@@ -1,0 +1,29 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+goals:
+  - Help with building the Node.js backend for Fresh Breeze Basket e-commerce platform
+  - Guide implementation of RESTful API endpoints with Express
+  - Assist with Supabase database integration and querying
+  - Provide best practices for cursor-based pagination implementation
+
+rules:
+  - Use TypeScript for all backend code with proper type definitions
+  - Implement cursor-based pagination instead of offset pagination
+  - Structure project with controllers, routes, and services pattern
+  - All database queries must use Supabase client with proper error handling
+  - API responses should follow a consistent format with appropriate status codes
+  - Authentication middleware must verify JWT tokens from request headers
+  - Protect routes with role-based access control (admin vs regular users)
+  - Use environment variables for configuration with proper validation
+
+context:
+  - Backend uses Node.js with Express framework
+  - Database is PostgreSQL accessed through Supabase client
+  - Authentication system uses JWT tokens
+  - The API supports product management, user accounts, order processing
+  - Payment processing is implemented with Stripe
+  - Frontend will be a separate React application
+  - System must handle inventory management when orders are placed
