@@ -9,6 +9,20 @@ END $$;
 -- Create enum for user roles
 CREATE TYPE user_role AS ENUM ('user', 'admin');
 
+-- Profiles Table
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL UNIQUE,
+    first_name TEXT,
+    last_name TEXT,
+    phone TEXT,
+    password TEXT,
+    avatar_url TEXT,
+    role user_role DEFAULT 'user',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Categories Table
 CREATE TABLE IF NOT EXISTS public.categories (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -79,6 +93,36 @@ CREATE TABLE IF NOT EXISTS public.addresses (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Enable Row Level Security
+ALTER TABLE public.addresses ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for addresses table
+CREATE POLICY "Admin has full access to all addresses"
+ON public.addresses FOR ALL TO authenticated
+USING (
+  EXISTS (
+    SELECT 1 FROM profiles
+    WHERE profiles.id = auth.uid()
+    AND profiles.role = 'admin'
+  )
+);
+
+CREATE POLICY "Enable delete for users to their own addresses"
+ON public.addresses FOR DELETE TO authenticated
+USING (auth.uid() = user_id);
+
+CREATE POLICY "Enable insert for authenticated users only"
+ON public.addresses FOR INSERT TO authenticated
+WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Enable read access for users to their own addresses"
+ON public.addresses FOR SELECT TO authenticated
+USING (auth.uid() = user_id);
+
+CREATE POLICY "Enable update for users to their own addresses"
+ON public.addresses FOR UPDATE TO authenticated
+USING (auth.uid() = user_id);
 
 -- Orders Table
 CREATE TABLE IF NOT EXISTS public.orders (
@@ -257,18 +301,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Enable Row Level Security
-ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.product_images ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.inventory ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.addresses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.order_status_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
 -- Profiles policies
 CREATE POLICY "Users can view their own profile"
     ON public.profiles FOR SELECT
@@ -279,6 +311,12 @@ CREATE POLICY "Users can update their own profile"
     ON public.profiles FOR UPDATE
     TO authenticated
     USING (auth.uid() = id)
+    WITH CHECK (auth.uid() = id);
+
+-- Allow profile creation during registration
+CREATE POLICY "Allow profile creation during registration"
+    ON public.profiles FOR INSERT
+    TO authenticated
     WITH CHECK (auth.uid() = id);
 
 -- Remove the recursive admin policies and replace with simpler ones
@@ -393,18 +431,6 @@ CREATE POLICY "Inventory is editable by admins only"
         )
     );
 
--- Addresses policies
-CREATE POLICY "Users can view their own addresses"
-    ON public.addresses FOR SELECT
-    TO authenticated
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can manage their own addresses"
-    ON public.addresses FOR ALL
-    TO authenticated
-    USING (auth.uid() = user_id)
-    WITH CHECK (auth.uid() = user_id);
-
 -- Orders policies
 CREATE POLICY "Users can view their own orders"
     ON public.orders FOR SELECT
@@ -415,6 +441,20 @@ CREATE POLICY "Users can create their own orders"
     ON public.orders FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can cancel their own orders"
+    ON public.orders FOR UPDATE
+    TO authenticated
+    USING (
+        auth.uid() = user_id AND 
+        (status = 'pending' OR status = 'processing')
+    )
+    WITH CHECK (
+        auth.uid() = user_id AND 
+        (status = 'pending' OR status = 'processing') AND 
+        status = 'cancelled' AND
+        user_id = auth.uid()
+    );
 
 CREATE POLICY "Orders are editable by admins only"
     ON public.orders FOR UPDATE
@@ -443,6 +483,31 @@ CREATE POLICY "Users can view their own order status history"
             SELECT 1 FROM public.orders
             WHERE orders.id = order_status_history.order_id
             AND orders.user_id = auth.uid()
+        )
+    );
+
+-- Allow system to create status history entries via triggers
+CREATE POLICY "Allow order status history creation via triggers"
+    ON public.order_status_history FOR INSERT
+    TO authenticated
+    WITH CHECK (true);
+
+-- Allow admins to manage all order status history
+CREATE POLICY "Admins can manage all order status history"
+    ON public.order_status_history FOR ALL
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE profiles.id = auth.uid()
+            AND profiles.role = 'admin'
+        )
+    )
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE profiles.id = auth.uid()
+            AND profiles.role = 'admin'
         )
     );
 

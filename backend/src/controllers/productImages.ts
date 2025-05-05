@@ -178,4 +178,41 @@ export const deleteProductImage = async (req: Request, res: Response, next: Next
   } catch (error) {
     next(error);
   }
+};
+
+export const bulkAddProductImages = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { product_id } = req.params;
+    const { images } = req.body;
+
+    if (!Array.isArray(images) || images.length === 0) {
+      throw new ValidationError('Images array is required');
+    }
+
+    // Format the images with the product_id
+    const imagesData = images.map(img => ({
+      product_id,
+      image_url: img.image_url,
+      is_primary: img.is_primary || false,
+      display_order: img.display_order || 0
+    }));
+
+    // Insert all images in a batch
+    const { data, error } = await supabase
+      .from('product_images')
+      .insert(imagesData)
+      .select();
+
+    if (error) {
+      console.error('Error adding product images:', error);
+      throw new ApiError(500, 'Error adding product images');
+    }
+
+    res.json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    next(error);
+  }
 }; 

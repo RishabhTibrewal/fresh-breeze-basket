@@ -41,21 +41,23 @@ export interface Category {
 export interface Product {
   id: string;
   name: string;
-  slug: string;
   description: string | null;
   price: number;
   sale_price: number | null;
-  unit: string;
-  images: string[];
-  badge: string | null;
-  category_id: string;
-  origin: string | null;
-  nutritional_info: string | null;
+  image_url: string | null;
+  category_id: string | null;
+  slug: string;
+  is_featured: boolean;
+  is_active: boolean;
   stock_count: number;
-  harvest_date: string | null;
+  unit_type: string;
+  nutritional_info: string | null;
+  origin: string | null;
   best_before: string | null;
   created_at: string;
   updated_at: string;
+  unit: number | null;
+  badge: string | null;
 }
 
 export interface Order {

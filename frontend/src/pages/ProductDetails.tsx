@@ -1,41 +1,38 @@
-
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Calendar, Flag, Truck, ShoppingCart, Heart, Minus, Plus, ArrowLeft } from 'lucide-react';
-import { getProductBySlug, getProductsByCategory } from '@/data/productData';
+import { useQuery } from '@tanstack/react-query';
+import { Calendar, Flag, ShoppingCart, Heart, Minus, Plus, ArrowLeft } from 'lucide-react';
+import { productsService } from '@/api/products';
 import ProductCard from '@/components/products/ProductCard';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { useCart } from '@/contexts/CartContext';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ErrorMessage } from '@/components/ui/error-message';
 
 const ProductDetails = () => {
-  const { slug } = useParams<{ slug: string }>();
-  const product = getProductBySlug(slug || '');
+  const { id } = useParams<{ id: string }>();
   const [quantity, setQuantity] = useState(1);
-  const [activeImage, setActiveImage] = useState(0);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const { addToCart } = useCart();
 
-  if (!product) {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <Navbar />
-        <main className="flex-grow container mx-auto px-4 py-12">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold mb-4">Product Not Found</h1>
-            <p className="mb-6">Sorry, the product you are looking for does not exist.</p>
-            <Link to="/products" className="btn-primary">
-              Continue Shopping
-            </Link>
-          </div>
-        </main>
-        <Footer />
-      </div>
-    );
-  }
+  const { data: product, isLoading, error } = useQuery({
+    queryKey: ['product', id],
+    queryFn: () => productsService.getById(id || ''),
+    enabled: !!id,
+  });
+
+  // Add console log to debug product data
+  console.log('Product data:', product);
 
   // Get related products
-  const relatedProducts = getProductsByCategory(product.categoryId)
-    .filter(p => p.id !== product.id)
+  const { data: products } = useQuery({
+    queryKey: ['products'],
+    queryFn: productsService.getAll,
+  });
+
+  const relatedProducts = products
+    ?.filter(p => p.category_id === product?.category_id && p.id !== product?.id)
     .slice(0, 4);
 
   // Handle quantity change
@@ -46,15 +43,61 @@ const ProductDetails = () => {
   };
 
   const increaseQuantity = () => {
-    if (quantity < product.stockCount) {
+    // Add null check and default value for stock_count
+    const maxStock = product?.stock_count ?? 0;
+    if (product && quantity < maxStock) {
       setQuantity(quantity + 1);
     }
   };
 
   // Handle add to cart
   const handleAddToCart = () => {
-    addToCart(product, quantity);
+    if (product) {
+      addToCart(product, quantity);
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Navbar />
+        <main className="flex-grow container mx-auto px-4 py-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+            <Skeleton className="h-96 rounded-lg" />
+            <div className="space-y-4">
+              <Skeleton className="h-8 w-3/4" />
+              <Skeleton className="h-6 w-1/2" />
+              <Skeleton className="h-24" />
+              <Skeleton className="h-12" />
+            </div>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  if (error || !product) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Navbar />
+        <main className="flex-grow container mx-auto px-4 py-12">
+          <ErrorMessage 
+            title="Product Not Found" 
+            message="Sorry, the product you are looking for does not exist." 
+          />
+          <Link to="/products" className="btn-primary mt-6 inline-block">
+            Continue Shopping
+          </Link>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  const mainImage = product.additional_images && product.additional_images.length > 0 
+    ? product.additional_images[activeImageIndex]
+    : product.image_url || '/placeholder.svg';
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -70,32 +113,31 @@ const ProductDetails = () => {
           </div>
 
           {/* Product Details */}
-          <div className="bg-white rounded-lg shadow-md p-6 mb-10">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+          <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-10">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10">
               {/* Product Images */}
               <div>
-                <div className="rounded-lg overflow-hidden mb-4 h-80 md:h-96 bg-gray-50">
+                <div className="relative rounded-lg overflow-hidden mb-4 aspect-[4/3] bg-gray-50">
                   <img 
-                    src={product.images[activeImage]} 
+                    src={mainImage} 
                     alt={product.name} 
-                    className="w-full h-full object-contain"
+                    className="absolute inset-0 w-full h-full object-cover"
                   />
                 </div>
-                
-                {product.images.length > 1 && (
-                  <div className="flex space-x-2">
-                    {product.images.map((image, index) => (
-                      <button 
+                {product.additional_images && product.additional_images.length > 1 && (
+                  <div className="grid grid-cols-5 sm:grid-cols-6 gap-2">
+                    {product.additional_images.map((imageUrl, index) => (
+                      <button
                         key={index}
-                        onClick={() => setActiveImage(index)}
-                        className={`w-20 h-20 rounded-md overflow-hidden border-2 ${
-                          activeImage === index ? 'border-primary' : 'border-transparent'
+                        onClick={() => setActiveImageIndex(index)}
+                        className={`relative rounded-lg overflow-hidden aspect-square ${
+                          index === activeImageIndex ? 'ring-2 ring-primary' : ''
                         }`}
                       >
-                        <img 
-                          src={image} 
-                          alt={`${product.name} - view ${index + 1}`} 
-                          className="w-full h-full object-cover"
+                        <img
+                          src={imageUrl}
+                          alt={`${product.name} - view ${index + 1}`}
+                          className="absolute inset-0 w-full h-full object-cover hover:scale-110 transition-transform duration-200"
                         />
                       </button>
                     ))}
@@ -105,115 +147,113 @@ const ProductDetails = () => {
               
               {/* Product Info */}
               <div>
-                {product.badge && (
-                  <div className={`inline-block py-1 px-3 text-white text-xs font-semibold rounded-full mb-3 ${
-                    product.badge === 'sale' ? 'bg-accent-sale' : 
-                    product.badge === 'new' ? 'bg-accent' : 
-                    product.badge === 'best-seller' ? 'bg-primary' : 
-                    'bg-accent-special'
-                  }`}>
-                    {product.badge === 'sale' ? 'SALE' : 
-                     product.badge === 'new' ? 'NEW' : 
-                     product.badge === 'best-seller' ? 'BEST SELLER' : 
-                     'ORGANIC'}
+                {product.sale_price && (
+                  <div className="inline-block bg-red-500 text-white text-sm font-medium px-3 py-1 rounded-full mb-2">
+                    SALE
                   </div>
                 )}
-                
-                <h1 className="text-2xl md:text-3xl font-bold mb-2">{product.name}</h1>
+                <h1 className="text-2xl sm:text-3xl font-bold mb-3">{product.name}</h1>
                 
                 <div className="flex items-center mb-4">
-                  <Flag className="h-4 w-4 mr-1 text-gray-500" />
+                  <Flag className="h-4 w-4 mr-2 text-gray-500" />
                   <span className="text-gray-600">Origin: {product.origin}</span>
                 </div>
                 
-                <div className="flex items-baseline mb-6">
-                  {product.salePrice ? (
+                <div className="flex flex-wrap items-baseline mb-6">
+                  {product.sale_price ? (
                     <>
-                      <span className="text-accent-sale font-bold text-2xl md:text-3xl">AED {product.salePrice.toFixed(2)}</span>
-                      <span className="ml-3 text-gray-500 line-through text-lg">AED {product.price.toFixed(2)}</span>
+                      <span className="text-2xl sm:text-3xl font-bold text-red-500">AED {product.sale_price.toFixed(2)}</span>
+                      <span className="ml-3 text-gray-500 line-through">AED {product.price.toFixed(2)}</span>
+                      <span className="ml-2 text-gray-600">/{product.unit} {product.unit_type}</span>
                     </>
                   ) : (
-                    <span className="font-bold text-2xl md:text-3xl">AED {product.price.toFixed(2)}</span>
+                    <>
+                      <span className="text-2xl sm:text-3xl font-bold">AED {product.price.toFixed(2)}</span>
+                      <span className="ml-2 text-gray-600">/{product.unit} {product.unit_type}</span>
+                    </>
                   )}
-                  <span className="ml-2 text-gray-600">/{product.unit}</span>
                 </div>
                 
+                <p className="text-gray-700 mb-6">{product.description}</p>
+
                 <div className="mb-6">
-                  <p className="text-gray-700 mb-4">{product.description}</p>
-                  
-                  <h3 className="font-semibold text-lg mb-2">Nutritional Highlights:</h3>
-                  <p className="text-gray-700 mb-4">{product.nutritionalInfo}</p>
-                  
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    <div className="flex items-center text-sm bg-green-50 text-primary px-3 py-1 rounded-full">
-                      <Calendar className="h-4 w-4 mr-1" />
-                      <span>Harvested: {product.harvestDate}</span>
-                    </div>
-                    <div className="flex items-center text-sm bg-orange-50 text-orange-600 px-3 py-1 rounded-full">
-                      <Calendar className="h-4 w-4 mr-1" />
-                      <span>Best Before: {product.bestBefore}</span>
-                    </div>
+                  <h2 className="text-xl font-semibold mb-2">Nutritional Highlights:</h2>
+                  <p className="text-gray-700">{product.nutritional_info}</p>
+                </div>
+
+                <div className="space-y-4 mb-6">
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    {product.best_before && (
+                      <div className="inline-flex items-center bg-orange-50 px-3 py-2 rounded-lg">
+                        <Calendar className="h-5 w-5 text-orange-500 mr-2 flex-shrink-0" />
+                        <div className="flex items-center min-w-0">
+                          <span className="text-sm text-orange-600 mr-2 whitespace-nowrap">Best Before:</span>
+                          <span className="text-orange-700 truncate">{new Date(product.best_before).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="h-px bg-gray-200 mt-4" /> 
                   </div>
                 </div>
                 
-                <div className="border-t border-gray-200 pt-6">
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center border rounded-md">
-                      <button 
-                        onClick={decreaseQuantity}
-                        className="px-3 py-2 text-gray-600 hover:bg-gray-100"
-                        disabled={quantity <= 1}
-                      >
-                        <Minus className="h-4 w-4" />
-                      </button>
-                      <span className="px-4 py-2 border-l border-r">{quantity}</span>
-                      <button 
-                        onClick={increaseQuantity}
-                        className="px-3 py-2 text-gray-600 hover:bg-gray-100"
-                        disabled={quantity >= product.stockCount}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                    </div>
-                    
-                    <div className="text-sm text-gray-600">
-                      {product.stockCount > 10 ? (
-                        <span className="text-green-600">In Stock</span>
-                      ) : product.stockCount > 0 ? (
-                        <span className="text-orange-600">Only {product.stockCount} left</span>
-                      ) : (
-                        <span className="text-red-600">Out of Stock</span>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                  <div className="flex items-center border rounded-lg overflow-hidden">
                     <button 
-                      onClick={handleAddToCart}
-                      className="flex-1 btn-primary flex items-center justify-center"
-                      disabled={product.stockCount === 0}
+                      onClick={decreaseQuantity}
+                      className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-r"
+                      disabled={quantity <= 1}
                     >
-                      <ShoppingCart className="h-5 w-5 mr-2" />
-                      Add to Cart
+                      <Minus className="h-4 w-4" />
                     </button>
-                    <button className="flex items-center justify-center px-6 py-3 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
-                      <Heart className="h-5 w-5" />
+                    <span className="w-12 text-center text-lg">{quantity}</span>
+                    <button 
+                      onClick={increaseQuantity}
+                      className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-l"
+                      disabled={quantity >= (product?.stock_count ?? 0)}
+                    >
+                      <Plus className="h-4 w-4" />
                     </button>
                   </div>
                   
-                  <div className="mt-6 flex items-center text-gray-600">
-                    <Truck className="h-5 w-5 mr-2" />
-                    <span>Free delivery for orders over AED 100</span>
+                  <div className="text-green-600 font-medium">
+                    {(product?.stock_count ?? 0) > 10 ? (
+                      'In Stock'
+                    ) : (product?.stock_count ?? 0) > 0 ? (
+                      `Only ${product.stock_count} left`
+                    ) : (   
+                      'Out of Stock'
+                    )}
                   </div>
+                </div>
+                
+                <div className="flex gap-3">
+                  <button 
+                    onClick={handleAddToCart}
+                    className="flex-1 bg-green-600 text-white py-3 sm:py-4 rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center justify-center"
+                    disabled={!product.is_active || product.stock_count === 0}
+                  >
+                    <ShoppingCart className="h-5 w-5 mr-2" />
+                    Add to Cart
+                  </button>
+                  <button 
+                    className="w-12 sm:w-14 h-12 sm:h-14 flex items-center justify-center border rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    <Heart className="h-5 sm:h-6 w-5 sm:w-6" />
+                  </button>
+                </div>
+
+                <div className="mt-6 flex items-center text-gray-600">
+                  <ShoppingCart className="h-5 w-5 mr-2" />
+                  Free delivery for orders over AED 100
                 </div>
               </div>
             </div>
           </div>
-          
+
           {/* Related Products */}
-          {relatedProducts.length > 0 && (
-            <div className="mb-10">
-              <h2 className="section-title mb-6">You May Also Like</h2>
+          {relatedProducts && relatedProducts.length > 0 && (
+            <div>
+              <h2 className="text-2xl font-bold mb-6">Related Products</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 {relatedProducts.map((relatedProduct) => (
                   <ProductCard key={relatedProduct.id} product={relatedProduct} />

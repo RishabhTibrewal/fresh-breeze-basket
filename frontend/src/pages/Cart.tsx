@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ShoppingCart, Trash, Plus, Minus, ChevronLeft, AlertCircle } from 'lucide-react';
@@ -52,7 +51,7 @@ const Cart = () => {
                           
                           <div className="flex-grow min-w-0">
                             <Link 
-                              to={`/products/${item.slug}`}
+                              to={`/products/${item.id}`}
                               className="font-semibold text-lg text-gray-800 hover:text-primary line-clamp-1"
                             >
                               {item.name}

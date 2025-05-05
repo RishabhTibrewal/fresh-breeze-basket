@@ -1,0 +1,200 @@
+I can help you with automating inventory updates in Supabase after orders. Let me search for the most up-to-date information on how to implement this automation.
+
+Now, let me search for more specific information about automating inventory updates after orders with timers in Supabase:
+
+Let me explore one more key aspect - database triggers in Supabase specifically for inventory updates:
+
+Based on my research, I can help you implement an automated inventory update system in Supabase that will update inventory 5 minutes after an order is placed, while also checking the order status. Here's how you can set this up:
+
+## Solution Overview
+
+You can automate inventory updates after orders using a combination of:
+
+1. PostgreSQL triggers to detect new orders
+2. Supabase's pg_cron extension for scheduling the inventory update after a 5-minute delay
+3. Edge Functions to handle the business logic of checking order status and updating inventory
+
+## Implementation Steps
+
+### 1. Create a Database Trigger for New Orders
+
+First, you'll need to create a trigger function that fires whenever a new order is placed. This function will schedule the inventory update to happen 5 minutes later.
+
+```sql
+-- Create a function that will be called when a new order is placed
+CREATE OR REPLACE FUNCTION public.schedule_inventory_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  -- Schedule an inventory update 5 minutes after the order
+  PERFORM cron.schedule(
+    'update-inventory-for-order-' || NEW.id,
+    NOW() + INTERVAL '5 minutes',
+    $$
+    SELECT net.http_post(
+      url := 'https://[your-project-reference].functions.supabase.co/update-inventory',
+      headers := '{"Content-Type": "application/json", "Authorization": "Bearer [your-anon-key]"}'::jsonb,
+      body := json_build_object('order_id', NEW.id)::jsonb
+    ) AS request_id;
+    $$
+  );
+  
+  RETURN NEW;
+END;
+$$;
+
+-- Create the trigger on your orders table
+CREATE TRIGGER after_order_created
+AFTER INSERT ON orders
+FOR EACH ROW
+EXECUTE FUNCTION public.schedule_inventory_update();
+```
+
+Note: The `SECURITY DEFINER` clause is important as it ensures your trigger function runs with the privileges of the function owner rather than the client making the request. This way, it can properly schedule tasks even when triggered by client updates.
+
+### 2. Create an Edge Function to Update Inventory
+
+Create a Supabase Edge Function that will be called by the scheduled job. This function will check the order status and update the inventory accordingly.
+
+```typescript
+// update-inventory.ts
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
+const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || ''
+const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+serve(async (req) => {
+  try {
+    const { order_id } = await req.json()
+    
+    // Get order details
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .select('*, order_items(*)')
+      .eq('id', order_id)
+      .single()
+    
+    if (orderError) throw orderError
+    
+    // Check order status - only update inventory if order is confirmed
+    if (order.status === 'confirmed' || order.status === 'processing') {
+      // Update inventory for each item in the order
+      for (const item of order.order_items) {
+        const { error: updateError } = await supabase
+          .from('inventory')
+          .update({ 
+            quantity: supabase.rpc('decrement_quantity', { 
+              item_id: item.product_id,
+              amount: item.quantity
+            })
+          })
+          .eq('id', item.product_id)
+        
+        if (updateError) throw updateError
+      }
+      
+      // Update order status to reflect inventory has been updated
+      const { error: statusError } = await supabase
+        .from('orders')
+        .update({ inventory_updated: true })
+        .eq('id', order_id)
+      
+      if (statusError) throw statusError
+    }
+    
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+      status: 200,
+    })
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { 'Content-Type': 'application/json' },
+      status: 400,
+    })
+  }
+})
+```
+
+### 3. Create a Helper Function to Safely Decrement Inventory
+
+To ensure inventory quantities don't go negative and to handle this operation atomically, create a database function:
+
+```sql
+CREATE OR REPLACE FUNCTION decrement_quantity(item_id UUID, amount INTEGER)
+RETURNS INTEGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  current_quantity INTEGER;
+BEGIN
+  -- Get current quantity with a lock to prevent race conditions
+  SELECT quantity INTO current_quantity
+  FROM inventory
+  WHERE id = item_id
+  FOR UPDATE;
+  
+  -- Calculate new quantity, ensuring it doesn't go below zero
+  current_quantity := GREATEST(0, current_quantity - amount);
+  
+  -- Update and return the new quantity
+  UPDATE inventory
+  SET quantity = current_quantity
+  WHERE id = item_id;
+  
+  RETURN current_quantity;
+END;
+$$;
+```
+
+### 4. Enable Required Extensions
+
+Make sure the necessary extensions are enabled in your Supabase project:
+
+```sql
+-- Enable the pg_cron extension for scheduling
+CREATE EXTENSION IF NOT EXISTS pg_cron SCHEMA extensions;
+
+-- Enable pg_net for making HTTP requests from the database
+CREATE EXTENSION IF NOT EXISTS pg_net SCHEMA extensions;
+```
+
+### 5. Monitoring the Scheduled Jobs
+
+You can monitor your scheduled jobs in the Supabase dashboard under "Database" > "Extensions" > "pg_cron". For more detailed monitoring, Supabase Cron provides a clean interface to track and investigate recurring jobs and their historical runs.
+
+## Real-time Notifications (Optional)
+
+If you want to notify your frontend application when inventory is updated, you can use Supabase Realtime to listen for changes to your inventory table:
+
+```javascript
+// Frontend code to listen for inventory updates
+const channel = supabase
+  .channel('inventory-changes')
+  .on(
+    'postgres_changes',
+    {
+      event: 'UPDATE', 
+      schema: 'public',
+      table: 'inventory'
+    },
+    (payload) => {
+      console.log('Inventory updated:', payload)
+      // Update UI with new inventory levels
+    }
+  )
+  .subscribe()
+```
+
+## Advantages of This Approach
+
+1. **Reliability**: By using database triggers and scheduled jobs, you ensure the inventory update happens even if a client disconnects.
+2. **Delay implementation**: The 5-minute delay is handled by the database scheduler, ensuring accurate timing.
+3. **Status checking**: The Edge Function checks the order status before updating inventory.
+4. **Atomic operations**: The inventory decrement is handled atomically to prevent race conditions.
+5. **Scalability**: This approach can handle high volumes of orders without overloading your system.
+
+Would you like me to explain any specific part of this implementation in more detail?

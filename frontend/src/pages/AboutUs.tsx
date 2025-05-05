@@ -26,7 +26,7 @@ const AboutUs = () => {
             <div className="flex flex-col md:flex-row items-center gap-8">
               <div className="md:w-1/2">
                 <img 
-                  src="https://images.unsplash.com/photo-1605810230434-7631ac76ec81?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" 
+                  src="https://images.unsplash.com/photo-1610348725531-843dff563e2c?q=80&w=1200&auto=format" 
                   alt="Our Team" 
                   className="rounded-lg shadow-lg w-full h-auto"
                 />

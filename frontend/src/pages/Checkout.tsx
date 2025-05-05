@@ -1,0 +1,401 @@
+import { useState, useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { CheckCircle, Plus, MapPin, CreditCard, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import { Button } from "@/components/ui/button";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
+
+import { addressApi } from "@/api/addresses";
+import { ordersService } from "@/api/orders";
+import { productsService } from "@/api/products";
+import { useCart } from "@/contexts/CartContext";
+import { Address } from "@/types/database";
+import AddressForm from "./account/AddressForm";
+
+export default function CheckoutPage() {
+  const navigate = useNavigate();
+  const { state: cartState, clearCart } = useCart();
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [showAddressForm, setShowAddressForm] = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+
+  // Fetch user's addresses
+  const { 
+    data: addresses = [], 
+    isLoading: isLoadingAddresses,
+    isError: addressError,
+    refetch: refetchAddresses
+  } = useQuery({
+    queryKey: ["addresses"],
+    queryFn: addressApi.getAddresses,
+  });
+
+  // Set default address as selected if available
+  useEffect(() => {
+    if (addresses.length > 0) {
+      const defaultAddress = addresses.find(addr => addr.is_default);
+      if (defaultAddress) {
+        setSelectedAddressId(defaultAddress.id);
+      } else {
+        setSelectedAddressId(addresses[0].id);
+      }
+    }
+  }, [addresses]);
+
+  // Create order mutation
+  const createOrder = useMutation({
+    mutationFn: ordersService.create,
+    onSuccess: () => {
+      toast.success("Order placed successfully!");
+      clearCart();
+      setIsProcessing(false);
+      navigate("/thank-you");
+    },
+    onError: (error: any) => {
+      let message = "Failed to place order. Please try again.";
+      if (error?.response?.data?.error) {
+        message = error.response.data.error;
+      }
+      toast.error(message);
+      setIsProcessing(false);
+    }
+  });
+
+  const handlePlaceOrder = async () => {
+    if (!selectedAddressId) {
+      toast.error("Please select a delivery address");
+      return;
+    }
+
+    if (cartState.items.length === 0) {
+      toast.error("Your cart is empty");
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      
+      // Get the selected address details
+      const selectedAddress = addresses.find(addr => addr.id === selectedAddressId);
+      
+      if (!selectedAddress) {
+        toast.error("Selected address not found");
+        setIsProcessing(false);
+        return;
+      }
+      
+      // Fetch latest product data to ensure price consistency
+      const productIds = cartState.items.map(item => item.id);
+      const latestProductsData = await Promise.all(
+        productIds.map(async (id) => {
+          try {
+            return await productsService.getById(id);
+          } catch (error) {
+            console.error(`Error fetching product ${id}:`, error);
+            return null;
+          }
+        })
+      );
+      
+      // Filter out any failed product fetches
+      const validProducts = latestProductsData.filter(product => product !== null);
+      
+      // Check if all products were fetched successfully
+      if (validProducts.length !== productIds.length) {
+        toast.error("Some products are unavailable. Please refresh and try again.");
+        setIsProcessing(false);
+        return;
+      }
+      
+      // Prepare items with latest prices
+      const items = cartState.items.map(cartItem => {
+        const latestProduct = validProducts.find(p => p?.id === cartItem.id);
+        const currentPrice = latestProduct?.sale_price || latestProduct?.price;
+        
+        return {
+          product_id: cartItem.id,
+          quantity: cartItem.quantity,
+          price: currentPrice
+        };
+      });
+      
+      // Calculate total amount with latest prices
+      const subtotal = items.reduce((total, item) => total + (item.price * item.quantity), 0);
+      const shippingCost = subtotal >= 100 ? 0 : 10;
+      const totalAmount = subtotal + shippingCost;
+      
+      // Prepare order data with only IDs, explicitly not including address objects
+      const orderData = {
+        items,
+        shipping_address_id: selectedAddressId,
+        billing_address_id: selectedAddressId, // Using same address for billing and shipping
+        payment_method: 'card', // Default to card payment
+        total_amount: totalAmount
+      };
+
+      // Log the data being sent to the backend
+      console.log("Order Data being sent to backend:", orderData);
+      console.log("Selected Address ID:", selectedAddressId);
+      console.log("Addresses:", addresses);
+
+      // Create the order
+      const result = await createOrder.mutateAsync(orderData);
+      
+      // If successful, the createOrder.onSuccess will handle navigation and cart clearing
+      
+    } catch (error) {
+      console.error("Error placing order:", error);
+      toast.error("Failed to place order");
+      setIsProcessing(false);
+    }
+  };
+
+  // Handle address added
+  const handleAddressAdded = (newAddress: Address) => {
+    if (editingAddressId) {
+      refetchAddresses();
+    } else {
+      refetchAddresses();
+      // Select the newly added address
+      setSelectedAddressId(newAddress.id);
+    }
+    setShowAddressForm(false);
+    setEditingAddressId(null);
+  };
+
+  // Handle loading state
+  if (isLoadingAddresses) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Navbar />
+        <main className="flex-grow flex items-center justify-center">
+          <div className="text-center">
+            <Spinner className="h-8 w-8 mx-auto mb-4" />
+            <p className="text-gray-600">Loading checkout information...</p>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  // If there's an error fetching addresses
+  if (addressError) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Navbar />
+        <main className="flex-grow flex items-center justify-center">
+          <div className="text-center max-w-md p-6">
+            <h2 className="text-2xl font-bold mb-4 text-red-600">Something went wrong</h2>
+            <p className="mb-6">We couldn't load your addresses. Please try again later.</p>
+            <Button onClick={() => refetchAddresses()}>Retry</Button>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Navbar />
+      <main className="flex-grow bg-gray-50 py-8">
+        <div className="container mx-auto px-4">
+          <h1 className="text-2xl md:text-3xl font-bold mb-8">Checkout</h1>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Left Column - Delivery Address */}
+            <div className="lg:col-span-2 space-y-6">
+              <div className="bg-white rounded-lg shadow-md p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-semibold">Delivery Address</h2>
+                  <Button 
+                    variant="ghost" 
+                    className="inline-flex items-center text-primary hover:bg-primary/5"
+                    onClick={() => {
+                      setEditingAddressId(null);
+                      setShowAddressForm(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add New Address
+                  </Button>
+                </div>
+
+                {addresses.length === 0 ? (
+                  <div className="text-center py-6 border border-dashed rounded-md">
+                    <MapPin className="h-12 w-12 mx-auto text-gray-300 mb-3" />
+                    <p className="text-gray-500 mb-4">You don't have any saved addresses yet</p>
+                    <Button 
+                      variant="outline"
+                      onClick={() => {
+                        setEditingAddressId(null);
+                        setShowAddressForm(true);
+                      }}
+                    >
+                      Add Address
+                    </Button>
+                  </div>
+                ) : (
+                  <RadioGroup 
+                    value={selectedAddressId || undefined} 
+                    onValueChange={setSelectedAddressId}
+                    className="grid gap-4"
+                  >
+                    {addresses.map((address: Address) => (
+                      <div 
+                        key={address.id} 
+                        className={`p-4 border rounded-md ${selectedAddressId === address.id ? 'border-primary bg-primary/5' : 'border-gray-200'}`}
+                      >
+                        <div className="flex items-start space-x-3">
+                          <RadioGroupItem value={address.id} id={`address-${address.id}`} className="mt-1" />
+                          <div className="flex-1">
+                            <Label 
+                              htmlFor={`address-${address.id}`}
+                              className="flex items-center text-base font-medium cursor-pointer"
+                            >
+                              Address {address.address_type}
+                              {address.is_default && (
+                                <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">
+                                  Default
+                                </span>
+                              )}
+                            </Label>
+                            <div className="text-sm text-gray-500 mt-1">
+                              <div>{address.address_line1}</div>
+                              {address.address_line2 && <div>{address.address_line2}</div>}
+                              <div>
+                                {address.city}, {address.state} {address.postal_code}
+                              </div>
+                              <div>{address.country}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </RadioGroup>
+                )}
+              </div>
+
+              {/* Payment Method */}
+              <div className="bg-white rounded-lg shadow-md p-6">
+                <h2 className="text-xl font-semibold mb-6">Payment Method</h2>
+                <RadioGroup defaultValue="card" className="grid gap-4">
+                  <div className="flex items-center space-x-3 p-4 border rounded-md border-primary bg-primary/5">
+                    <RadioGroupItem value="card" id="payment-card" checked={true} />
+                    <Label htmlFor="payment-card" className="flex items-center cursor-pointer">
+                      <CreditCard className="h-5 w-5 mr-2" />
+                      <span>Pay with Card (Secure payment)</span>
+                    </Label>
+                  </div>
+                </RadioGroup>
+                <p className="text-sm text-gray-500 mt-4">
+                  Your card will be charged after you proceed to payment. All transactions are secure and encrypted.
+                </p>
+              </div>
+            </div>
+
+            {/* Right Column - Order Summary */}
+            <div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Order Summary</CardTitle>
+                  <CardDescription>Review your order before payment</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Products */}
+                  <div className="space-y-3">
+                    {cartState.items.map((item) => (
+                      <div key={item.id} className="flex justify-between">
+                        <div className="flex-1">
+                          <div className="font-medium">{item.name}</div>
+                          <div className="text-sm text-gray-500">
+                            {item.quantity} x AED {(item.salePrice || item.price).toFixed(2)}
+                          </div>
+                        </div>
+                        <div className="text-right font-medium">
+                          AED {((item.salePrice || item.price) * item.quantity).toFixed(2)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Separator />
+
+                  {/* Totals */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Subtotal</span>
+                      <span className="font-medium">AED {cartState.subtotal.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Shipping</span>
+                      <span className="font-medium">
+                        {cartState.subtotal >= 100 ? "Free" : "AED 10.00"}
+                      </span>
+                    </div>
+                    <Separator />
+                    <div className="flex justify-between text-lg font-bold">
+                      <span>Total</span>
+                      <span>
+                        AED {(cartState.subtotal + (cartState.subtotal >= 100 ? 0 : 10)).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+                <CardFooter>
+                  <Button 
+                    className="w-full"
+                    onClick={handlePlaceOrder}
+                    disabled={isProcessing || !selectedAddressId || cartState.items.length === 0}
+                  >
+                    {isProcessing ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      'Proceed to Payment'
+                    )}
+                  </Button>
+                </CardFooter>
+              </Card>
+            </div>
+          </div>
+        </div>
+      </main>
+      <Footer />
+
+      {/* Address Form Modal */}
+      {showAddressForm && (
+        <div 
+          className="fixed inset-0 bg-black/5 backdrop-blur-sm z-50 flex items-center justify-center overflow-auto"
+          onClick={() => setShowAddressForm(false)}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto m-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <AddressForm 
+              editId={editingAddressId} 
+              onClose={() => {
+                setShowAddressForm(false);
+                setEditingAddressId(null);
+              }}
+              onAddressAdded={handleAddressAdded}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+} 

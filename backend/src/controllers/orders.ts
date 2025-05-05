@@ -2,11 +2,65 @@ import { Request, Response } from 'express';
 import { supabase } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 import { stripeClient } from '../config';
+// import { scheduleOrderProcessing } from '../utils/orderScheduler';
 
 // Get all orders (admin only)
 export const getOrders = async (req: Request, res: Response) => {
   try {
     const { status, from_date, to_date, limit, page } = req.query;
+    const userId = req.user.id;
+    
+    // Log to help with debugging
+    console.log('getOrders for user ID:', userId);
+    
+    // Check if the user exists in profiles table
+    let isAdmin = false;
+    
+    try {
+      // First try to get the profile from profiles table
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId);
+      
+      if (profileError) {
+        console.error('Error fetching profile:', profileError);
+      } else if (profile && profile.length > 0) {
+        // Check if any of the returned rows has admin role
+        isAdmin = profile.some(p => p.role === 'admin');
+        console.log('Profile found in profiles table, admin status:', isAdmin);
+      } else {
+        console.log('Profile not found in profiles table, checking users table');
+        
+        // If profile not found, try users table or another table that might have role information
+        const { data: user, error: userError } = await supabase
+          .from('users')  // Change this to whatever table might have the role information
+          .select('role')
+          .eq('id', userId)
+          .single();
+          
+        if (!userError && user) {
+          isAdmin = user.role === 'admin';
+          console.log('User found in users table, admin status:', isAdmin);
+        }
+      }
+    } catch (error) {
+      console.error('Error during admin check:', error);
+    }
+    
+    // Fall back to authenticated middleware's check if we couldn't determine admin status
+    if (!isAdmin) {
+      // The user passed the adminOnly middleware, so they should be an admin
+      console.log('Using middleware admin verification as fallback');
+      isAdmin = req.user.role === 'admin';
+    }
+    
+    if (!isAdmin) {
+      console.error('Non-admin user attempting to access all orders');
+      throw new ApiError(403, 'Admin access required');
+    }
+    
+    console.log('Admin status confirmed, fetching all orders');
     
     let query = supabase.from('orders').select('*, order_items(*, products(*))');
     
@@ -36,8 +90,11 @@ export const getOrders = async (req: Request, res: Response) => {
     const { data, error, count } = await query;
     
     if (error) {
+      console.error('Error fetching orders:', error);
       throw new ApiError(400, error.message);
     }
+    
+    console.log(`Successfully fetched ${data?.length || 0} orders`);
     
     res.status(200).json({
       success: true,
@@ -45,10 +102,18 @@ export const getOrders = async (req: Request, res: Response) => {
       data
     });
   } catch (error) {
+    console.error('Error in getOrders:', error);
     if (error instanceof ApiError) {
-      throw error;
+      res.status(error.statusCode).json({
+        success: false,
+        error: error.message
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Error fetching orders'
+      });
     }
-    throw new ApiError(500, 'Error fetching orders');
   }
 };
 
@@ -85,20 +150,55 @@ export const getOrderById = async (req: Request, res: Response) => {
     const { id } = req.params;
     const userId = req.user.id;
     
-    // Check if user is admin
-    const { data: isAdmin, error: adminError } = await supabase.rpc('is_admin', { user_id: userId });
+    console.log('getOrderById, Order ID:', id, 'User ID:', userId);
     
-    if (adminError) {
-      console.error('Error checking admin status:', adminError);
-      return res.status(500).json({
-        success: false,
-        error: 'Error checking permissions'
-      });
+    // Check if the user exists in profiles table
+    let isAdmin = false;
+    
+    try {
+      // First try to get the profile from profiles table
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId);
+      
+      if (profileError) {
+        console.error('Error fetching profile:', profileError);
+      } else if (profile && profile.length > 0) {
+        // Check if any of the returned rows has admin role
+        isAdmin = profile.some(p => p.role === 'admin');
+        console.log('Profile found in profiles table, admin status:', isAdmin);
+      } else {
+        console.log('Profile not found in profiles table, checking users table');
+        
+        // If profile not found, try users table or another table that might have role information
+        const { data: user, error: userError } = await supabase
+          .from('users')  // Change this to whatever table might have the role information
+          .select('role')
+          .eq('id', userId)
+          .single();
+          
+        if (!userError && user) {
+          isAdmin = user.role === 'admin';
+          console.log('User found in users table, admin status:', isAdmin);
+        }
+      }
+    } catch (error) {
+      console.error('Error during admin check:', error);
     }
+    
+    // Fall back to authenticated middleware's check if we couldn't determine admin status
+    if (!isAdmin) {
+      // The user passed the adminOnly middleware, so they should be an admin
+      console.log('Using middleware admin verification as fallback');
+      isAdmin = req.user.role === 'admin';
+    }
+    
+    console.log('User admin status:', isAdmin);
     
     let query = supabase
       .from('orders')
-      .select('*, order_items(*)')
+      .select('*, order_items(*, products(*))')
       .eq('id', id);
     
     // If not admin, make sure user can only access their own orders
@@ -123,6 +223,8 @@ export const getOrderById = async (req: Request, res: Response) => {
       });
     }
     
+    console.log('Successfully fetched order details');
+    
     res.status(200).json({
       success: true,
       data
@@ -139,15 +241,21 @@ export const getOrderById = async (req: Request, res: Response) => {
 // Create a new order
 export const createOrder = async (req: Request, res: Response) => {
   try {
-    const { items, shipping_address, billing_address, payment_method, total_amount } = req.body;
+    const { 
+      items, 
+      shipping_address, 
+      billing_address, 
+      shipping_address_id, 
+      billing_address_id, 
+      payment_method, 
+      total_amount 
+    } = req.body;
     const userId = req.user.id;
 
-    // Validate required fields
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Order items are required'
-      });
+    console.log('createOrder for user ID:', userId);
+    
+    if (!items || !items.length) {
+      throw new ApiError(400, 'No items provided');
     }
     
     // Get product details to verify prices
@@ -187,49 +295,101 @@ export const createOrder = async (req: Request, res: Response) => {
       }
     }
     
-    // Create shipping address
-    console.log('Creating shipping address...');
-    const { data: shippingAddr, error: shippingAddrError } = await supabase
-      .from('addresses')
-      .insert({
-        user_id: userId,
-        ...shipping_address,
-        address_type: 'shipping'
-      })
-      .select('*')
-      .single();
+    // Variables to store address IDs
+    let finalShippingAddressId: string;
+    let finalBillingAddressId: string;
     
-    if (shippingAddrError) {
-      console.error('Shipping address error:', shippingAddrError);
-      throw new ApiError(400, `Error creating shipping address: ${shippingAddrError.message}`);
+    // If using existing addresses
+    if (shipping_address_id) {
+      // Add debug logging
+      console.log('Checking shipping address:', shipping_address_id, 'for user:', userId);
+      
+      // Verify the shipping address exists and belongs to the user
+      const { data: shippingAddr, error: shippingAddrError } = await supabase
+        .from('addresses')
+        .select('id, user_id')
+        .eq('id', shipping_address_id)
+        .eq('user_id', userId)
+        .single();
+      
+      console.log('Address query result:', shippingAddr, 'Error:', shippingAddrError);
+      
+      if (shippingAddrError || !shippingAddr) {
+        throw new ApiError(400, 'Invalid shipping address');
+      }
+      
+      finalShippingAddressId = shipping_address_id;
+      
+      // Use either provided billing address ID or shipping address ID
+      if (billing_address_id && billing_address_id !== shipping_address_id) {
+        // Verify the billing address exists and belongs to the user
+        const { data: billingAddr, error: billingAddrError } = await supabase
+          .from('addresses')
+          .select('id')
+          .eq('id', billing_address_id)
+          .eq('user_id', userId)
+          .single();
+        
+        if (billingAddrError || !billingAddr) {
+          throw new ApiError(400, 'Invalid billing address');
+        }
+        
+        finalBillingAddressId = billing_address_id;
+      } else {
+        finalBillingAddressId = shipping_address_id;
+      }
     }
-    
-    if (!shippingAddr) {
-      throw new ApiError(400, 'Failed to create shipping address: No data returned');
-    }
-    
-    console.log('Created shipping address:', shippingAddr.id);
-    
-    // Create billing address if different from shipping
-    let billingAddr;
-    if (billing_address && JSON.stringify(billing_address) !== JSON.stringify(shipping_address)) {
-      console.log('Creating billing address...');
-      const { data: addr, error: addrError } = await supabase
+    // If creating new addresses
+    else if (shipping_address) {
+      // Create shipping address
+      console.log('Creating shipping address...');
+      const { data: shippingAddr, error: shippingAddrError } = await supabase
         .from('addresses')
         .insert({
           user_id: userId,
-          ...billing_address,
-          address_type: 'billing'
+          ...shipping_address,
+          address_type: 'shipping'
         })
         .select('*')
         .single();
       
-      if (addrError) {
-        console.error('Billing address error:', addrError);
-        throw new ApiError(400, `Error creating billing address: ${addrError.message}`);
+      if (shippingAddrError) {
+        console.error('Shipping address error:', shippingAddrError);
+        throw new ApiError(400, `Error creating shipping address: ${shippingAddrError.message}`);
       }
-      billingAddr = addr;
-      console.log('Created billing address:', billingAddr.id);
+      
+      if (!shippingAddr) {
+        throw new ApiError(400, 'Failed to create shipping address: No data returned');
+      }
+      
+      console.log('Created shipping address:', shippingAddr.id);
+      finalShippingAddressId = shippingAddr.id;
+      
+      // Create billing address if different from shipping
+      if (billing_address && JSON.stringify(billing_address) !== JSON.stringify(shipping_address)) {
+        console.log('Creating billing address...');
+        const { data: billingAddr, error: billingAddrError } = await supabase
+          .from('addresses')
+          .insert({
+            user_id: userId,
+            ...billing_address,
+            address_type: 'billing'
+          })
+          .select('*')
+          .single();
+        
+        if (billingAddrError) {
+          console.error('Billing address error:', billingAddrError);
+          throw new ApiError(400, `Error creating billing address: ${billingAddrError.message}`);
+        }
+        
+        finalBillingAddressId = billingAddr.id;
+        console.log('Created billing address:', billingAddr.id);
+      } else {
+        finalBillingAddressId = shippingAddr.id;
+      }
+    } else {
+      throw new ApiError(400, 'Either shipping address details or shipping address ID must be provided');
     }
     
     // Create order
@@ -239,12 +399,13 @@ export const createOrder = async (req: Request, res: Response) => {
       .insert({
         user_id: userId,
         status: 'pending',
-        shipping_address,
+        shipping_address_id: finalShippingAddressId,
+        billing_address_id: finalBillingAddressId,
+        total_amount,
         payment_status: 'pending',
-        payment_method,
-        total_amount
+        payment_method: payment_method || 'card'
       })
-      .select()
+      .select('*')
       .single();
 
     if (orderError) {
@@ -257,11 +418,11 @@ export const createOrder = async (req: Request, res: Response) => {
 
     // Add order items
     console.log('Adding order items...');
-    const orderItems = items.map(item => ({
+    const orderItems = items.map((item: {product_id: string, quantity: number, price: number}) => ({
       order_id: order.id,
       product_id: item.product_id,
       quantity: item.quantity,
-      price: item.price
+      unit_price: item.price
     }));
 
     const { error: itemsError } = await supabase
@@ -269,8 +430,17 @@ export const createOrder = async (req: Request, res: Response) => {
       .insert(orderItems);
 
     if (itemsError) {
-      console.error('Order items error:', itemsError);
-      throw new ApiError(400, `Error adding order items: ${itemsError.message}`);
+      console.error('Error adding order items:', itemsError);
+      // Rollback order creation
+      await supabase
+        .from('orders')
+        .delete()
+        .eq('id', order.id);
+      
+      return res.status(500).json({
+        success: false,
+        error: 'Error adding order items'
+      });
     }
     
     console.log('Added order items');
@@ -289,11 +459,16 @@ export const createOrder = async (req: Request, res: Response) => {
         .delete()
         .eq('cart_id', cart.id);
       
-      return res.status(500).json({
-        success: false,
-        error: 'Error adding order items'
-      });
+      if (cartError) {
+        console.error('Error clearing cart:', cartError);
+      } else {
+        console.log('Cart cleared');
+      }
     }
+
+    // Schedule order processing (status update to 'processing' after 5 minutes)
+    // scheduleOrderProcessing(order.id);
+    console.log(`Order scheduler disabled: would have scheduled order ${order.id} for automatic processing`);
 
     res.status(201).json({
       success: true,
@@ -305,7 +480,7 @@ export const createOrder = async (req: Request, res: Response) => {
     console.error('Error in createOrder:', error);
     res.status(500).json({
       success: false,
-      error: 'Error creating order'
+      error: error instanceof ApiError ? error.message : 'Error creating order'
     });
   }
 };
@@ -314,7 +489,7 @@ export const createOrder = async (req: Request, res: Response) => {
 export const updateOrderStatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, tracking_number, estimated_delivery } = req.body;
     
     if (!status) {
       throw new ApiError(400, 'Please provide a status');
@@ -326,13 +501,31 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Invalid status');
     }
     
+    // Prepare update data
+    const updateData: any = {
+      status,
+      updated_at: new Date()
+    };
+    
+    // Reset inventory_updated flag when cancelling an order
+    if (status === 'cancelled') {
+      updateData.inventory_updated = false;
+    }
+    
+    // Add tracking number if provided
+    if (tracking_number) {
+      updateData.tracking_number = tracking_number;
+    }
+    
+    // Add estimated delivery if provided
+    if (estimated_delivery) {
+      updateData.estimated_delivery = estimated_delivery;
+    }
+    
     // Update order
     const { data, error } = await supabase
       .from('orders')
-      .update({
-        status,
-        updated_at: new Date()
-      })
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
@@ -341,21 +534,9 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       throw new ApiError(400, error.message);
     }
     
-    // If order is canceled, restore inventory
+    // If order is canceled, inventory is restored by the database trigger if needed
     if (status === 'cancelled') {
-      const { data: orderItems } = await supabase
-        .from('order_items')
-        .select('product_id, quantity')
-        .eq('order_id', id);
-      
-      if (orderItems) {
-        for (const item of orderItems) {
-          await supabase.rpc('update_stock', { 
-            p_id: item.product_id,
-            quantity: -item.quantity // Negative to add back to inventory
-          });
-        }
-      }
+      console.log(`Order ${id} cancelled by admin. Inventory restoration handled by database trigger if needed.`);
     }
     
     res.status(200).json({
@@ -367,5 +548,82 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       throw error;
     }
     throw new ApiError(500, 'Error updating order status');
+  }
+};
+
+// Cancel order (user)
+export const cancelOrder = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    
+    // Fetch the order and verify it belongs to the user
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .select('*, order_items(product_id, quantity)')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+    
+    if (orderError || !order) {
+      return res.status(404).json({
+        success: false,
+        error: 'Order not found or you do not have permission to cancel it'
+      });
+    }
+    
+    // Check if order is in a status that can be cancelled
+    if (order.status !== 'pending' && order.status !== 'processing') {
+      return res.status(400).json({
+        success: false,
+        error: 'Only pending or processing orders can be cancelled'
+      });
+    }
+    
+    // Check if order was created within the last 5 minutes
+    const orderCreatedAt = new Date(order.created_at);
+    const currentTime = new Date();
+    const timeDifferenceMinutes = (currentTime.getTime() - orderCreatedAt.getTime()) / (1000 * 60);
+    
+    if (timeDifferenceMinutes > 5) {
+      return res.status(400).json({
+        success: false,
+        error: 'Orders can only be cancelled within 5 minutes of creation'
+      });
+    }
+    
+    // Update order status to cancelled
+    const { data: updatedOrder, error: updateError } = await supabase
+      .from('orders')
+      .update({
+        status: 'cancelled',
+        inventory_updated: false, // Reset inventory_updated flag
+        updated_at: new Date()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (updateError) {
+      throw new ApiError(400, updateError.message);
+    }
+    
+    // The inventory restoration is now handled automatically by the database trigger
+    // This only performs logging for transparency
+    if (order.inventory_updated) {
+      console.log(`Order ${id} cancelled with inventory_updated=true. Inventory will be restored automatically.`);
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: updatedOrder,
+      message: 'Order cancelled successfully'
+    });
+  } catch (error) {
+    console.error('Error in cancelOrder:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error cancelling order'
+    });
   }
 }; 
