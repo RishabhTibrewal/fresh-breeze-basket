@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { supabase } from '../db/supabase';
+import { verifyUserToken } from '../config/supabase';
 import { AuthenticationError, AuthorizationError } from './error';
+import { supabase } from '../config/supabase';
 
 // Simple in-memory rate limiting
 const rateLimit = new Map<string, { count: number; resetTime: number }>();
@@ -40,23 +40,28 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
       throw new AuthenticationError('Authentication token is required');
     }
 
+    console.log('Attempting to verify token:', token.substring(0, 20) + '...');
+    
     try {
-      // For Supabase tokens, we can decode without verification since they're already verified by Supabase
-      const decoded = jwt.decode(token);
+      // Verify the token with Supabase
+      const user = await verifyUserToken(token);
       
-      if (!decoded || typeof decoded === 'string') {
+      if (!user) {
+        console.error('No user returned from token verification');
         throw new AuthenticationError('Invalid authentication token');
       }
 
       // Add user info to request
       req.user = {
-        id: decoded.sub,
-        email: decoded.email,
-        role: decoded.role || 'authenticated'
+        id: user.id,
+        email: user.email || '',
+        role: 'authenticated'
       };
 
+      console.log('User authenticated successfully:', { id: user.id, email: user.email });
       next();
-    } catch (jwtError) {
+    } catch (authError) {
+      console.error('Auth error:', authError);
       throw new AuthenticationError('Invalid authentication token');
     }
   } catch (error) {
@@ -72,23 +77,31 @@ export const adminOnly = async (req: Request, res: Response, next: NextFunction)
 
     console.log('Checking admin status for user:', req.user.id);
     
-    // Check if user is admin by directly checking the profile
-    const { data: profile, error: profileError } = await supabase
+    // Check if user is admin by checking the profile(s)
+    const { data: profiles, error: profileError } = await supabase
       .from('profiles')
       .select('role')
-      .eq('id', req.user.id)
-      .single();
+      .eq('id', req.user.id);
       
     if (profileError) {
       console.error('Error fetching profile:', profileError);
       throw new AuthorizationError('Error checking admin status');
     }
     
-    if (!profile || profile.role !== 'admin') {
+    // Check if any of the returned profiles have admin role
+    const isAdmin = profiles && profiles.length > 0 && profiles.some(profile => profile.role === 'admin');
+    
+    if (!isAdmin) {
+      // If not admin, throw error
       throw new AuthorizationError('Admin access required');
     }
     
+    // If we get here, user is admin
     console.log('User is admin');
+    
+    // Add admin role to req.user for controllers to use
+    req.user.role = 'admin';
+    
     next();
   } catch (error) {
     next(error);

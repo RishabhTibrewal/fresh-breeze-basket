@@ -1,11 +1,12 @@
-
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { X, ShoppingCart, Trash, Plus, Minus } from 'lucide-react';
+import { X, ShoppingCart, Trash, Plus, Minus, Upload } from 'lucide-react';
 import { useCart } from '@/contexts/CartContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 const CartDrawer = () => {
-  const { state, removeFromCart, updateQuantity, isCartOpen, setIsCartOpen } = useCart();
+  const { state, removeFromCart, updateQuantity, isCartOpen, setIsCartOpen, isSyncing, syncCartWithBackend } = useCart();
+  const { user } = useAuth();
 
   return (
     <>
@@ -63,7 +64,7 @@ const CartDrawer = () => {
                     
                     <div className="flex-grow min-w-0">
                       <Link 
-                        to={`/products/${item.slug}`}
+                        to={`/products/${item.id}`}
                         onClick={() => setIsCartOpen(false)}
                         className="font-medium text-gray-800 hover:text-primary line-clamp-2"
                       >
@@ -123,6 +124,22 @@ const CartDrawer = () => {
                 </div>
               </div>
               
+              {/* Sync Button for logged-in users */}
+              {/* {user && (
+                <button
+                  onClick={syncCartWithBackend}
+                  disabled={isSyncing}
+                  className="flex items-center justify-center w-full bg-gray-100 hover:bg-gray-200 text-gray-800 py-2 text-center rounded-md mb-2"
+                >
+                  {isSyncing ? 'Syncing...' : (
+                    <>
+                      <Upload className="h-4 w-4 mr-2" />
+                      Sync Cart
+                    </>
+                  )}
+                </button>
+              )} */}
+              
               <Link 
                 to="/cart"
                 onClick={() => setIsCartOpen(false)}
@@ -133,7 +150,13 @@ const CartDrawer = () => {
               
               <Link 
                 to="/checkout"
-                onClick={() => setIsCartOpen(false)}
+                onClick={() => {
+                  if (user) {
+                    // Sync cart before checkout for logged-in users
+                    syncCartWithBackend();
+                  }
+                  setIsCartOpen(false);
+                }}
                 className="block w-full bg-accent text-white py-3 text-center rounded-md hover:bg-opacity-90 transition-colors"
               >
                 Checkout

@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -49,9 +48,27 @@ export function UserNav() {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link to="/orders" className="flex items-center">
+          <Link to="/account/address" className="flex items-center">
+            <User className="mr-2 h-4 w-4" />
+            <span>Address</span>
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/account/orders" className="flex items-center">
             <ShoppingBag className="mr-2 h-4 w-4" />
             <span>My Orders</span>
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/account/payment" className="flex items-center">
+            <Settings className="mr-2 h-4 w-4" />
+            <span>Payment Methods</span>
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/account/settings" className="flex items-center">
+            <Settings className="mr-2 h-4 w-4" />
+            <span>Settings</span>
           </Link>
         </DropdownMenuItem>
         {isAdmin && (

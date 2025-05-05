@@ -1,0 +1,52 @@
+---
+description: Frontend development rules for the Fresh Breeze Basket e-commerce application, focusing on React best practices, component structure, state management, and API integration.
+globs: 
+alwaysApply: false
+---
+description: Frontend development rules for the Fresh Breeze Basket e-commerce application, focusing on React best practices, component structure, state management, and API integration.
+
+auto_attach:
+  paths:
+    - frontend/**/*.js
+    - frontend/**/*.jsx
+    - frontend/**/*.ts
+    - frontend/**/*.tsx
+    - frontend/**/*.css
+    - frontend/**/*.scss
+
+goals:
+  - Create a responsive and accessible user interface for the e-commerce platform
+  - Implement consistent component architecture across the frontend
+  - Ensure efficient state management and data flow
+  - Establish robust API integration patterns with the backend
+  - Maintain performance optimization across all frontend components
+
+rules:
+  - Use functional components with hooks instead of class components
+  - Implement reusable UI components in a component library
+  - Follow atomic design principles (atoms, molecules, organisms, templates, pages)
+  - Use CSS modules or styled-components for component styling
+  - Implement responsive design with mobile-first approach
+  - Separate business logic from UI components using custom hooks
+  - Use form libraries (Formik/React Hook Form) for complex forms
+  - Implement proper loading and error states for all data-fetching components
+  - Use React.memo, useCallback, and useMemo for performance optimization
+  - Follow accessibility (a11y) best practices
+  - Use TypeScript for type safety when applicable
+  - Include prop validation with PropTypes or TypeScript
+  - Implement a consistent error boundary strategy
+  - Use lazy loading for code splitting where appropriate
+  - Structure Redux state with domain-driven design principles
+  - Follow a consistent naming convention for components and files
+
+context:
+  - Frontend is built with React in the frontend/ directory
+  - UI design follows the company brand guidelines and color scheme
+  - The application targets both desktop and mobile users
+  - User authentication state must be maintained across page refreshes
+  - Shopping cart persistence is required for guest and logged-in users
+  - Product catalog must implement filtering, sorting, and pagination
+  - Checkout flow includes multi-step form validation
+  - User dashboard displays order history and account management
+  - Admin interface requires role-based access control
+  - Image optimization is important for product gallery performance

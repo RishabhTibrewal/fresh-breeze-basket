@@ -4,7 +4,8 @@ import {
   getOrderById,
   createOrder,
   updateOrderStatus,
-  getUserOrders
+  getUserOrders,
+  cancelOrder
 } from '../controllers';
 import { protect, adminOnly } from '../middleware/auth';
 
@@ -12,11 +13,12 @@ const router = express.Router();
 
 // Protected routes (logged in users)
 router.get('/my-orders', protect, getUserOrders);
+router.get('/:id', protect, getOrderById);
 router.post('/', protect, createOrder);
+router.put('/:id/cancel', protect, cancelOrder);
 
 // Admin only routes
 router.get('/', protect, adminOnly, getOrders);
-router.get('/:id', protect, adminOnly, getOrderById);
 router.put('/:id/status', protect, adminOnly, updateOrderStatus);
 
 export default router; 

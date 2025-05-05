@@ -1,29 +1,36 @@
 ---
-description: 
+description:  Rules for integrating Fresh Breeze Basket e-commerce backend API with React frontend, focusing on secure API communication, state management, and proper API service implementation.
 globs: 
 alwaysApply: false
 ---
+description: Rules for integrating Fresh Breeze Basket e-commerce backend API with React frontend, focusing on secure API communication, state management, and proper API service implementation.
+
 goals:
-  - Help with building the Node.js backend for Fresh Breeze Basket e-commerce platform
-  - Guide implementation of RESTful API endpoints with Express
-  - Assist with Supabase database integration and querying
-  - Provide best practices for cursor-based pagination implementation
+  - Integrate the Fresh Breeze Basket e-commerce backend API with React frontend
+  - Implement secure API communication between frontend and backend
+  - Set up state management for handling API responses and application data
+  - Create reusable API service modules for all backend endpoints
+  - Ensure proper error handling and loading states for all API calls
 
 rules:
-  - Use TypeScript for all backend code with proper type definitions
-  - Implement cursor-based pagination instead of offset pagination
-  - Structure project with controllers, routes, and services pattern
-  - All database queries must use Supabase client with proper error handling
-  - API responses should follow a consistent format with appropriate status codes
-  - Authentication middleware must verify JWT tokens from request headers
-  - Protect routes with role-based access control (admin vs regular users)
-  - Use environment variables for configuration with proper validation
+  - Use Axios or Fetch API for making HTTP requests to the backend
+  - Implement a centralized API client with interceptors for auth tokens and error handling
+  - Structure API services into separate modules by domain (products, users, orders, etc.)
+  - Set up React Context or Redux for global state management
+  - Handle API loading, success, and error states for improved UX
+  - Implement proper form validation before submitting data to backend
+  - Use environment variables for API base URLs across different environments
+  - Cache appropriate API responses to minimize unnecessary requests
+  - Implement token refresh mechanism for handling expired JWT tokens
+  - Add request debouncing for search and filter operations
 
 context:
-  - Backend uses Node.js with Express framework
-  - Database is PostgreSQL accessed through Supabase client
-  - Authentication system uses JWT tokens
-  - The API supports product management, user accounts, order processing
-  - Payment processing is implemented with Stripe
-  - Frontend will be a separate React application
-  - System must handle inventory management when orders are placed
+  - Frontend is built with React in the frontend/ directory
+  - Backend provides RESTful API endpoints with Express in the backend/ directory
+  - Authentication uses JWT tokens stored securely in browser
+  - API responses follow consistent format with appropriate status codes
+  - Pagination requires cursor-based implementation on the frontend
+  - User roles (admin/regular) determine accessible features
+  - Product catalog, cart management, and checkout flow require API integration
+  - Payment processing uses Stripe elements integration
+  - Real-time inventory checks must be performed during checkout

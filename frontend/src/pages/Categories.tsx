@@ -1,55 +1,54 @@
-
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { categories } from '@/data/productData';
+import { useQuery } from '@tanstack/react-query';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ErrorMessage } from '@/components/ui/error-message';
+import { CategoryCard } from '@/components/CategoryCard';
+import { fetchCategories } from '@/api/categories';
+import type { ProductCategory } from '@/types/product';
 
-const Categories = () => {
+export default function Categories() {
+  const { data: categories, isLoading, error } = useQuery<ProductCategory[]>({
+    queryKey: ['categories'],
+    queryFn: fetchCategories,
+  });
+
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <main className="flex-grow">
-        <div className="bg-primary text-white py-8">
-          <div className="container mx-auto px-4">
-            <h1 className="text-3xl md:text-4xl font-bold">Product Categories</h1>
-            <p className="mt-2">Browse our selection of fresh produce by category</p>
-          </div>
+      <main className="flex-grow container mx-auto px-4 py-8">
+        <div className="text-center mb-12">
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">
+            Fresh Categories
+          </h1>
+          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+            Explore our wide selection of fresh, high-quality produce categories.
+            From seasonal fruits to organic vegetables, we have everything you need.
+          </p>
         </div>
-        
-        <div className="container mx-auto px-4 py-12">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-            {categories.map((category) => (
-              <Link 
-                key={category.id}
-                to={`/products?category=${category.id}`}
-                className="group"
-              >
-                <div className="bg-white rounded-lg shadow-md overflow-hidden transition-transform hover:shadow-lg group-hover:-translate-y-1">
-                  <div className="h-48 overflow-hidden">
-                    <img
-                      src={category.image || '/placeholder.svg'}
-                      alt={category.name}
-                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                    />
-                  </div>
-                  <div className="p-6">
-                    <h2 className="text-xl font-semibold text-gray-800 group-hover:text-primary transition-colors">
-                      {category.name}
-                    </h2>
-                    <p className="mt-2 text-gray-600">
-                      {`Browse our selection of ${category.name.toLowerCase()}`}
-                    </p>
-                  </div>
-                </div>
-              </Link>
+
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8" role="status" aria-label="Loading categories">
+            {[...Array(6)].map((_, index) => (
+              <Skeleton key={index} className="h-64 rounded-lg" />
             ))}
           </div>
-        </div>
+        ) : error ? (
+          <ErrorMessage 
+            title="Failed to load categories" 
+            message="Please try refreshing the page or contact support if the problem persists." 
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {categories?.map((category) => (
+              <CategoryCard key={category.id} category={category} />
+            ))}
+          </div>
+        )}
       </main>
       <Footer />
     </div>
   );
-};
-
-export default Categories;
+}

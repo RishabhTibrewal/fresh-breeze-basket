@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, createAuthClient } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
 // Register new user
@@ -10,87 +10,168 @@ export const register = async (req: Request, res: Response) => {
     
     if (!email || !password) {
       console.log('Missing email or password:', { email, password });
-      throw new ApiError(400, 'Please provide email and password');
-    }
-    
-    // Check if user already exists
-    const { data: existingUser, error: userCheckError } = await supabase.auth.signInWithPassword({
-      email,
-      password: 'dummy-password-for-check' // We use a dummy password just to check if the user exists
-    });
-    
-    // If we get a specific error about invalid credentials, it means the user exists
-    // If we get a different error, it might be a server issue
-    if (userCheckError && userCheckError.message.includes('Invalid login credentials')) {
-      console.log('User already exists with email:', email);
-      return res.status(409).json({
+      return res.status(400).json({
         success: false,
-        message: 'User already exists. Please login instead.'
+        message: 'Please provide email and password'
       });
     }
     
-    // Register with Supabase Auth
+    // Check if a profile with this email already exists
+    const { data: existingProfileByEmail, error: emailCheckError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', email)
+      .single();
+    
+    if (emailCheckError && emailCheckError.code !== 'PGRST116') {
+      console.error('Error checking email:', emailCheckError);
+      return res.status(500).json({
+        success: false,
+        message: 'Error checking email availability'
+      });
+    }
+    
+    if (existingProfileByEmail) {
+      // User already exists, return message to login instead
+      return res.status(400).json({
+        success: false,
+        message: 'Already registered, please login'
+      });
+    }
+    
+    // Register with Supabase Auth first
+    console.log('Attempting to create user in Supabase Auth...');
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          first_name,
+          last_name,
+          phone
+        }
+      }
     });
+    
+    if (authError && authError.code === 'user_already_exists') {
+      console.error('User already registered:', authError);
+      return res.status(400).json({
+        success: false,
+        message: 'Already registered, please login'
+      });
+    }
     
     if (authError) {
       console.error('Supabase auth error:', authError);
-      throw new ApiError(400, authError.message);
+      return res.status(400).json({
+        success: false,
+        message: authError.message
+      });
     }
     
     if (!authData.user) {
       console.error('No user data returned from Supabase');
-      throw new ApiError(500, 'Error creating user');
+      return res.status(500).json({
+        success: false,
+        message: 'Error creating user'
+      });
     }
     
     console.log('User created in Supabase Auth with ID:', authData.user.id);
     
-    // Use upsert to either create or update the profile
-    console.log('Upserting profile for user ID:', authData.user.id);
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .upsert({
-        id: authData.user.id,
-        email,
-        first_name: first_name || null,
-        last_name: last_name || null,
-        phone: phone || null,
-        role: 'user', // default role
-        updated_at: new Date()
-      }, {
-        onConflict: 'id',
-        ignoreDuplicates: false
-      })
-      .select()
-      .single();
-    
-    if (profileError) {
-      console.error('Error upserting profile:', profileError);
-      throw new ApiError(500, 'Error creating/updating user profile');
-    }
-    
-    console.log('Profile upserted successfully:', profile);
-    
-    res.status(201).json({
+    // Return success after user is created in Supabase Auth
+    return res.status(201).json({
       success: true,
-      message: 'Registration successful! Please check your email for verification.'
+      message: 'User registered successfully',
+      data: {
+        id: authData.user.id,
+        email: authData.user.email
+      }
     });
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
     console.error('Unexpected error during registration:', error);
-    throw new ApiError(500, 'Error registering user');
+    return res.status(500).json({
+      success: false,
+      message: 'Error registering user'
+    });
   }
 };
 
 // Login user
 export const login = async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, supabase_token } = req.body;
     
+    // Check if we're trying to login with a Supabase token (for keeping backend in sync)
+    if (email && supabase_token) {
+      try {
+        console.log('Attempting to login with Supabase token for email:', email);
+        
+        // Verify the Supabase token by calling the Supabase API
+        const authClient = createAuthClient(supabase_token);
+        const { data: userData, error: userError } = await authClient.auth.getUser();
+        
+        if (userError || !userData.user) {
+          console.error('Error validating Supabase token:', userError);
+          return res.status(401).json({
+            success: false,
+            message: 'Invalid Supabase token'
+          });
+        }
+        
+        // Verify that the email matches the token
+        if (userData.user.email !== email) {
+          console.error('Email mismatch:', { tokenEmail: userData.user.email, requestEmail: email });
+          return res.status(401).json({
+            success: false,
+            message: 'Email does not match token'
+          });
+        }
+        
+        // Token is valid, get or create profile
+        let profile;
+        const { data: existingProfile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userData.user.id)
+          .single();
+        
+        if (profileError) {
+          console.error('Profile not found for valid token user:', userData.user.id);
+          return res.status(500).json({
+            success: false,
+            message: 'User profile is missing. Please contact support.'
+          });
+        } else {
+          profile = existingProfile;
+          console.log('Profile found for token login:', profile);
+        }
+        
+        // Return success with token (reusing the Supabase token)
+        return res.status(200).json({
+          success: true,
+          data: {
+            token: supabase_token,
+            user: {
+              id: profile.id,
+              email: profile.email,
+              first_name: profile.first_name,
+              last_name: profile.last_name,
+              phone: profile.phone,
+              role: profile.role
+            }
+          }
+        });
+      } catch (tokenError) {
+        console.error('Error during token validation:', tokenError);
+        return res.status(401).json({
+          success: false,
+          message: 'Failed to validate Supabase token'
+        });
+      }
+    }
+    
+    // Regular login flow with email and password
     if (!email || !password) {
       return res.status(400).json({
         success: false,
@@ -98,42 +179,51 @@ export const login = async (req: Request, res: Response) => {
       });
     }
     
-    const { data, error } = await supabase.auth.signInWithPassword({
+    // Get Supabase auth session first
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
     
-    if (error) {
-      console.error('Login error:', error);
+    if (authError) {
+      console.error('Supabase auth error:', authError);
       return res.status(401).json({
         success: false,
-        message: 'Invalid login credentials'
+        message: 'Please register'
       });
     }
     
-    // Get user profile
-    const { data: profile, error: profileError } = await supabase
+    // Get or create profile
+    let profile;
+    const { data: existingProfile, error: profileError } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', data.user.id)
+      .eq('id', authData.user.id)
       .single();
     
     if (profileError) {
-      console.error('Profile fetch error:', profileError);
+      // Profile not found - return error instead of creating
+      console.error('Login successful but profile not found for user ID:', authData.user.id, 'Error:', profileError);
       return res.status(500).json({
         success: false,
-        message: 'Error fetching user profile'
+        message: 'Login successful, but user profile is missing. Please contact support.'
       });
+    } else {
+      profile = existingProfile;
+      console.log('Existing profile found during login:', profile);
     }
     
     return res.status(200).json({
       success: true,
       data: {
-        token: data.session.access_token,
+        token: authData.session.access_token,
         user: {
-          id: data.user.id,
-          email: data.user.email,
-          ...profile
+          id: profile.id,
+          email: profile.email,
+          first_name: profile.first_name,
+          last_name: profile.last_name,
+          phone: profile.phone,
+          role: profile.role
         }
       }
     });
@@ -162,46 +252,70 @@ export const getCurrentUser = async (req: Request, res: Response) => {
     if (error && error.code === 'PGRST116') { // PGRST116 is "not found" error
       console.log('Profile not found for user ID:', userId, 'Creating new profile...');
       
-      // Create new profile
-      const { data: newProfile, error: createError } = await supabase
-        .from('profiles')
-        .insert({
-          id: userId,
-          email: req.user.email,
-          role: 'user',
-          updated_at: new Date()
-        })
-        .select()
-        .single();
-      
-      if (createError) {
-        console.error('Error creating profile:', createError);
-        throw new ApiError(500, 'Error creating user profile');
-      }
-      
-      console.log('New profile created successfully:', newProfile);
-      
-      // Check if user is admin
-      const { data: isAdmin } = await supabase.rpc('is_admin', { user_id: userId });
-      
-      return res.status(200).json({
-        success: true,
-        data: {
-          id: userId,
-          email: req.user.email,
-          ...newProfile,
-          isAdmin: isAdmin || false
+      try {
+        // Create new profile
+        const { data: newProfile, error: createError } = await supabase
+          .from('profiles')
+          .insert({
+            id: userId,
+            email: req.user.email,
+            role: 'user',
+            updated_at: new Date()
+          })
+          .select()
+          .single();
+        
+        if (createError) {
+          console.error('Error creating profile:', createError);
+          // Instead of throwing an error that crashes the server, return a response
+          return res.status(500).json({
+            success: false,
+            error: {
+              message: 'Error creating user profile. This may be due to permissions issues.',
+              details: createError.message
+            }
+          });
         }
-      });
+        
+        console.log('New profile created successfully:', newProfile);
+        
+        // Check if user is admin
+        const { data: isAdmin } = await supabase.rpc('is_admin', { user_id: userId });
+        
+        return res.status(200).json({
+          success: true,
+          data: {
+            id: userId,
+            email: req.user.email,
+            ...newProfile,
+            isAdmin: isAdmin || false
+          }
+        });
+      } catch (profileCreateError) {
+        console.error('Caught exception while creating profile:', profileCreateError);
+        return res.status(500).json({
+          success: false,
+          error: {
+            message: 'Failed to create user profile. Please try again later.',
+            details: profileCreateError instanceof Error ? profileCreateError.message : 'Unknown error'
+          }
+        });
+      }
     } else if (error) {
       console.error('Error fetching profile:', error);
-      throw new ApiError(500, 'Error fetching user profile');
+      return res.status(500).json({
+        success: false,
+        error: {
+          message: 'Error fetching user profile',
+          details: error.message
+        }
+      });
     }
     
     // Check if user is admin
     const { data: isAdmin } = await supabase.rpc('is_admin', { user_id: userId });
     
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: {
         id: userId,
@@ -211,11 +325,14 @@ export const getCurrentUser = async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
     console.error('Unexpected error in getCurrentUser:', error);
-    throw new ApiError(500, 'Error getting user profile');
+    return res.status(500).json({
+      success: false,
+      error: {
+        message: 'Error retrieving user profile',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }
+    });
   }
 };
 
@@ -259,6 +376,19 @@ export const updateProfile = async (req: Request, res: Response) => {
 export const addAddress = async (req: Request, res: Response) => {
   try {
     const userId = req.user.id;
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication token required'
+      });
+    }
+    
+    console.log(`Adding address for user ${userId}:`, req.body);
+    
+    // Create client with auth context
+    const authClient = createAuthClient(token);
+    
     const {
       address_type,
       address_line1,
@@ -271,10 +401,11 @@ export const addAddress = async (req: Request, res: Response) => {
     } = req.body;
     
     // Validate required fields
-    const requiredFields = ['address_line1', 'city', 'address_type', 'state', 'postal_code', 'country'];
+    const requiredFields = ['address_line1', 'city', 'address_type', 'country'];
     const missingFields = requiredFields.filter(field => !req.body[field]);
     
     if (missingFields.length > 0) {
+      console.log(`Missing required fields: ${missingFields.join(', ')}`);
       return res.status(400).json({
         success: false,
         message: `Missing required fields: ${missingFields.join(', ')}`
@@ -284,6 +415,7 @@ export const addAddress = async (req: Request, res: Response) => {
     // Validate address type
     const validAddressTypes = ['shipping', 'billing', 'both'];
     if (!validAddressTypes.includes(address_type)) {
+      console.log(`Invalid address type: ${address_type}`);
       return res.status(400).json({
         success: false,
         message: `Invalid address type. Must be one of: ${validAddressTypes.join(', ')}`
@@ -292,15 +424,21 @@ export const addAddress = async (req: Request, res: Response) => {
     
     // If setting as default, update other addresses first
     if (is_default) {
-      await supabase
+      console.log(`Setting address as default for type: ${address_type}`);
+      const { error: updateError } = await authClient
         .from('addresses')
         .update({ is_default: false })
         .eq('user_id', userId)
         .eq('address_type', address_type);
+      
+      if (updateError) {
+        console.error('Error updating existing addresses:', updateError);
+      }
     }
     
-    // Add new address
-    const { data, error } = await supabase
+    // Add new address - using auth client with user's token
+    console.log('Inserting new address with user_id:', userId);
+    const { data, error } = await authClient
       .from('addresses')
       .insert({
         user_id: userId,
@@ -308,8 +446,8 @@ export const addAddress = async (req: Request, res: Response) => {
         address_line1,
         address_line2: address_line2 || null,
         city,
-        state,
-        postal_code,
+        state: state || null,
+        postal_code: postal_code || null,
         country,
         is_default: is_default || false
       })
@@ -324,6 +462,7 @@ export const addAddress = async (req: Request, res: Response) => {
       });
     }
     
+    console.log('Address added successfully:', data);
     res.status(201).json({
       success: true,
       data
@@ -341,26 +480,45 @@ export const addAddress = async (req: Request, res: Response) => {
 export const getAddresses = async (req: Request, res: Response) => {
   try {
     const userId = req.user.id;
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication token required'
+      });
+    }
     
-    const { data, error } = await supabase
+    console.log(`Getting addresses for user ${userId}`);
+    
+    // Create client with auth context
+    const authClient = createAuthClient(token);
+    
+    const { data, error } = await authClient
       .from('addresses')
       .select('*')
       .eq('user_id', userId)
       .order('is_default', { ascending: false });
     
     if (error) {
-      throw new ApiError(400, error.message);
+      console.error('Supabase error when fetching addresses:', error);
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
     }
+    
+    console.log(`Found ${data?.length || 0} addresses for user ${userId}`);
     
     res.status(200).json({
       success: true,
-      data
+      data: data || []
     });
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    throw new ApiError(500, 'Error getting addresses');
+  } catch (error: any) {
+    console.error('Unhandled error in getAddresses:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Error getting addresses'
+    });
   }
 };
 
@@ -369,6 +527,17 @@ export const updateAddress = async (req: Request, res: Response) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication token required'
+      });
+    }
+
+    // Create client with auth context
+    const authClient = createAuthClient(token);
+    
     const {
       address_type,
       address_line1,
@@ -381,7 +550,7 @@ export const updateAddress = async (req: Request, res: Response) => {
     } = req.body;
     
     // Verify address belongs to user
-    const { data: existingAddress, error: fetchError } = await supabase
+    const { data: existingAddress, error: fetchError } = await authClient
       .from('addresses')
       .select('*')
       .eq('id', id)
@@ -408,7 +577,7 @@ export const updateAddress = async (req: Request, res: Response) => {
     
     // If setting as default, update other addresses first
     if (is_default) {
-      await supabase
+      await authClient
         .from('addresses')
         .update({ is_default: false })
         .eq('user_id', userId)
@@ -425,13 +594,13 @@ export const updateAddress = async (req: Request, res: Response) => {
     if (address_line1) updateData.address_line1 = address_line1;
     if (address_line2 !== undefined) updateData.address_line2 = address_line2;
     if (city) updateData.city = city;
-    if (state) updateData.state = state;
-    if (postal_code) updateData.postal_code = postal_code;
+    if (state !== undefined) updateData.state = state;
+    if (postal_code !== undefined) updateData.postal_code = postal_code;
     if (country) updateData.country = country;
     if (is_default !== undefined) updateData.is_default = is_default;
     
     // Update address
-    const { data, error } = await supabase
+    const { data, error } = await authClient
       .from('addresses')
       .update(updateData)
       .eq('id', id)
@@ -464,9 +633,19 @@ export const deleteAddress = async (req: Request, res: Response) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication token required'
+      });
+    }
+
+    // Create client with auth context
+    const authClient = createAuthClient(token);
     
     // Verify address belongs to user
-    const { data: existingAddress, error: fetchError } = await supabase
+    const { data: existingAddress, error: fetchError } = await authClient
       .from('addresses')
       .select('*')
       .eq('id', id)
@@ -474,28 +653,36 @@ export const deleteAddress = async (req: Request, res: Response) => {
       .single();
     
     if (fetchError || !existingAddress) {
-      throw new ApiError(404, 'Address not found or does not belong to user');
+      return res.status(404).json({
+        success: false,
+        message: 'Address not found or does not belong to user'
+      });
     }
     
     // Delete address
-    const { error } = await supabase
+    const { error } = await authClient
       .from('addresses')
       .delete()
       .eq('id', id);
     
     if (error) {
-      throw new ApiError(400, error.message);
+      console.error('Error deleting address:', error);
+      return res.status(400).json({
+        success: false,
+        message: `Error deleting address: ${error.message}`
+      });
     }
     
     res.status(200).json({
       success: true,
       message: 'Address deleted successfully'
     });
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    throw new ApiError(500, 'Error deleting address');
+  } catch (error: any) {
+    console.error('Error deleting address:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Error deleting address'
+    });
   }
 };
 
@@ -526,4 +713,4 @@ export const logout = async (req: Request, res: Response) => {
       message: 'An unexpected error occurred during logout'
     });
   }
-}; 
+};

@@ -1,4 +1,3 @@
-
 import React, { useEffect } from 'react';
 import { Link, Outlet, useNavigate } from 'react-router-dom';
 import { 
@@ -7,7 +6,8 @@ import {
   ShoppingCart, 
   Users, 
   Settings,
-  LogOut
+  LogOut,
+  Grid
 } from 'lucide-react';
 import { 
   SidebarProvider, 
@@ -95,6 +95,14 @@ const AdminDashboard = () => {
                       <Link to="/admin/products">
                         <Package className="h-4 w-4" />
                         <span>Products</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip="Categories">
+                      <Link to="/admin/categories">
+                        <Grid className="h-4 w-4" />
+                        <span>Categories</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

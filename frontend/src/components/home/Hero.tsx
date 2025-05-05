@@ -19,7 +19,7 @@ const Hero = () => {
               <Link to="/products" className="btn-primary">
                 Shop Fresh Today
               </Link>
-              <Link to="/categories/value-bundles" className="btn-secondary">
+              <Link to="/products" className="btn-secondary">
                 View Today's Deals
               </Link>
             </div>

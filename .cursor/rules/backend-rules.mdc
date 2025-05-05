@@ -1,0 +1,64 @@
+---
+description: Backend development rules for the Fresh Breeze Basket e-commerce application, focusing on API design, security, database interactions, and business logic implementation.
+globs: 
+alwaysApply: false
+---
+description: Backend development rules for the Fresh Breeze Basket e-commerce application, focusing on API design, security, database interactions, and business logic implementation.
+
+auto_attach:
+  paths:
+    - backend/**/*.js
+    - backend/**/*.ts
+    - backend/models/**/*.js
+    - backend/models/**/*.ts
+    - backend/controllers/**/*.js
+    - backend/controllers/**/*.ts
+    - backend/routes/**/*.js
+    - backend/routes/**/*.ts
+    - backend/middleware/**/*.js
+    - backend/middleware/**/*.ts
+    - backend/services/**/*.js
+    - backend/services/**/*.ts
+    - backend/utils/**/*.js
+    - backend/utils/**/*.ts
+
+goals:
+  - Implement secure and efficient RESTful API endpoints
+  - Establish robust database models and relationships
+  - Create middleware for authentication, validation, and error handling
+  - Develop business logic services for e-commerce operations
+  - Ensure proper error handling and validation across all endpoints
+
+rules:
+  - Structure project following MVC architecture pattern
+  - Implement input validation using middleware (express-validator/joi)
+  - Use environment variables for all configuration settings
+  - Implement JWT authentication with proper token refresh mechanism
+  - Create middleware for role-based access control
+  - Implement database transactions for multi-step operations
+  - Follow RESTful API naming conventions
+  - Return consistent API response format across all endpoints
+  - Implement proper HTTP status codes for different scenarios
+  - Use async/await for handling asynchronous operations
+  - Implement proper error handling with try/catch blocks
+  - Create database indexes for frequently queried fields
+  - Implement rate limiting for public API endpoints
+  - Use parameterized queries to prevent SQL injection
+  - Implement logging for API requests and errors
+  - Create separate services for external API integrations (payment, shipping)
+  - Implement data pagination for list endpoints
+  - Use compression middleware for response optimization
+
+context:
+  - Backend is built with Express.js in the backend/ directory
+  - Database uses MongoDB/PostgreSQL (specify which one you're using)
+  - Authentication relies on JWT tokens with refresh token rotation
+  - Payment processing integrates with Stripe API
+  - Order processing includes inventory management
+  - API must handle concurrent requests efficiently
+  - User data requires GDPR compliance measures
+  - Backend serves as API only, not rendering views
+  - File uploads are stored in cloud storage (S3/similar)
+  - Email notifications are sent for order updates
+  - Scheduled tasks handle abandoned carts and inventory updates
+  - API documentation is generated using Swagger/OpenAPI
