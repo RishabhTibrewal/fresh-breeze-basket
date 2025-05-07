@@ -22,6 +22,8 @@ export interface ProductFiltersProps {
   maxPrice: number;
   onReset: () => void;
   onApply: () => void;
+  showDiscountedOnly?: boolean;
+  onDiscountToggle?: () => void;
   className?: string;
 }
 
@@ -34,11 +36,14 @@ const ProductFilters: React.FC<ProductFiltersProps> = ({
   maxPrice,
   onReset,
   onApply,
+  showDiscountedOnly = false,
+  onDiscountToggle,
   className
 }) => {
   const [expandedSections, setExpandedSections] = React.useState({
     categories: true,
     price: true,
+    discount: true,
   });
 
   const toggleSection = (section: keyof typeof expandedSections) => {
@@ -163,6 +168,46 @@ const ProductFilters: React.FC<ProductFiltersProps> = ({
       </div>
 
       <Separator className="my-4" />
+      
+      {/* Discount Filter */}
+      {onDiscountToggle && (
+        <div className="mb-4">
+          <button
+            onClick={() => toggleSection('discount')}
+            className="flex items-center justify-between w-full text-left font-medium mb-2"
+          >
+            <span>Special Offers</span>
+            {expandedSections.discount ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </button>
+          
+          {expandedSections.discount && (
+            <div className="space-y-2 mt-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="discount-only"
+                  checked={showDiscountedOnly}
+                  onCheckedChange={onDiscountToggle}
+                />
+                <label
+                  htmlFor="discount-only"
+                  className="text-sm flex items-center justify-between w-full cursor-pointer"
+                >
+                  <span>Items on Sale</span>
+                  <span className="text-muted-foreground text-xs bg-red-100 text-red-600 rounded-full px-2 py-0.5">
+                    Sale
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
+          
+          <Separator className="my-4" />
+        </div>
+      )}
 
       <Button onClick={onApply} className="w-full">
         Apply Filters

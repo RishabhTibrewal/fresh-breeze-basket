@@ -5,6 +5,13 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import apiClient from '@/lib/apiClient';
 
+// Add a global declaration for the session refresh interval
+declare global {
+  interface Window {
+    _sessionRefreshInterval: NodeJS.Timeout | null;
+  }
+}
+
 type AuthContextType = {
   session: Session | null;
   user: User | null;
@@ -112,9 +119,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (currentSession?.access_token) {
           localStorage.setItem('supabase_token', currentSession.access_token);
           console.log('Token stored in localStorage');
+          
+          // Set a session refresh interval to prevent automatic logout
+          const refreshIntervalId = setInterval(async () => {
+            try {
+              console.log('Refreshing session...');
+              const { data, error } = await supabase.auth.refreshSession();
+              
+              if (error) {
+                console.error('Error refreshing session:', error);
+              } else if (data && data.session) {
+                console.log('Session refreshed successfully');
+              }
+            } catch (refreshError) {
+              console.error('Error during session refresh:', refreshError);
+            }
+          }, 10 * 60 * 1000); // Refresh every 10 minutes
+          
+          // Store the interval ID so we can clear it later
+          window._sessionRefreshInterval = refreshIntervalId;
         } else {
           localStorage.removeItem('supabase_token');
           console.log('Token removed from localStorage');
+          
+          // Clear the refresh interval when logged out
+          if (window._sessionRefreshInterval) {
+            clearInterval(window._sessionRefreshInterval);
+            window._sessionRefreshInterval = null;
+          }
         }
         
         // Clear profile state if user is signed out
@@ -300,6 +332,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (backendError) {
         // Log but continue with Supabase logout
         console.error('Backend logout failed:', backendError);
+      }
+      
+      // Clear any active session refresh interval
+      if (window._sessionRefreshInterval) {
+        clearInterval(window._sessionRefreshInterval);
+        window._sessionRefreshInterval = null;
       }
       
       // Then log out from Supabase

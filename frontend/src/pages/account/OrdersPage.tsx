@@ -70,14 +70,14 @@ const CancellationTimer = React.memo(({ order }: { order: Order }) => {
       const orderDate = new Date(order.created_at);
       const currentTime = new Date();
       const timeDifferenceMs = currentTime.getTime() - orderDate.getTime();
-      const timeDifferenceMinutes = timeDifferenceMs / (1000 * 60);
       
-      // The cancellation window is 5 minutes
-      const timeLeftSeconds = Math.max(0, 5 * 60 - timeDifferenceMs / 1000);
+      // The cancellation window is 5 minutes (300 seconds)
+      const cancellationWindowSeconds = 5 * 60;
+      const timeLeftSeconds = Math.max(0, cancellationWindowSeconds - timeDifferenceMs / 1000);
       setTimeLeft(Math.round(timeLeftSeconds));
       
       // Calculate percentage for progress bar (0-100)
-      const progressPercentage = 100 - (timeLeftSeconds / (5 * 60) * 100);
+      const progressPercentage = 100 - (timeLeftSeconds / cancellationWindowSeconds * 100);
       setPercentage(Math.min(100, Math.max(0, progressPercentage)));
       
       return timeLeftSeconds > 0;
@@ -113,11 +113,19 @@ const CancellationTimer = React.memo(({ order }: { order: Order }) => {
       <div className="flex items-center justify-between text-xs">
         <span className="text-muted-foreground flex items-center">
           <Timer className="h-3 w-3 mr-1" />
-          Time to cancel:
+          Time remaining to cancel:
         </span>
         <span className="font-medium">{formattedTime}</span>
       </div>
       <Progress value={percentage} className="h-1.5" />
+      <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+        <p>After time expires:</p>
+        <ul className="list-disc pl-4 space-y-0.5">
+          <li>Order status will change to "Processing"</li>
+          <li>Product stock will be reserved</li>
+          <li>Expected delivery in 3 days</li>
+        </ul>
+      </div>
     </div>
   );
 });

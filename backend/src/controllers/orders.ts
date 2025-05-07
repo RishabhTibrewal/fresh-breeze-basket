@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { supabase } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 import { stripeClient } from '../config';
-// import { scheduleOrderProcessing } from '../utils/orderScheduler';
+import { scheduleOrderProcessing } from '../utils/orderScheduler';
 
 // Get all orders (admin only)
 export const getOrders = async (req: Request, res: Response) => {
@@ -467,8 +467,8 @@ export const createOrder = async (req: Request, res: Response) => {
     }
 
     // Schedule order processing (status update to 'processing' after 5 minutes)
-    // scheduleOrderProcessing(order.id);
-    console.log(`Order scheduler disabled: would have scheduled order ${order.id} for automatic processing`);
+    scheduleOrderProcessing(order.id);
+    console.log(`Order ${order.id} scheduled for automatic processing after 5 minutes`);
 
     res.status(201).json({
       success: true,
@@ -500,6 +500,17 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     if (!validStatuses.includes(status)) {
       throw new ApiError(400, 'Invalid status');
     }
+
+    // Fetch the current order data to check previous status and inventory_updated flag
+    const { data: currentOrder, error: currentOrderError } = await supabase
+      .from('orders')
+      .select('*, order_items(product_id, quantity), status, inventory_updated')
+      .eq('id', id)
+      .single();
+
+    if (currentOrderError || !currentOrder) {
+      throw new ApiError(404, 'Order not found');
+    }
     
     // Prepare update data
     const updateData: any = {
@@ -510,6 +521,11 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     // Reset inventory_updated flag when cancelling an order
     if (status === 'cancelled') {
       updateData.inventory_updated = false;
+    }
+    
+    // Set inventory_updated flag when processing an order
+    if (status === 'processing') {
+      updateData.inventory_updated = true;
     }
     
     // Add tracking number if provided
@@ -534,9 +550,53 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       throw new ApiError(400, error.message);
     }
     
-    // If order is canceled, inventory is restored by the database trigger if needed
+    // If order is cancelled, inventory is restored by the database trigger if needed
     if (status === 'cancelled') {
       console.log(`Order ${id} cancelled by admin. Inventory restoration handled by database trigger if needed.`);
+    }
+    
+    // If status is being changed to 'processing' and inventory hasn't been updated yet,
+    // reduce product stock counts
+    if (status === 'processing' && currentOrder.status !== 'processing' && !currentOrder.inventory_updated) {
+      console.log(`Order ${id} status changed to processing. Reducing inventory...`);
+      
+      const orderItems = currentOrder.order_items;
+      
+      if (orderItems && orderItems.length > 0) {
+        // Process each item and update stock
+        for (const item of orderItems) {
+          try {
+            // First get the current stock
+            const { data: product, error: productError } = await supabase
+              .from('products')
+              .select('stock_count')
+              .eq('id', item.product_id)
+              .single();
+            
+            if (productError) {
+              console.error(`Error fetching product ${item.product_id}:`, productError);
+              continue;
+            }
+            
+            // Calculate new stock count
+            const newStockCount = Math.max(0, product.stock_count - item.quantity);
+            
+            // Update the product stock
+            const { error: updateError } = await supabase
+              .from('products')
+              .update({ stock_count: newStockCount })
+              .eq('id', item.product_id);
+            
+            if (updateError) {
+              console.error(`Error updating stock for product ${item.product_id}:`, updateError);
+            } else {
+              console.log(`Stock reduced for product ${item.product_id}: ${product.stock_count} -> ${newStockCount}`);
+            }
+          } catch (err) {
+            console.error(`Error processing item ${item.product_id}:`, err);
+          }
+        }
+      }
     }
     
     res.status(200).json({
@@ -592,6 +652,8 @@ export const cancelOrder = async (req: Request, res: Response) => {
       });
     }
     
+    console.log(`Cancelling order ${id} for user ${userId}`);
+    
     // Update order status to cancelled
     const { data: updatedOrder, error: updateError } = await supabase
       .from('orders')
@@ -608,10 +670,51 @@ export const cancelOrder = async (req: Request, res: Response) => {
       throw new ApiError(400, updateError.message);
     }
     
-    // The inventory restoration is now handled automatically by the database trigger
-    // This only performs logging for transparency
-    if (order.inventory_updated) {
-      console.log(`Order ${id} cancelled with inventory_updated=true. Inventory will be restored automatically.`);
+    // If the order was in processing status and inventory was already updated,
+    // we need to restore the inventory
+    if (order.status === 'processing' && order.inventory_updated) {
+      console.log(`Order ${id} was in processing state and had inventory updated. Restoring inventory...`);
+      
+      // Get the order items
+      const orderItems = order.order_items;
+      
+      if (orderItems && orderItems.length > 0) {
+        // Process each item and restore stock
+        for (const item of orderItems) {
+          try {
+            // First get the current stock
+            const { data: product, error: productError } = await supabase
+              .from('products')
+              .select('stock_count')
+              .eq('id', item.product_id)
+              .single();
+            
+            if (productError) {
+              console.error(`Error fetching product ${item.product_id}:`, productError);
+              continue;
+            }
+            
+            // Calculate restored stock count
+            const restoredStockCount = product.stock_count + item.quantity;
+            
+            // Update the product stock
+            const { error: updateError } = await supabase
+              .from('products')
+              .update({ stock_count: restoredStockCount })
+              .eq('id', item.product_id);
+            
+            if (updateError) {
+              console.error(`Error restoring stock for product ${item.product_id}:`, updateError);
+            } else {
+              console.log(`Stock restored for product ${item.product_id}: ${product.stock_count} -> ${restoredStockCount}`);
+            }
+          } catch (err) {
+            console.error(`Error processing item ${item.product_id}:`, err);
+          }
+        }
+      }
+    } else {
+      console.log(`Order ${id} cancelled with inventory_updated=${order.inventory_updated}`);
     }
     
     res.status(200).json({

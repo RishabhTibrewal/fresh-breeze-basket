@@ -37,20 +37,46 @@ export default function Products() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [maxPrice, setMaxPrice] = useState(1000);
+  const [showDiscountedOnly, setShowDiscountedOnly] = useState(false);
   
-  // Get category from URL if present
+  // Get parameters from URL if present
   const categoryFromUrl = searchParams.get('category');
   const urlSearchQuery = searchParams.get('search');
+  const discountParam = searchParams.get('discount');
+
+  // Fetch categories for filter
+  const { data: categories, isLoading: isLoadingCategories } = useQuery({
+    queryKey: ['categories'],
+    queryFn: categoriesService.getAll,
+  });
 
   // Set initial values from URL params
   useEffect(() => {
-    if (categoryFromUrl && !selectedCategories.includes(categoryFromUrl)) {
-      setSelectedCategories(prev => [...prev, categoryFromUrl]);
+    if (categories && categoryFromUrl) {
+      // Check if categoryFromUrl is a category ID
+      const categoryById = categories.find(c => c.id === categoryFromUrl);
+      
+      // Check if categoryFromUrl is a category name/slug
+      const categoryByName = categories.find(c => 
+        c.name.toLowerCase() === categoryFromUrl.toLowerCase() || 
+        (c.slug && c.slug.toLowerCase() === categoryFromUrl.toLowerCase())
+      );
+      
+      if (categoryById && !selectedCategories.includes(categoryById.id)) {
+        setSelectedCategories(prev => [...prev, categoryById.id]);
+      } else if (categoryByName && !selectedCategories.includes(categoryByName.id)) {
+        setSelectedCategories(prev => [...prev, categoryByName.id]);
+      }
     }
+    
     if (urlSearchQuery) {
       setSearchQuery(urlSearchQuery);
     }
-  }, [categoryFromUrl, urlSearchQuery]);
+    
+    if (discountParam === 'true') {
+      setShowDiscountedOnly(true);
+    }
+  }, [categoryFromUrl, urlSearchQuery, discountParam, categories, selectedCategories]);
 
   // Fetch products
   const { data: products, isLoading: isLoadingProducts, error: productsError } = useQuery({
@@ -68,12 +94,6 @@ export default function Products() {
       setPriceRange([0, highestPrice]);
     }
   }, [products]);
-
-  // Fetch categories for filter
-  const { data: categories, isLoading: isLoadingCategories } = useQuery({
-    queryKey: ['categories'],
-    queryFn: categoriesService.getAll,
-  });
 
   // Transform categories for the filter component
   const filterCategories: FilterCategory[] = React.useMemo(() => {
@@ -99,10 +119,13 @@ export default function Products() {
       const matchesSearch = !searchQuery || 
         product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (product.description && product.description.toLowerCase().includes(searchQuery.toLowerCase()));
+        
+      const matchesDiscount = !showDiscountedOnly || 
+        (product.sale_price && product.sale_price < product.price);
 
-      return matchesCategory && matchesPrice && matchesSearch;
+      return matchesCategory && matchesPrice && matchesSearch && matchesDiscount;
     });
-  }, [products, selectedCategories, priceRange, searchQuery]);
+  }, [products, selectedCategories, priceRange, searchQuery, showDiscountedOnly]);
 
   // Sort products
   const sortedProducts = React.useMemo(() => {
@@ -141,11 +164,16 @@ export default function Products() {
   const handlePriceRangeChange = (value: number[]) => {
     setPriceRange([value[0], value[1]]);
   };
+  
+  const handleDiscountToggle = () => {
+    setShowDiscountedOnly(prev => !prev);
+  };
 
   const handleResetFilters = () => {
     setSelectedCategories([]);
     setPriceRange([0, maxPrice]);
     setSearchQuery('');
+    setShowDiscountedOnly(false);
   };
 
   const handleApplyFilters = () => {
@@ -164,6 +192,10 @@ export default function Products() {
     
     if (sortBy !== 'newest') {
       params.set('sort', sortBy);
+    }
+    
+    if (showDiscountedOnly) {
+      params.set('discount', 'true');
     }
     
     setSearchParams(params);
@@ -186,9 +218,9 @@ export default function Products() {
         <div className="container mx-auto px-4">
           <div className="mb-8">
             <h1 className="text-3xl font-bold mb-2">Fresh Products</h1>
-            {selectedCategories.length > 0 && categories && (
-              <div className="flex flex-wrap gap-2 mt-2">
-                {selectedCategories.map(id => {
+            <div className="flex flex-wrap gap-2 mt-2">
+              {selectedCategories.length > 0 && categories && (
+                selectedCategories.map(id => {
                   const category = categories.find(c => c.id === id);
                   return category ? (
                     <Badge key={id} variant="secondary" className="py-1 px-3">
@@ -201,19 +233,30 @@ export default function Products() {
                       </button>
                     </Badge>
                   ) : null;
-                })}
-                {selectedCategories.length > 0 && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => setSelectedCategories([])}
-                    className="text-sm h-7"
+                })
+              )}
+              {showDiscountedOnly && (
+                <Badge variant="secondary" className="py-1 px-3 bg-primary text-white">
+                  Sale Items
+                  <button 
+                    onClick={handleDiscountToggle}
+                    className="ml-1"
                   >
-                    Clear filters
-                  </Button>
-                )}
-              </div>
-            )}
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              )}
+              {(selectedCategories.length > 0 || showDiscountedOnly) && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={handleResetFilters}
+                  className="text-sm h-7"
+                >
+                  Clear filters
+                </Button>
+              )}
+            </div>
           </div>
           
           <div className="flex flex-col md:flex-row gap-6">
@@ -229,6 +272,8 @@ export default function Products() {
                   maxPrice={maxPrice}
                   onReset={handleResetFilters}
                   onApply={handleApplyFilters}
+                  showDiscountedOnly={showDiscountedOnly}
+                  onDiscountToggle={handleDiscountToggle}
                 />
               )}
             </div>
@@ -299,6 +344,8 @@ export default function Products() {
                               maxPrice={maxPrice}
                               onReset={handleResetFilters}
                               onApply={handleApplyFilters}
+                              showDiscountedOnly={showDiscountedOnly}
+                              onDiscountToggle={handleDiscountToggle}
                               className="border-none shadow-none p-0"
                             />
                           </div>
@@ -316,7 +363,7 @@ export default function Products() {
               </div>
 
               {isLoadingProducts || isLoadingCategories ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
                   {[...Array(6)].map((_, index) => (
                     <Skeleton key={index} className="h-[400px] rounded-lg" />
                   ))}
@@ -342,7 +389,7 @@ export default function Products() {
                   <p className="text-sm text-gray-500 mb-4">
                     Showing {sortedProducts.length} products
                   </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
                     {sortedProducts.map((product) => (
                       <ProductCard key={product.id} product={product} />
                     ))}

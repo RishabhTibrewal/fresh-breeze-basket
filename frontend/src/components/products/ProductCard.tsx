@@ -20,7 +20,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   };
 
   return (
-    <div className="product-card flex flex-col bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow">
+    <div className="product-card flex flex-col bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow h-full">
       <Link to={`/products/${product.id}`} className="relative overflow-hidden group">
         <div className="relative aspect-square overflow-hidden rounded-lg">
           <img
@@ -38,38 +38,38 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         </div>
       </Link>
       
-      <div className="p-3 sm:p-4 flex-grow flex flex-col">
-        <div className="text-xs text-gray-500 mb-1">Origin: {product.origin}</div>
+      <div className="p-2 sm:p-3 flex-grow flex flex-col">
+        <div className="text-xs text-gray-500 mb-0.5">Origin: {product.origin}</div>
         <Link to={`/products/${product.id}`} className="hover:text-primary">
-          <h3 className="font-semibold text-base sm:text-lg mb-2 line-clamp-2">{product.name}</h3>
+          <h3 className="font-semibold text-sm sm:text-base mb-1.5 line-clamp-2">{product.name}</h3>
         </Link>
         
         <div className="mt-auto">
-          <div className="flex items-baseline mb-3">
+          <div className="flex items-baseline mb-2">
             {product.sale_price ? (
               <>
-                <span className="text-accent-sale font-bold text-base sm:text-lg">AED {product.sale_price.toFixed(2)}</span>
-                <span className="ml-2 text-gray-500 line-through text-sm">AED {product.price.toFixed(2)}</span>
-                <span className="ml-1 text-sm text-gray-600">/{product.unit_type}</span>
+                <span className="text-accent-sale font-bold text-sm sm:text-base">AED {product.sale_price.toFixed(2)}</span>
+                <span className="ml-1.5 text-gray-500 line-through text-xs">AED {product.price.toFixed(2)}</span>
+                <span className="ml-1 text-xs text-gray-600">/{product.unit_type}</span>
               </>
             ) : (
               <>
-                <span className="font-bold text-base sm:text-lg">AED {product.price.toFixed(2)}</span>
-                <span className="ml-1 text-sm text-gray-600">/{product.unit_type}</span>
+                <span className="font-bold text-sm sm:text-base">AED {product.price.toFixed(2)}</span>
+                <span className="ml-1 text-xs text-gray-600">/{product.unit_type}</span>
               </>
             )}
           </div>
           
-          <div className="flex space-x-2">
+          <div className="flex space-x-1.5">
             <button 
               onClick={handleAddToCart}
-              className="flex-1 bg-primary text-white rounded-md py-2 px-3 flex items-center justify-center text-sm hover:bg-opacity-90 transition-colors"
+              className="flex-1 bg-primary text-white rounded-md py-1.5 px-2 flex items-center justify-center text-xs sm:text-sm hover:bg-opacity-90 transition-colors"
             >
-              <ShoppingCart className="h-4 w-4 mr-1" />
+              <ShoppingCart className="h-3 w-3 mr-1" />
               Add to Cart
             </button>
-            <button className="bg-gray-100 hover:bg-gray-200 rounded-md p-2 transition-colors">
-              <Heart className="h-4 w-4 text-gray-600" />
+            <button className="bg-gray-100 hover:bg-gray-200 rounded-md p-1.5 transition-colors">
+              <Heart className="h-3 w-3 text-gray-600" />
             </button>
           </div>
         </div>

@@ -714,3 +714,53 @@ export const logout = async (req: Request, res: Response) => {
     });
   }
 };
+
+// Function to check admin status
+export const checkAdminStatus = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user.id;
+    
+    // Get user's profile
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+      
+    if (profileError) {
+      console.error('Error fetching profile for admin check:', profileError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve profile'
+      });
+    }
+    
+    // Check admin status using RPC function
+    const { data: isAdminRpc, error: rpcError } = await supabase.rpc('is_admin', { user_id: userId });
+    
+    if (rpcError) {
+      console.error('Error in is_admin RPC call:', rpcError);
+    }
+    
+    // Direct role check
+    const isAdmin = profile?.role === 'admin';
+    
+    return res.status(200).json({
+      success: true,
+      data: {
+        userId,
+        email: req.user.email,
+        profile,
+        isAdmin,
+        isAdminRpc,
+        profileRole: profile?.role || 'none'
+      }
+    });
+  } catch (error) {
+    console.error('Error in checkAdminStatus:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Error checking admin status'
+    });
+  }
+};

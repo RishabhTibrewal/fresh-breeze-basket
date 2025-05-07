@@ -66,4 +66,9 @@ export const authService = {
     const { data } = await apiClient.put<UserProfile>('/auth/profile', profileData);
     return data;
   },
+
+  async checkAdminStatus(): Promise<any> {
+    const { data } = await apiClient.get('/auth/check-admin');
+    return data;
+  },
 }; 

@@ -17,6 +17,8 @@ export interface Order {
   userId: string;
   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
   total_amount: number;
+  tax_amount?: number;
+  tax_rate?: number;
   items: OrderItem[];
   shippingAddress: {
     id: string;
@@ -102,6 +104,8 @@ export const ordersService = {
       id: order.id,
       status: order.status,
       total_amount: order.total_amount,
+      tax_amount: order.tax_amount,
+      tax_rate: order.tax_rate,
       created_at: order.created_at,
       items: order.order_items || [],
       userId: order.user_id,
@@ -130,6 +134,8 @@ export const ordersService = {
       id: order.id,
       status: order.status,
       total_amount: order.total_amount,
+      tax_amount: order.tax_amount,
+      tax_rate: order.tax_rate,
       created_at: order.created_at,
       items: order.order_items || [],
       userId: order.user_id,
@@ -153,6 +159,8 @@ export const ordersService = {
       id: order.id,
       status: order.status,
       total_amount: order.total_amount,
+      tax_amount: order.tax_amount,
+      tax_rate: order.tax_rate,
       created_at: order.created_at,
       items: order.order_items || [],
       userId: order.user_id,

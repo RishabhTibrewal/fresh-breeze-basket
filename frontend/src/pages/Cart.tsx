@@ -59,10 +59,23 @@ const Cart = () => {
                             
                             <div className="mt-1 text-gray-600">
                               <span className="text-sm">Price: </span>
-                              <span className="font-medium">
-                                AED {(item.salePrice || item.price).toFixed(2)}
+                              {item.sale_price ? (
+                                <>
+                                  <span className="font-medium text-red-500">
+                                    AED {item.sale_price.toFixed(2)}
+                                  </span>
+                                  <span className="text-gray-500 text-sm line-through ml-1">
+                                    AED {item.price.toFixed(2)}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="font-medium">
+                                  AED {item.price.toFixed(2)}
+                                </span>
+                              )}
+                              <span className="text-gray-500 ml-1">
+                                /{item.unit} {item.unit_type}
                               </span>
-                              <span className="text-gray-500">/{item.unit}</span>
                             </div>
                             
                             <div className="flex items-center justify-between mt-4">
@@ -85,7 +98,7 @@ const Cart = () => {
                               
                               <div className="flex items-end flex-col">
                                 <div className="font-bold">
-                                  AED {((item.salePrice || item.price) * item.quantity).toFixed(2)}
+                                  AED {((item.sale_price || item.price) * item.quantity).toFixed(2)}
                                 </div>
                                 <button 
                                   onClick={() => removeFromCart(item.id)}

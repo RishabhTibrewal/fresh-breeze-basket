@@ -131,7 +131,9 @@ export default function CheckoutPage() {
       // Calculate total amount with latest prices
       const subtotal = items.reduce((total, item) => total + (item.price * item.quantity), 0);
       const shippingCost = subtotal >= 100 ? 0 : 10;
-      const totalAmount = subtotal + shippingCost;
+      const taxRate = 0.05; // 5% tax rate
+      const taxAmount = subtotal * taxRate;
+      const totalAmount = subtotal + shippingCost + taxAmount;
       
       // Prepare order data with only IDs, explicitly not including address objects
       const orderData = {
@@ -139,7 +141,9 @@ export default function CheckoutPage() {
         shipping_address_id: selectedAddressId,
         billing_address_id: selectedAddressId, // Using same address for billing and shipping
         payment_method: 'card', // Default to card payment
-        total_amount: totalAmount
+        total_amount: totalAmount,
+        tax_amount: taxAmount,
+        tax_rate: taxRate
       };
 
       // Log the data being sent to the backend
@@ -319,11 +323,19 @@ export default function CheckoutPage() {
                         <div className="flex-1">
                           <div className="font-medium">{item.name}</div>
                           <div className="text-sm text-gray-500">
-                            {item.quantity} x AED {(item.salePrice || item.price).toFixed(2)}
+                            {item.quantity} x {item.sale_price ? (
+                              <>
+                                <span className="text-red-500">AED {item.sale_price.toFixed(2)}</span>
+                                <span className="line-through ml-1 text-gray-400">AED {item.price.toFixed(2)}</span>
+                              </>
+                            ) : (
+                              <span>AED {item.price.toFixed(2)}</span>
+                            )}
+                            <span className="ml-1">/{item.unit} {item.unit_type}</span>
                           </div>
                         </div>
                         <div className="text-right font-medium">
-                          AED {((item.salePrice || item.price) * item.quantity).toFixed(2)}
+                          AED {((item.sale_price || item.price) * item.quantity).toFixed(2)}
                         </div>
                       </div>
                     ))}
@@ -343,13 +355,31 @@ export default function CheckoutPage() {
                         {cartState.subtotal >= 100 ? "Free" : "AED 10.00"}
                       </span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Tax (5%)</span>
+                      <span className="font-medium">AED {(cartState.subtotal * 0.05).toFixed(2)}</span>
+                    </div>
                     <Separator />
                     <div className="flex justify-between text-lg font-bold">
                       <span>Total</span>
                       <span>
-                        AED {(cartState.subtotal + (cartState.subtotal >= 100 ? 0 : 10)).toFixed(2)}
+                        AED {(cartState.subtotal + (cartState.subtotal >= 100 ? 0 : 10) + (cartState.subtotal * 0.05)).toFixed(2)}
                       </span>
                     </div>
+                  </div>
+
+                  {/* Order Processing Information */}
+                  <div className="mt-4 p-3 bg-blue-50 rounded-md">
+                    <h4 className="text-sm font-medium text-blue-800 mb-1">Order Processing</h4>
+                    <p className="text-xs text-blue-700">
+                      • Orders can be cancelled within 5 minutes of placing
+                    </p>
+                    <p className="text-xs text-blue-700">
+                      • After 5 minutes, your order status changes to "Processing"
+                    </p>
+                    <p className="text-xs text-blue-700">
+                      • Products are reserved and delivery is scheduled for 3 days later
+                    </p>
                   </div>
                 </CardContent>
                 <CardFooter>
