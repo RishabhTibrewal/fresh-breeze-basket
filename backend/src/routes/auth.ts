@@ -8,7 +8,8 @@ import {
   addAddress,
   getAddresses,
   deleteAddress,
-  updateAddress
+  updateAddress,
+  checkAdminStatus
 } from '../controllers/auth';
 import { protect } from '../middleware/auth';
 
@@ -26,5 +27,6 @@ router.post('/addresses', protect, addAddress);
 router.get('/addresses', protect, getAddresses);
 router.put('/addresses/:id', protect, updateAddress);
 router.delete('/addresses/:id', protect, deleteAddress);
+router.get('/check-admin', protect, checkAdminStatus);
 
 export default router; 

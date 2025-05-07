@@ -9,8 +9,9 @@ interface CartItem {
   id: string;
   name: string;
   price: number;
-  salePrice?: number;
+  sale_price?: number;
   unit: number;
+  unit_type?: string;
   image?: string;
   quantity: number;
 }
@@ -65,7 +66,7 @@ const CartContext = createContext<{
 const calculateCartTotals = (items: CartItem[]): { totalItems: number; subtotal: number } => {
   const totalItems = items.reduce((total, item) => total + item.quantity, 0);
   const subtotal = items.reduce(
-    (total, item) => total + (item.salePrice || item.price) * item.quantity,
+    (total, item) => total + (item.sale_price || item.price) * item.quantity,
     0
   );
   return { totalItems, subtotal };
@@ -76,13 +77,17 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
   switch (action.type) {
     case 'ADD_ITEM': {
       const { product, quantity, cartItemId } = action.payload;
+      
       const qty = typeof quantity === 'string' ? parseInt(quantity, 10) : quantity;
       const existingItem = state.items.find(item => item.id === product.id);
 
-      // Map snake_case fields to camelCase for CartItem
-      const salePrice = (product as any).salePrice !== undefined ? (product as any).salePrice : (product as any).sale_price;
+      // Map snake_case fields for CartItem
+      const salePrice = product.sale_price && product.sale_price > 0 ? Number(product.sale_price) : null;
       const image = (product as any).image !== undefined ? (product as any).image : (product as any).image_url;
-
+      
+      // Make sure unit has a valid value
+      const unit = product.unit && Number(product.unit) > 0 ? Number(product.unit) : 1;
+      
       if (existingItem) {
         const updatedItems = state.items.map(item =>
           item.id === product.id
@@ -93,7 +98,7 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
           ...state,
           items: updatedItems,
           totalItems: updatedItems.reduce((sum, item) => sum + item.quantity, 0),
-          subtotal: updatedItems.reduce((sum, item) => sum + (item.salePrice || item.price) * item.quantity, 0),
+          subtotal: updatedItems.reduce((sum, item) => sum + (item.sale_price || item.price) * item.quantity, 0),
         };
       }
 
@@ -101,18 +106,19 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
         id: product.id,
         name: product.name,
         price: product.price,
-        salePrice: salePrice,
-        unit: Number(product.unit),
+        sale_price: salePrice,
+        unit: unit,
+        unit_type: product.unit_type,
         image: image,
         quantity: Number(qty),
       };
-
+      
       const updatedItems = [...state.items, newItem];
       return {
         ...state,
         items: updatedItems,
         totalItems: updatedItems.reduce((sum, item) => sum + item.quantity, 0),
-        subtotal: updatedItems.reduce((sum, item) => sum + (item.salePrice || item.price) * item.quantity, 0),
+        subtotal: updatedItems.reduce((sum, item) => sum + (item.sale_price || item.price) * item.quantity, 0),
       };
     }
 
@@ -122,7 +128,7 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
         ...state,
         items: updatedItems,
         totalItems: updatedItems.reduce((sum, item) => sum + item.quantity, 0),
-        subtotal: updatedItems.reduce((sum, item) => sum + (item.salePrice || item.price) * item.quantity, 0),
+        subtotal: updatedItems.reduce((sum, item) => sum + (item.sale_price || item.price) * item.quantity, 0),
       };
     }
 
@@ -139,7 +145,7 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
         ...state,
         items: updatedItems,
         totalItems: updatedItems.reduce((sum, item) => sum + item.quantity, 0),
-        subtotal: updatedItems.reduce((sum, item) => sum + (item.salePrice || item.price) * item.quantity, 0),
+        subtotal: updatedItems.reduce((sum, item) => sum + (item.sale_price || item.price) * item.quantity, 0),
       };
     }
 
@@ -177,12 +183,24 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           dispatch({ type: 'CLEAR_CART' });
           parsed.items.forEach((item: any) => {
             const quantity = typeof item.quantity === 'string' ? parseInt(item.quantity, 10) : item.quantity;
-            dispatch({ type: 'ADD_ITEM', payload: { product: item, quantity, cartItemId: item.id } });
+            
+            // Fix the cart item before dispatching
+            const fixedItem = {
+              ...item,
+              // Only set sale_price if it exists and is greater than 0
+              sale_price: item.sale_price && Number(item.sale_price) > 0 ? Number(item.sale_price) : null,
+              // Make sure unit has a valid value
+              unit: item.unit && Number(item.unit) > 0 ? Number(item.unit) : 1
+            };
+            
+            dispatch({ type: 'ADD_ITEM', payload: { product: fixedItem, quantity, cartItemId: item.id } });
           });
         }
-      } catch {}
+      } catch (e) {
+        console.error("Error loading cart from localStorage:", e);
+      }
     }
-  }, []);
+  }, [dispatch]);
 
   // Helper to save cart to localStorage
   useEffect(() => {
@@ -224,8 +242,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: item.products.id,
             name: item.products.name || 'Unknown Product',
             price: Number(item.products.price),
-            sale_price: Number(item.products.sale_price || 0),
-            unit: 0, // Backend doesn't include this, using default
+            sale_price: item.products.sale_price && Number(item.products.sale_price) > 0 ? Number(item.products.sale_price) : null,
+            unit: item.products.unit && Number(item.products.unit) > 0 ? Number(item.products.unit) : 1,
+            unit_type: item.products.unit_type || '',
             image_url: item.products.image_url,
             description: item.products.description || '',
             category_id: item.products.category_id || '',
@@ -235,7 +254,6 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             created_at: '',
             updated_at: '',
             stock_count: 0,
-            unit_type: '',
             nutritional_info: '',
             origin: '',
             best_before: '',

@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Mail, Phone, MapPin, Facebook, Instagram, Twitter } from 'lucide-react';
-import { categoriesService, Category } from '@/api/categories';
+import { categoriesService } from '@/api/categories';
 
-const Footer: React.FC = () => {
+const Footer = () => {
   const currentYear = new Date().getFullYear();
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [categories, setCategories] = useState([]);
 
   // Fetch categories when component mounts
   useEffect(() => {
@@ -22,7 +22,7 @@ const Footer: React.FC = () => {
   }, []);
 
   // Find category IDs by name (case insensitive)
-  const findCategoryId = (name: string): string | null => {
+  const findCategoryId = (name) => {
     const category = categories.find(c => 
       c.name.toLowerCase() === name.toLowerCase()
     );
@@ -152,4 +152,4 @@ const Footer: React.FC = () => {
   );
 };
 
-export default Footer;
+export default Footer; 

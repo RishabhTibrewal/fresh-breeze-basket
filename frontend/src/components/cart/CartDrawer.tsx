@@ -19,7 +19,7 @@ const CartDrawer = () => {
       )}
       
       {/* Cart drawer */}
-      <div className={`fixed top-0 right-0 h-full w-full sm:w-96 bg-white shadow-lg z-50 transform transition-transform duration-300 ease-in-out ${
+      <div className={`fixed top-0 right-0 h-full w-[85%] sm:w-80 md:w-96 bg-white shadow-lg z-50 transform transition-transform duration-300 ease-in-out ${
         isCartOpen ? 'translate-x-0' : 'translate-x-full'
       }`}>
         <div className="flex flex-col h-full">
@@ -72,10 +72,21 @@ const CartDrawer = () => {
                       </Link>
                       
                       <div className="flex items-center mt-1 text-sm">
-                        <span className="font-semibold">
-                          AED {(item.salePrice || item.price).toFixed(2)}
-                        </span>
-                        <span className="text-gray-500 ml-1">/{item.unit}</span>
+                        {item.sale_price ? (
+                          <>
+                            <span className="font-semibold text-red-500">
+                              AED {item.sale_price.toFixed(2)}
+                            </span>
+                            <span className="text-gray-500 line-through ml-1 text-xs">
+                              AED {item.price.toFixed(2)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="font-semibold">
+                            AED {item.price.toFixed(2)}
+                          </span>
+                        )}
+                        <span className="text-gray-500 ml-1">/{item.unit} {item.unit_type}</span>
                       </div>
                       
                       <div className="flex items-center justify-between mt-2">

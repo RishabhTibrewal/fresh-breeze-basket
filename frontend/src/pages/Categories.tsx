@@ -30,8 +30,8 @@ export default function Categories() {
         </div>
 
         {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8" role="status" aria-label="Loading categories">
-            {[...Array(6)].map((_, index) => (
+          <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 lg:gap-8" role="status" aria-label="Loading categories">
+            {[...Array(8)].map((_, index) => (
               <Skeleton key={index} className="h-64 rounded-lg" />
             ))}
           </div>
@@ -41,7 +41,7 @@ export default function Categories() {
             message="Please try refreshing the page or contact support if the problem persists." 
           />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 lg:gap-8">
             {categories?.map((category) => (
               <CategoryCard key={category.id} category={category} />
             ))}

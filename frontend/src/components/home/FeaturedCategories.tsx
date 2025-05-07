@@ -1,11 +1,17 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCategories } from '@/api/categories';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorMessage } from '@/components/ui/error-message';
-import { ExternalLink, ChevronRight } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { ChevronRight } from 'lucide-react';
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
 
 // Define background colors for categories (will cycle through these)
 const CATEGORY_COLORS = [
@@ -22,98 +28,100 @@ const FeaturedCategories = () => {
     queryKey: ['categories'],
     queryFn: fetchCategories,
   });
+  
+  const carouselApi = useRef<{ scrollNext: () => void } | null>(null);
+
+  // Auto-slide carousel every 3 seconds
+  useEffect(() => {
+    if (!carouselApi.current) return;
+    
+    const interval = setInterval(() => {
+      if (carouselApi.current) {
+        carouselApi.current.scrollNext();
+      }
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [carouselApi]);
 
   return (
-    <section className="py-12 md:py-16 bg-gray-50">
-      <div className="container mx-auto px-4">
-        <div className="text-center mb-10">
-          <h2 className="text-3xl font-bold text-gray-900 mb-3">Shop by Category</h2>
+    <section className="py-16 pb-8 md:py-20 md:pb-10 bg-gray-50 overflow-hidden">
+      <div className="container mx-auto">
+        <div className="text-center mb-14 px-4">
+          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">Shop by Category</h2>
           <p className="text-gray-600 max-w-2xl mx-auto">
             Explore our selection of fresh, premium quality products sorted by category to make your shopping experience easier.
           </p>
         </div>
         
         {isLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" role="status" aria-label="Loading categories">
+          <div className="flex justify-center gap-6 px-4">
             {[...Array(4)].map((_, index) => (
-              <Skeleton key={index} className="h-64 rounded-lg" />
+              <div key={index} className="flex flex-col items-center">
+                <Skeleton className="h-44 w-44 md:h-56 md:w-56 lg:h-64 lg:w-64 rounded-full mb-5" />
+                <Skeleton className="h-6 w-28 rounded" />
+              </div>
             ))}
           </div>
         ) : error ? (
-          <ErrorMessage 
-            title="Failed to load categories" 
-            message="We couldn't load the product categories. Please try refreshing the page." 
-          />
+          <div className="px-4">
+            <ErrorMessage 
+              title="Failed to load categories" 
+              message="We couldn't load the product categories. Please try refreshing the page." 
+            />
+          </div>
         ) : (
           <>
-            {/* Featured Main Categories - Top Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-              {categories?.slice(0, 2).map((category, index) => (
-                <Link 
-                  key={category.id} 
-                  to={`/products?category=${category.id}`}
-                  className="group relative overflow-hidden rounded-xl shadow-md transition-all duration-300 hover:shadow-lg flex flex-col"
-                >
-                  <div className="aspect-[16/9] overflow-hidden">
-                    <img
-                      src={category.image_url || '/placeholder.svg'}
-                      alt={category.name}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    />
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent flex flex-col justify-end p-6">
-                    <h3 className="text-2xl font-bold text-white mb-2">{category.name}</h3>
-                    <p className="text-white/90 mb-4">
-                      Browse our selection of premium {category.name.toLowerCase()}
-                    </p>
-                    <div className="flex items-center text-white bg-primary/80 rounded-full py-2 px-4 w-fit transform transition-transform group-hover:translate-x-2">
-                      <span className="mr-2">Shop Now</span>
-                      <ChevronRight size={16} />
-                    </div>
-                  </div>
-                </Link>
-              ))}
-            </div>
-            
-            {/* Smaller Categories - Bottom Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {categories?.slice(2).map((category, index) => (
-                <Link 
-                  key={category.id} 
-                  to={`/products?category=${category.id}`}
-                  className={cn(
-                    "group rounded-lg shadow-sm p-5 transition-all duration-300 hover:shadow-md",
-                    CATEGORY_COLORS[index % CATEGORY_COLORS.length]
-                  )}
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="w-14 h-14 rounded-full overflow-hidden bg-white p-1">
-                      <img
-                        src={category.image_url || '/placeholder.svg'}
-                        alt={category.name}
-                        className="w-full h-full object-cover rounded-full"
-                      />
-                    </div>
-                    <ExternalLink size={16} className="text-gray-400 group-hover:text-primary transition-colors" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-1 group-hover:text-primary transition-colors">
-                    {category.name}
-                  </h3>
-                  <p className="text-sm text-gray-600">
-                    {category.description || `Explore our ${category.name.toLowerCase()} collection`}
-                  </p>
-                </Link>
-              ))}
+            {/* Categories Carousel */}
+            <div className="relative px-4">
+              <Carousel 
+                opts={{
+                  align: "start",
+                  loop: true,
+                  slidesToScroll: 4,
+                  containScroll: "trimSnaps"
+                }}
+                setApi={(api) => {
+                  carouselApi.current = api;
+                }}
+                className="w-full"
+              >
+                <CarouselContent>
+                  {categories?.map((category, index) => (
+                    <CarouselItem key={category.id} className="basis-full sm:basis-1/2 md:basis-1/4 lg:basis-1/4">
+                      <Link 
+                        to={`/products?category=${category.id}`}
+                        className="flex flex-col items-center group"
+                      >
+                        <div className={`w-44 h-44 sm:w-52 sm:h-52 md:w-56 md:h-56 lg:w-64 lg:h-64 rounded-full overflow-hidden flex items-center justify-center mx-auto mb-5 transition-transform duration-300 group-hover:scale-105 shadow-sm ${CATEGORY_COLORS[index % CATEGORY_COLORS.length]}`}>
+                          <div className="w-40 h-40 sm:w-48 sm:h-48 md:w-52 md:h-52 lg:w-60 lg:h-60 rounded-full overflow-hidden border-4 border-white">
+                            <img
+                              src={category.image_url || '/placeholder.svg'}
+                              alt={category.name}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        </div>
+                        <h3 className="text-center text-xl font-medium text-gray-800 group-hover:text-primary transition-colors">
+                          {category.name}
+                        </h3>
+                      </Link>
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+                <CarouselPrevious className="-left-3 md:left-2" />
+                <CarouselNext className="-right-3 md:right-2" />
+              </Carousel>
             </div>
             
             {/* View All Categories Link */}
             <div className="mt-10 text-center">
               <Link 
                 to="/categories" 
-                className="inline-flex items-center text-primary hover:text-primary/80 font-medium"
+                className="inline-flex items-center text-lg text-primary hover:text-primary/80 font-medium"
               >
                 View All Categories
-                <ChevronRight size={16} className="ml-1" />
+                <ChevronRight size={18} className="ml-1" />
               </Link>
             </div>
           </>

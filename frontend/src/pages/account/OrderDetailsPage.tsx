@@ -321,14 +321,18 @@ export default function OrderDetailsPage() {
 
   // Memoize order summary calculations
   const orderSummary = useMemo(() => {
-    if (!order) return { subtotal: 0, total: 0 };
+    if (!order) return { subtotal: 0, total: 0, tax: 0 };
     
     const subtotal = order.items.reduce((sum: number, item: any) => {
       return sum + (item.quantity * item.unit_price);
     }, 0);
     
+    // Calculate tax - either use the tax_amount from the API or calculate 5%
+    const tax = order.tax_amount || subtotal * 0.05;
+    
     return {
       subtotal,
+      tax,
       total: order.total_amount
     };
   }, [order]);
@@ -531,11 +535,15 @@ export default function OrderDetailsPage() {
                   <span>AED {orderSummary.subtotal.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Tax (5%)</span>
+                  <span>AED {orderSummary.tax.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Shipping</span>
                   <span>
                     {orderSummary.subtotal >= 100 ? 
                       'Free' : 
-                      `AED ${(orderSummary.total - orderSummary.subtotal).toFixed(2)}`
+                      `AED ${(orderSummary.total - orderSummary.subtotal - orderSummary.tax).toFixed(2)}`
                     }
                   </span>
                 </div>

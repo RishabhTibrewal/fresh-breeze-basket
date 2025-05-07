@@ -25,7 +25,7 @@ import express, { Request } from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import { errorHandler } from './middleware/error';
-// import { initOrderScheduler } from './utils/orderScheduler';
+import { initOrderScheduler } from './utils/orderScheduler';
 
 // Extend Express Request type to include user
 declare global {
@@ -42,7 +42,8 @@ import {
   productRoutes,
   orderRoutes,
   paymentRoutes,
-  categoryRoutes
+  categoryRoutes,
+  adminRoutes
 } from './routes';
 import productImagesRouter from './routes/productImages';
 import inventoryRouter from './routes/inventory';
@@ -116,12 +117,13 @@ app.get('/health', (req, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/categories', categoryRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
-app.use('/api/categories', categoryRoutes);
 app.use('/api/product-images', productImagesRouter);
 app.use('/api/inventory', inventoryRouter);
 app.use('/api/cart', cartRouter);
+app.use('/api/admin', adminRoutes);
 
 // Final error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -156,9 +158,9 @@ if (process.env.NODE_ENV !== 'test') {
     `);
     
     // Initialize the order scheduler
-    // initOrderScheduler().catch(err => {
-    //   console.error('Failed to initialize order scheduler:', err);
-    // });
+    initOrderScheduler().catch(err => {
+      console.error('Failed to initialize order scheduler:', err);
+    });
   });
   
   // Handle server exceptions
