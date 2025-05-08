@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
 import { CartProvider } from "@/contexts/CartContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { CategoryProvider } from "@/contexts/CategoryContext";
@@ -28,6 +28,7 @@ import OrdersPage from "./pages/account/OrdersPage";
 import PaymentMethodsPage from "./pages/account/PaymentMethodsPage";
 import SettingsPage from "./pages/account/SettingsPage";
 import OrderDetailsPage from "./pages/account/OrderDetailsPage";
+import CustomerProfilePage from "./pages/account/CustomerProfilePage";
 
 // Admin Dashboard Routes
 import AdminDashboard from "./pages/admin/Dashboard";
@@ -40,8 +41,16 @@ import AdminOrderDetails from "./pages/admin/AdminOrderDetails";
 import CustomerList from "./pages/admin/CustomerList";
 import AdminCheck from "./pages/admin/AdminCheck";
 
+// Sales Executive Routes
+import SalesLayout from "./layouts/SalesLayout";
+import SalesDashboard from "./pages/sales/Dashboard";
+import Customers from "./pages/sales/Customers";
+import CustomerOrders from "./pages/sales/CustomerOrders";
+import CreateOrder from "./pages/sales/CreateOrder";
+import SalesProtectedRoute from "./components/auth/SalesProtectedRoute";
+
 // Create a new QueryClient instance inside the component
-const App = () => {
+const App: React.FC = () => {
   const queryClient = new QueryClient();
   
   return (
@@ -70,6 +79,7 @@ const App = () => {
                   {/* Protected Routes */}
                   <Route path="/account" element={<ProtectedRoute><AccountLayout /></ProtectedRoute>}>
                     <Route index element={<ProfilePage />} />
+                    <Route path="customer" element={<CustomerProfilePage />} />
                     <Route path="address" element={<AddressPage />} />
                     <Route path="orders" element={<OrdersPage />} />
                     <Route path="orders/:id" element={<OrderDetailsPage />} />
@@ -91,6 +101,25 @@ const App = () => {
                     <Route path="customers" element={<CustomerList />} />
                     <Route path="settings" element={<div>Admin Settings</div>} />
                     <Route path="check" element={<AdminCheck />} />
+                  </Route>
+                  
+                  {/* Sales Executive Routes */}
+                  <Route path="/sales" element={
+                    <SalesProtectedRoute>
+                      <SalesLayout>
+                        <Outlet />
+                      </SalesLayout>
+                    </SalesProtectedRoute>
+                  }>
+                    <Route index element={<SalesDashboard />} />
+                    <Route path="customers" element={<Customers />} />
+                    <Route path="customers/:customerId/orders" element={<CustomerOrders />} />
+                    <Route path="orders/create" element={<CreateOrder />} />
+                    <Route path="orders/:orderId" element={<div>Order Details</div>} />
+                    <Route path="orders/:orderId/edit" element={<div>Edit Order</div>} />
+                    <Route path="orders" element={<div>Orders Management</div>} />
+                    <Route path="credit" element={<div>Credit Management</div>} />
+                    <Route path="settings" element={<div>Sales Settings</div>} />
                   </Route>
                   
                   {/* Catch-all route */}

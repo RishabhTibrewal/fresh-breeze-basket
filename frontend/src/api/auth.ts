@@ -34,6 +34,10 @@ export interface UpdateProfileData {
   postalCode?: string;
 }
 
+export interface UpdateRoleData {
+  role: 'user' | 'admin' | 'sales';
+}
+
 export interface AuthResponse {
   token: string;
   user: UserProfile;
@@ -69,6 +73,11 @@ export const authService = {
 
   async checkAdminStatus(): Promise<any> {
     const { data } = await apiClient.get('/auth/check-admin');
+    return data;
+  },
+
+  async updateRole(roleData: UpdateRoleData): Promise<UserProfile> {
+    const { data } = await apiClient.put<UserProfile>('/auth/role', roleData);
     return data;
   },
 }; 

@@ -9,7 +9,7 @@ export interface User {
   last_name: string | null;
   phone: string | null;
   avatar_url: string | null;
-  role: 'user' | 'admin';
+  role: 'user' | 'admin' | 'sales';
   created_at: string;
   updated_at: string;
 }
@@ -98,6 +98,33 @@ export interface Payment {
   created_at: string;
 }
 
+export interface Customer {
+  id: string;
+  user_id: string;
+  sales_executive_id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  trn_number: string | null;
+  credit_period_days: number;
+  credit_limit: number;
+  current_credit: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface creditPeriods {
+  id: string;
+  customer_id: string;
+  amount: number;
+  period: number;
+  start_date: string;
+  end_date: string;
+  type: 'credit' | 'payment';
+  description: string | null;
+  created_at: string;
+}
+
 // Database type definition for Supabase
 export interface Database {
   public: {
@@ -136,6 +163,16 @@ export interface Database {
         Row: Payment;
         Insert: Omit<Payment, 'id' | 'created_at'>;
         Update: Partial<Omit<Payment, 'id'>>;
+      };
+      customers: {
+        Row: Customer;
+        Insert: Omit<Customer, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<Customer, 'id'>>;
+      };
+      credit_periods: {
+        Row: creditPeriods;
+        Insert: Omit<creditPeriods, 'id' | 'created_at'>;
+        Update: Partial<Omit<creditPeriods, 'id'>>;
       };
     };
     Views: {

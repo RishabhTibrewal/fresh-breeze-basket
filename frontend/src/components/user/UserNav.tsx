@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from '@/contexts/AuthContext';
-import { LogOut, User, ShoppingBag, Settings } from 'lucide-react';
+import { LogOut, User, ShoppingBag, Settings, LayoutDashboard } from 'lucide-react';
 
 export function UserNav() {
   const { user, profile, signOut, isAdmin } = useAuth();
@@ -74,8 +74,16 @@ export function UserNav() {
         {isAdmin && (
           <DropdownMenuItem asChild>
             <Link to="/admin" className="flex items-center">
-              <Settings className="mr-2 h-4 w-4" />
+              <LayoutDashboard className="mr-2 h-4 w-4" />
               <span>Admin Dashboard</span>
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {profile?.role === 'sales' && (
+          <DropdownMenuItem asChild>
+            <Link to="/sales" className="flex items-center">
+              <LayoutDashboard className="mr-2 h-4 w-4" />
+              <span>Sales Dashboard</span>
             </Link>
           </DropdownMenuItem>
         )}

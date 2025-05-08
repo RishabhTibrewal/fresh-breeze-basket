@@ -106,4 +106,59 @@ export const adminOnly = async (req: Request, res: Response, next: NextFunction)
   } catch (error) {
     next(error);
   }
+};
+
+export const isAuthenticated = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'No token provided' });
+    }
+
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    res.status(500).json({ error: 'Authentication failed' });
+  }
+};
+
+export const isAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', req.user?.id)
+      .single();
+
+    if (error || !profile || profile.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    next();
+  } catch (error) {
+    res.status(500).json({ error: 'Authorization failed' });
+  }
+};
+
+export const isSalesExecutive = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', req.user?.id)
+      .single();
+
+    if (error || !profile || profile.role !== 'sales') {
+      return res.status(403).json({ error: 'Sales executive access required' });
+    }
+
+    next();
+  } catch (error) {
+    res.status(500).json({ error: 'Authorization failed' });
+  }
 }; 
