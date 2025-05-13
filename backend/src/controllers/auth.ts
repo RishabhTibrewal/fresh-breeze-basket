@@ -764,3 +764,143 @@ export const checkAdminStatus = async (req: Request, res: Response) => {
     });
   }
 };
+
+// Update user role
+export const updateRole = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user.id;
+    const { role } = req.body;
+
+    if (!role || !['user', 'admin', 'sales'].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid role specified'
+      });
+    }
+
+    // Update profile role
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .update({ role })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating role:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update role'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: profile
+    });
+  } catch (error) {
+    console.error('Error in updateRole:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'An unexpected error occurred'
+    });
+  }
+};
+
+// Sync the frontend user session with the backend
+export const syncSession = async (req: Request, res: Response) => {
+  try {
+    console.log('Syncing session for user:', req.user?.id);
+    
+    const { userId, email, role } = req.body;
+    
+    // Check if the user making the request matches the user to sync
+    if (req.user?.id !== userId) {
+      console.error('Session sync attempt with mismatched user IDs', { 
+        requestUser: req.user?.id, 
+        syncUser: userId 
+      });
+      return res.status(403).json({
+        success: false,
+        message: 'User ID mismatch'
+      });
+    }
+    
+    // Update the user's session data in our backend if needed
+    // This is where you would update any session-specific state
+    
+    console.log('Session synced successfully for user:', userId);
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Session synced successfully',
+      data: {
+        userId,
+        email,
+        role
+      }
+    });
+  } catch (error) {
+    console.error('Error syncing session:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error syncing session'
+    });
+  }
+};
+
+// Get customer addresses (for customer ID - used by sales staff)
+export const getCustomerAddresses = async (req: Request, res: Response) => {
+  try {
+    const customerId = req.params.id;
+    
+    if (!customerId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer ID is required'
+      });
+    }
+    
+    console.log(`Getting addresses for customer ${customerId}`);
+    
+    // First, get the customer record to find the user_id
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('user_id')
+      .eq('id', customerId)
+      .single();
+    
+    if (customerError) {
+      console.error('Error fetching customer:', customerError);
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found'
+      });
+    }
+    
+    // Now fetch addresses using the user_id from the customer record
+    const { data, error } = await supabase
+      .from('addresses')
+      .select('*')
+      .eq('user_id', customer.user_id)
+      .order('is_default', { ascending: false });
+    
+    if (error) {
+      console.error('Supabase error when fetching customer addresses:', error);
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
+    console.log(`Found ${data?.length || 0} addresses for customer ${customerId} (user_id: ${customer.user_id})`);
+    
+    res.status(200).json(data || []);
+  } catch (error: any) {
+    console.error('Unhandled error in getCustomerAddresses:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Error getting customer addresses'
+    });
+  }
+};

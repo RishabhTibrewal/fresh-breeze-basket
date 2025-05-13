@@ -9,7 +9,9 @@ import {
   getAddresses,
   deleteAddress,
   updateAddress,
-  checkAdminStatus
+  checkAdminStatus,
+  updateRole,
+  syncSession
 } from '../controllers/auth';
 import { protect } from '../middleware/auth';
 
@@ -28,5 +30,11 @@ router.get('/addresses', protect, getAddresses);
 router.put('/addresses/:id', protect, updateAddress);
 router.delete('/addresses/:id', protect, deleteAddress);
 router.get('/check-admin', protect, checkAdminStatus);
+
+// Sync session with backend
+router.post('/sync-session', protect, syncSession);
+
+// Update role route
+router.put('/role', protect, updateRole);
 
 export default router; 

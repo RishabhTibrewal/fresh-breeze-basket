@@ -57,50 +57,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('last_backend_sync_attempt', now.toString());
 
     try {
-      console.log('Syncing backend session for user:', currentSession.user.id);
-      
-      // Try to verify backend session is active
-      try {
-        // Call an authenticated endpoint to check if backend session is active
-        await apiClient.get('/auth/me');
-        console.log('Backend session already active');
-        
-        // Clear any error state since backend is responsive
-        localStorage.removeItem('backend_sync_failed');
-      } catch (backendError) {
-        // Check if we've had multiple failures
-        const failCount = parseInt(localStorage.getItem('backend_sync_failed') || '0');
-        
-        if (failCount >= 3) {
-          console.log('Backend sync has failed multiple times, skipping further attempts');
-          return;
-        }
-        
-        console.log('Backend session not active, attempting login...');
-        
-        // If backend session is not active but we have a Supabase session,
-        // attempt to login with backend using email from Supabase
-        const { email } = currentSession.user;
-        if (email) {
-          try {
-            // We don't have password here, so this will only work if your backend 
-            // has a special endpoint that can validate the Supabase token directly
-            // or has another way to authenticate users from Supabase
-            await apiClient.post('/auth/login', { 
-              email,
-              supabase_token: currentSession.access_token
-            });
-            console.log('Successfully logged in to backend');
-            
-            // Reset failure counter on success
-            localStorage.removeItem('backend_sync_failed');
-          } catch (loginError) {
-            console.error('Backend login failed during sync:', loginError);
-            
-            // Increment failure counter
-            localStorage.setItem('backend_sync_failed', (failCount + 1).toString());
-          }
-        }
+      // Get the user's profile from Supabase first
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', currentSession.user.id)
+        .single();
+
+      if (profileError) {
+        console.error('Error fetching profile during sync:', profileError);
+        return;
+      }
+
+      // If user has a role, sync with backend
+      if (profile?.role) {
+        console.log('Syncing backend session for user with role:', profile.role);
+        await apiClient.post('/auth/sync-session', {
+          userId: currentSession.user.id,
+          email: currentSession.user.email,
+          role: profile.role
+        });
+      } else {
+        console.log('No role found for user, skipping backend sync');
       }
     } catch (error) {
       console.error('Error syncing backend session:', error);
