@@ -5,24 +5,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { authService } from '@/api/auth';
+import { ordersService } from '@/api/orders';
 import {
   Users,
   ShoppingCart,
   CreditCard,
   TrendingUp
 } from 'lucide-react';
-
-// TODO: Replace with actual API calls
-const mockData = {
-  totalCustomers: 150,
-  totalOrders: 45,
-  totalCredit: 25000,
-  recentOrders: [
-    { id: 1, customer: 'John Doe', amount: 1200, status: 'pending' },
-    { id: 2, customer: 'Jane Smith', amount: 800, status: 'completed' },
-    { id: 3, customer: 'Bob Johnson', amount: 1500, status: 'processing' }
-  ]
-};
 
 const SalesDashboard = () => {
   const { user, profile } = useAuth();
@@ -37,13 +26,10 @@ const SalesDashboard = () => {
     }
   };
 
-  // TODO: Replace with actual API calls
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['salesDashboard'],
     queryFn: async () => {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return mockData;
+      return await ordersService.getSalesDashboardStats();
     }
   });
 
@@ -56,6 +42,21 @@ const SalesDashboard = () => {
             <Skeleton key={i} className="h-32" />
           ))}
         </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 bg-destructive/10 border border-destructive rounded-lg text-center">
+        <h3 className="text-lg font-semibold text-destructive">Error Loading Dashboard</h3>
+        <p className="text-muted-foreground mt-2">Failed to load dashboard statistics. Please try again later.</p>
+        <button 
+          onClick={() => window.location.reload()} 
+          className="mt-4 bg-primary text-white px-4 py-2 rounded-md"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -99,7 +100,7 @@ const SalesDashboard = () => {
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${data?.totalCredit.toLocaleString()}</div>
+            <div className="text-2xl font-bold">${data?.totalCredit?.toLocaleString()}</div>
           </CardContent>
         </Card>
 
@@ -109,7 +110,7 @@ const SalesDashboard = () => {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">+12.5%</div>
+            <div className="text-2xl font-bold">&nbsp;</div>
           </CardContent>
         </Card>
       </div>
@@ -121,7 +122,9 @@ const SalesDashboard = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {data?.recentOrders.map((order) => (
+            {data?.recentOrders?.length === 0 ? (
+              <div className="text-center py-6 text-muted-foreground">No recent orders</div>
+            ) : data?.recentOrders?.map((order) => (
               <div
                 key={order.id}
                 className="flex items-center justify-between p-4 border rounded-lg"

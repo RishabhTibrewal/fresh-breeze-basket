@@ -56,6 +56,19 @@ interface Customer {
   totalSpent: number;
   lastOrder: string;
   user_id?: string;
+  active_credit?: {
+    amount: number;
+    period: number;
+    start_date: string;
+    end_date: string;
+  };
+  credit_periods?: {
+    id: string;
+    amount: number;
+    period: number;
+    type: string;
+    created_at: string;
+  }[];
 }
 
 const customerFormSchema = z.object({
@@ -428,6 +441,29 @@ export default function Customers() {
                                     <p>Credit Period: {selectedCustomer.credit_period_days || 0} days</p>
                                     <p>Credit Limit: ${(selectedCustomer.credit_limit || 0).toFixed(2)}</p>
                                     <p>Current Credit: ${(selectedCustomer.current_credit || 0).toFixed(2)}</p>
+                                    {selectedCustomer.active_credit && (
+                                      <div className="mt-2">
+                                        <h4 className="font-medium text-primary">Active Credit</h4>
+                                        <p>Amount: ${selectedCustomer.active_credit.amount.toFixed(2)}</p>
+                                        <p>Period: {selectedCustomer.active_credit.period} days</p>
+                                        <p>Start Date: {new Date(selectedCustomer.active_credit.start_date).toLocaleDateString()}</p>
+                                        <p>Due Date: {new Date(selectedCustomer.active_credit.end_date).toLocaleDateString()}</p>
+                                      </div>
+                                    )}
+                                    {selectedCustomer.credit_periods && selectedCustomer.credit_periods.length > 0 && (
+                                      <div className="mt-2">
+                                        <h4 className="font-medium">Recent Credit History</h4>
+                                        <div className="space-y-1">
+                                          {selectedCustomer.credit_periods.slice(0, 3).map((period) => (
+                                            <div key={period.id} className="text-sm">
+                                              <p>Amount: ${period.amount.toFixed(2)} ({period.type})</p>
+                                              <p>Period: {period.period} days</p>
+                                              <p>Date: {new Date(period.created_at).toLocaleDateString()}</p>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                   <div>
                                     <h3 className="font-semibold">Order Statistics</h3>

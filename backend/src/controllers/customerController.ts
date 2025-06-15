@@ -11,6 +11,7 @@ interface Customer {
   credit_period_days: number | null;
   credit_limit: number | null;
   current_credit: number | null;
+  user_id: string;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -30,18 +31,49 @@ export const getCustomers = async (req: Request, res: Response) => {
 
     if (error) throw error;
 
-    // Transform the data to include basic customer information
-    const transformedCustomers = (customers as Customer[]).map(customer => ({
-      id: customer.id,
-      name: customer.name,
-      email: customer.email,
-      phone: customer.phone,
-      trn_number: customer.trn_number,
-      credit_period_days: customer.credit_period_days,
-      credit_limit: customer.credit_limit,
-      current_credit: customer.current_credit,
-      lastOrder: customer.last_order_date || null,
-    }));
+    // Get all orders to calculate statistics
+    const { data: allOrders, error: ordersError } = await supabase
+      .from('orders')
+      .select('id, user_id, total_amount, created_at, status');
+    
+    if (ordersError) {
+      console.error('Error fetching orders:', ordersError);
+      throw new AppError('Failed to fetch orders data', 500);
+    }
+
+    // Transform the data to include customer information with order statistics
+    const transformedCustomers = (customers as Customer[]).map(customer => {
+      // Filter orders for this customer, EXCLUDING cancelled orders
+      const customerOrders = allOrders ? allOrders.filter(order => 
+        order.user_id === customer.user_id && order.status !== 'cancelled'
+      ) : [];
+      
+      // Calculate order metrics
+      const totalOrders = customerOrders.length;
+      const totalSpent = customerOrders.reduce((sum, order) => sum + parseFloat(order.total_amount), 0);
+      
+      // Find the last order date
+      let lastOrder = null;
+      if (customerOrders.length > 0) {
+        const orderDates = customerOrders.map(order => new Date(order.created_at).getTime());
+        const lastOrderDate = new Date(Math.max(...orderDates));
+        lastOrder = lastOrderDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+      }
+
+      return {
+        id: customer.id,
+        name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+        trn_number: customer.trn_number,
+        credit_period_days: customer.credit_period_days,
+        credit_limit: customer.credit_limit,
+        current_credit: customer.current_credit,
+        totalOrders,
+        totalSpent,
+        lastOrder: lastOrder || customer.last_order_date || null,
+      };
+    });
 
     res.json(transformedCustomers);
   } catch (error) {
@@ -68,7 +100,7 @@ export const getCustomerById = async (req: Request, res: Response) => {
     // Then separately get the order information
     const { data: orders, error: ordersError } = await supabase
       .from('orders')
-      .select('id, total_amount')
+      .select('id, total_amount, status')
       .eq('user_id', customer.user_id);
     
     if (ordersError) {
@@ -87,8 +119,9 @@ export const getCustomerById = async (req: Request, res: Response) => {
     }
 
     // Calculate order metrics
-    const totalOrders = orders?.length || 0;
-    const totalSpent = orders?.reduce((sum, order) => sum + parseFloat(order.total_amount), 0) || 0;
+    const filteredOrders = orders?.filter(order => order.status !== 'cancelled') || [];
+    const totalOrders = filteredOrders.length;
+    const totalSpent = filteredOrders.reduce((sum, order) => sum + parseFloat(order.total_amount), 0) || 0;
 
     // Get active credit information (most recent credit period)
     const activeCredit = creditPeriods && creditPeriods.length > 0 ? 
@@ -617,6 +650,61 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: error.message || 'Internal server error'
+    });
+  }
+};
+
+// Get all customers with credit information
+export const getCustomersWithCredit = async (req: Request, res: Response) => {
+  try {
+    const sales_executive_id = req.user?.id;
+
+    // Get all customers with their credit information
+    const { data: customers, error } = await supabase
+      .from('customers')
+      .select(`
+        id,
+        name,
+        email,
+        phone,
+        credit_limit,
+        current_credit,
+        credit_period_days,
+        active_credit:credit_periods!inner(
+          amount,
+          period,
+          start_date,
+          end_date
+        )
+      `)
+      .eq('sales_executive_id', sales_executive_id)
+      .order('name');
+
+    if (error) {
+      throw new AppError(`Error fetching customers: ${error.message}`, 500);
+    }
+
+    // Transform the data to match the frontend interface
+    const transformedCustomers = customers.map(customer => ({
+      ...customer,
+      active_credit: customer.active_credit?.[0] || null
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: transformedCustomers
+    });
+  } catch (error) {
+    console.error('Error in getCustomersWithCredit:', error);
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
     });
   }
 }; 

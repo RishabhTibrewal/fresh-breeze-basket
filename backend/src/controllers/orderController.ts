@@ -32,6 +32,9 @@ export const orderController = {
         total_amount
       } = req.body;
 
+      // Log the received payment_status from frontend
+      console.log('Payment status from frontend:', payment_status);
+
       const sales_executive_id = req.user?.id;
       console.log('Sales executive ID:', sales_executive_id);
       console.log('Customer ID:', customer_id);
@@ -97,31 +100,53 @@ export const orderController = {
         return res.status(400).json({ error: 'Credit limit exceeded' });
       }
 
-      // Determine payment status based on payment method
-      let orderPaymentStatus = 'pending';
-      if (payment_method === 'full_payment') {
-        orderPaymentStatus = 'paid';
-      } else if (payment_method === 'partial_payment') {
-        orderPaymentStatus = 'partial';
-      } else if (payment_method === 'full_credit') {
-        orderPaymentStatus = 'credit';
+      console.log('Creating order with payment status:', payment_status);
+
+      // Use the payment_status from the frontend directly if provided, otherwise determine based on payment_method
+      // This ensures we respect what was explicitly set by the frontend
+      let orderPaymentStatus = payment_status || 'pending';
+      
+      // Map frontend payment status to database values
+      if (payment_status) {
+        // Convert frontend values to database values
+        if (payment_status === 'full_payment') {
+          orderPaymentStatus = 'paid';
+        } else if (payment_status === 'partial_payment') {
+          orderPaymentStatus = 'partial';
+        } else if (payment_status === 'full_credit') {
+          orderPaymentStatus = 'credit';
+        }
+      } else {
+        // Only use the conversion if payment_status was not provided from frontend
+        if (payment_method === 'full_payment') {
+          orderPaymentStatus = 'paid';
+        } else if (payment_method === 'partial_payment') {
+          orderPaymentStatus = 'partial';
+        } else if (payment_method === 'full_credit') {
+          orderPaymentStatus = 'credit';
+        }
       }
 
-      console.log('Creating order with payment status:', orderPaymentStatus);
+      console.log('Creating order with final payment status:', orderPaymentStatus);
+
+      // Create order record data object for better logging
+      const orderData = {
+        user_id: customer.user_id,
+        status: 'pending',
+        shipping_address_id,
+        billing_address_id,
+        payment_method,
+        total_amount: calculatedTotalAmount,
+        notes,
+        payment_status: orderPaymentStatus
+      };
+      
+      console.log('Order data being inserted:', JSON.stringify(orderData, null, 2));
 
       // Create order - use customer.user_id instead of customer_id for user_id field
       const { data: order, error: orderError } = await supabase
         .from('orders')
-        .insert({
-          user_id: customer.user_id, // Use the customer's user_id, not the customer's id
-          status: 'pending',
-          shipping_address_id,
-          billing_address_id,
-          payment_method,
-          total_amount: calculatedTotalAmount, // Use total_amount field instead of subtotal/shipping_fee/tax
-          notes,
-          payment_status: orderPaymentStatus
-        })
+        .insert(orderData)
         .select()
         .single();
 
@@ -206,9 +231,17 @@ export const orderController = {
       console.log('Order items created successfully');
 
       // Handle credit period creation if required
-      if (payment_method === 'full_credit' || payment_method === 'partial_payment') {
+      // Use payment_status first or fallback to payment_method
+      const isCredit = payment_status === 'full_credit' || 
+                      payment_status === 'partial_payment' || 
+                      payment_method === 'full_credit' || 
+                      payment_method === 'partial_payment';
+                      
+      const isFullCredit = payment_status === 'full_credit' || payment_method === 'full_credit';
+      
+      if (isCredit) {
         // Calculate credit amount
-        const creditAmount = payment_method === 'full_credit' 
+        const creditAmount = isFullCredit
           ? calculatedTotalAmount 
           : (calculatedTotalAmount - (partial_payment_amount || 0));
         
@@ -220,6 +253,7 @@ export const orderController = {
             .from('credit_periods')
             .insert({
               customer_id,
+              order_id: order.id,
               amount: creditAmount,
               period: credit_details.period,
               start_date: credit_details.start_date,
@@ -275,6 +309,8 @@ export const orderController = {
       const { id: customer_id } = req.params;
       const sales_executive_id = req.user?.id;
 
+      console.log(`Fetching orders for customer ID: ${customer_id}`);
+
       // First get the customer details to get the user_id
       const { data: customer, error: customerError } = await supabase
         .from('customers')
@@ -287,6 +323,8 @@ export const orderController = {
         return res.status(404).json({ error: 'Customer not found' });
       }
 
+      console.log(`Found customer user_id: ${customer.user_id}`);
+
       // Use the customer's user_id to query orders
       const { data: orders, error: ordersError } = await supabase
         .from('orders')
@@ -295,7 +333,8 @@ export const orderController = {
           order_items (
             *,
             product:products (*)
-          )
+          ),
+          credit_periods (*)
         `)
         .eq('user_id', customer.user_id)
         .order('created_at', { ascending: false });
@@ -305,10 +344,21 @@ export const orderController = {
         return res.status(500).json({ error: 'Failed to fetch orders' });
       }
 
-      // Process orders to ensure they have all required fields for frontend
+      console.log(`Found ${orders.length} orders for customer`);
+
+      // Process orders to include credit details
       const processedOrders = orders.map(order => {
+        // Get the first credit period if it exists
+        const creditPeriod = order.credit_periods?.[0];
+        
+        console.log(`Order ${order.id} credit periods:`, order.credit_periods?.length || 0);
+        
+        // Remove the credit_periods array and add credit_details if exists
+        const { credit_periods, ...orderWithoutCreditPeriods } = order;
+        
         return {
-          ...order,
+          ...orderWithoutCreditPeriods,
+          credit_details: creditPeriod || null,
           // Add order_number if not present (using a part of the ID as fallback)
           order_number: order.order_number || `ORD-${order.id.substring(0, 8)}`,
           // Ensure status is never null
@@ -318,6 +368,7 @@ export const orderController = {
         };
       });
 
+      console.log('Returning processed orders with credit details');
       res.json(processedOrders);
     } catch (error: any) {
       console.error('Error in getCustomerOrders:', error);
@@ -347,6 +398,19 @@ export const orderController = {
       if (orderError) {
         console.error('Error fetching order:', orderError);
         return res.status(404).json({ error: 'Order not found' });
+      }
+
+      // Get credit details if applicable
+      if (order.payment_method === 'full_credit' || order.payment_method === 'partial_payment') {
+        const { data: creditPeriod, error: creditError } = await supabase
+          .from('credit_periods')
+          .select('*')
+          .eq('order_id', order_id)
+          .single();
+        
+        if (!creditError && creditPeriod) {
+          order.credit_details = creditPeriod;
+        }
       }
 
       // Verify the order belongs to a customer of this sales executive
@@ -416,6 +480,90 @@ export const orderController = {
       res.json(updatedOrder);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  },
+
+  // Get all orders for sales executive's customers
+  async getSalesOrders(req: Request, res: Response) {
+    try {
+      const sales_executive_id = req.user?.id;
+
+      // Get all customers for this sales executive
+      const { data: customers, error: customersError } = await supabase
+        .from('customers')
+        .select('id, user_id, name')
+        .eq('sales_executive_id', sales_executive_id);
+
+      if (customersError) {
+        console.error('Error fetching customers:', customersError);
+        return res.status(500).json({ error: 'Failed to fetch customers' });
+      }
+
+      if (!customers || customers.length === 0) {
+        return res.json([]); // Return empty array if no customers
+      }
+
+      // Get all orders for these customers
+      const customerUserIds = customers.map(c => c.user_id);
+      const { data: orders, error: ordersError } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          order_items (
+            *,
+            product:products (*)
+          )
+        `)
+        .in('user_id', customerUserIds)
+        .order('created_at', { ascending: false });
+
+      if (ordersError) {
+        console.error('Error fetching orders:', ordersError);
+        return res.status(500).json({ error: 'Failed to fetch orders' });
+      }
+
+      // Fetch credit periods for relevant orders
+      const ordersWithCredit = await Promise.all(orders.map(async (order) => {
+        // Only fetch credit details for orders with credit
+        if (order.payment_method === 'full_credit' || order.payment_method === 'partial_payment') {
+          const { data: creditPeriod, error: creditError } = await supabase
+            .from('credit_periods')
+            .select('*')
+            .eq('order_id', order.id)
+            .single();
+          
+          if (!creditError && creditPeriod) {
+            return {
+              ...order,
+              credit_details: creditPeriod
+            };
+          }
+        }
+        return order;
+      }));
+
+      // Add customer information to each order
+      const ordersWithCustomer = ordersWithCredit.map(order => {
+        const customer = customers.find(c => c.user_id === order.user_id);
+        return {
+          ...order,
+          customer: customer ? {
+            id: customer.id,
+            name: customer.name
+          } : null,
+          // Add order_number if not present
+          order_number: order.order_number || `ORD-${order.id.substring(0, 8)}`,
+          // Ensure status is never null
+          status: order.status || 'pending',
+          // Ensure payment_status is never null
+          payment_status: order.payment_status || 'pending'
+        };
+      });
+
+      res.json(ordersWithCustomer);
+    } catch (error: any) {
+      console.error('Error in getSalesOrders:', error);
+      res.status(500).json({ error: error.message || 'Failed to fetch orders' });
     }
   }
 }; 

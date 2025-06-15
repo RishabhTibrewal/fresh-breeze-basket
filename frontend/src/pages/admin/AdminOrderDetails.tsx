@@ -4,8 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { ordersService, Order } from '@/api/orders';
-import { productsService } from '@/api/products';
+import { productsService, Product } from '@/api/products';
 import { addressApi } from '@/api/addresses';
+import { supabase } from '@/lib/supabase';
 import { 
   Card,
   CardContent,
@@ -75,6 +76,8 @@ export default function AdminOrderDetails() {
   const [trackingNumber, setTrackingNumber] = useState('');
   const [estimatedDelivery, setEstimatedDelivery] = useState('');
   const [notes, setNotes] = useState('');
+  const [productDetails, setProductDetails] = useState<Record<string, Product>>({});
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   
   // Fetch order details
   const { 
@@ -138,6 +141,28 @@ export default function AdminOrderDetails() {
     enabled: !!order?.billing_address_id && 
              order?.billing_address_id !== order?.shipping_address_id,
     retry: 1
+  });
+  
+  // Fetch user profile
+  const {
+    data: userProfile,
+    isLoading: isLoadingProfile,
+    isError: isErrorProfile,
+    error: errorProfile
+  } = useQuery({
+    queryKey: ['user-profile', order?.userId],
+    queryFn: async () => {
+      if (!order?.userId) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', order.userId)
+        .single();
+      
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!order?.userId
   });
   
   // Update order status mutation
@@ -338,6 +363,38 @@ export default function AdminOrderDetails() {
     return <p className="text-muted-foreground">Address ID: {order.billing_address_id} (data not available)</p>;
   };
   
+  // Fetch product details for each item
+  useEffect(() => {
+    const fetchProductDetails = async () => {
+      if (!order?.items?.length) return;
+      
+      setIsLoadingProducts(true);
+      try {
+        const productIds = order.items.map((item: any) => item.product_id).filter(Boolean);
+        
+        const productDetailsMap: Record<string, Product> = {};
+        await Promise.all(
+          productIds.map(async (productId) => {
+            try {
+              const product = await productsService.getById(productId);
+              productDetailsMap[productId] = product;
+            } catch (err) {
+              console.error(`Error fetching product ${productId}:`, err);
+            }
+          })
+        );
+        
+        setProductDetails(productDetailsMap);
+      } catch (err) {
+        console.error("Error fetching product details:", err);
+      } finally {
+        setIsLoadingProducts(false);
+      }
+    };
+    
+    fetchProductDetails();
+  }, [order?.items]);
+  
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -522,33 +579,54 @@ export default function AdminOrderDetails() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {order.items && order.items.length > 0 ? (
-                    order.items.map((item: any, idx) => (
-                      <TableRow key={item.id || idx}>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {item.products?.image_url && (
-                              <div className="h-10 w-10 rounded bg-muted overflow-hidden">
-                                <img
-                                  src={item.products.image_url}
-                                  alt={item.products?.name || 'Product'}
-                                  className="h-full w-full object-cover"
-                                />
+                  {isLoadingProducts ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-4">
+                        <Spinner className="h-6 w-6 mx-auto" />
+                      </TableCell>
+                    </TableRow>
+                  ) : order.items && order.items.length > 0 ? (
+                    order.items.map((item: any, idx) => {
+                      const product = item.product;
+                      const primaryImage = product?.images?.find((img: any) => img.is_primary)?.image_url || 
+                                        product?.images?.[0]?.image_url || 
+                                        product?.image_url;
+                      return (
+                        <TableRow key={item.id || idx}>
+                          <TableCell>
+                            <div className="flex items-center gap-4">
+                              {primaryImage ? (
+                                <div className="h-16 w-16 rounded-md overflow-hidden border">
+                                  <img
+                                    src={primaryImage}
+                                    alt={product.name}
+                                    className="h-full w-full object-cover"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="h-16 w-16 rounded-md bg-muted flex items-center justify-center">
+                                  <Package className="h-8 w-8 text-muted-foreground" />
+                                </div>
+                              )}
+                              <div className="space-y-1">
+                                <p className="font-medium">{product?.name || `Product ID: ${item.product_id}`}</p>
+                                {product?.description && (
+                                  <p className="text-sm text-muted-foreground line-clamp-2">
+                                    {product.description}
+                                  </p>
+                                )}
+                                <p className="text-xs text-muted-foreground">SKU: {item.product_id}</p>
                               </div>
-                            )}
-                            <div>
-                              <p className="font-medium">{item.products?.name || `Product ID: ${item.product_id}`}</p>
-                              <p className="text-xs text-muted-foreground">{item.product_id}</p>
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>AED {item.unit_price?.toFixed(2) || '0.00'}</TableCell>
-                        <TableCell>{item.quantity}</TableCell>
-                        <TableCell className="text-right">
-                          AED {((item.quantity || 0) * (item.unit_price || 0)).toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                          <TableCell>AED {item.unit_price?.toFixed(2) || '0.00'}</TableCell>
+                          <TableCell>{item.quantity}</TableCell>
+                          <TableCell className="text-right">
+                            AED {((item.quantity || 0) * (item.unit_price || 0)).toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   ) : (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center py-4">
@@ -580,13 +658,58 @@ export default function AdminOrderDetails() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">User ID</p>
-                  <p className="font-medium">{order.userId || order.user_id}</p>
+              {isLoadingProfile ? (
+                <div className="flex items-center justify-center py-4">
+                  <Spinner className="h-6 w-6" />
                 </div>
-                {/* Additional customer information would go here if available from the API */}
-              </div>
+              ) : isErrorProfile ? (
+                <div className="text-red-500">
+                  Error loading customer profile: {(errorProfile as Error)?.message}
+                </div>
+              ) : userProfile ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    {userProfile.avatar_url ? (
+                      <img
+                        src={userProfile.avatar_url}
+                        alt={`${userProfile.first_name} ${userProfile.last_name}`}
+                        className="h-16 w-16 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center">
+                        <User className="h-8 w-8 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div>
+                      <h3 className="text-lg font-medium">
+                        {userProfile.first_name} {userProfile.last_name}
+                      </h3>
+                      <p className="text-sm text-muted-foreground">{userProfile.email}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">User ID</p>
+                      <p className="font-medium">{userProfile.id}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Phone</p>
+                      <p className="font-medium">{userProfile.phone || 'Not provided'}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Role</p>
+                      <p className="font-medium capitalize">{userProfile.role || 'user'}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Member Since</p>
+                      <p className="font-medium">{formatDate(userProfile.created_at)}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-muted-foreground">No customer information available</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

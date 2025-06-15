@@ -4,7 +4,8 @@ import orderRoutes from './orders';
 import paymentRoutes from './payments';
 import categoryRoutes from './categories';
 import adminRoutes from './admin';
-import customerRoutes from './customer';
+import customerRoutes from './customerRoutes';
+import creditPeriodRoutes from './creditPeriod';
 
 export {
   authRoutes,
@@ -13,5 +14,6 @@ export {
   paymentRoutes,
   categoryRoutes,
   adminRoutes,
-  customerRoutes
+  customerRoutes,
+  creditPeriodRoutes
 }; 

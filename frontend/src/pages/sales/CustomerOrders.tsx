@@ -37,6 +37,21 @@ export default function CustomerOrders() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   
+  // Store current customer ID in localStorage
+  useEffect(() => {
+    if (customerId) {
+      localStorage.setItem('currentCustomerId', customerId);
+    }
+    
+    // Clean up on unmount
+    return () => {
+      // Don't remove it when navigating to order details
+      if (!window.location.pathname.includes('/orders/')) {
+        localStorage.removeItem('currentCustomerId');
+      }
+    };
+  }, [customerId]);
+  
   // Get customer details
   const { data: customer, isLoading: customerLoading } = useQuery({
     queryKey: ['customer', customerId],
@@ -56,6 +71,28 @@ export default function CustomerOrders() {
     enabled: !!customerId,
   });
   
+  // Log orders data for debugging
+  useEffect(() => {
+    if (orders && orders.length > 0) {
+      console.log('Customer orders loaded:', orders.length);
+      console.log('First order details:', orders[0]);
+      
+      // Log credit details specifically
+      orders.forEach(order => {
+        if (order.credit_details) {
+          console.log(`Order ${order.order_number} credit details:`, {
+            amount: order.credit_details.amount,
+            period: order.credit_details.period,
+            start_date: order.credit_details.start_date,
+            end_date: order.credit_details.end_date,
+            due_date: (order.credit_details as any).due_date,
+            date_used: order.credit_details.end_date || (order.credit_details as any).due_date
+          });
+        }
+      });
+    }
+  }, [orders]);
+  
   const isLoading = customerLoading || ordersLoading;
   
   useEffect(() => {
@@ -64,11 +101,67 @@ export default function CustomerOrders() {
     }
   }, [isError, error]);
   
+  // Add this function to check credit details in orders
+  const addCreditDetailsFromPaymentInfo = (orders: any[]) => {
+    console.log('Processing orders to add credit details:', orders.length);
+    
+    return orders.map(order => {
+      // If order already has credit_details, just return it
+      if (order.credit_details) {
+        console.log(`Order ${order.order_number} already has credit_details:`, order.credit_details);
+        return order;
+      }
+      
+      // Check payment status to determine if we should create virtual credit details
+      if (order.payment_status === 'partial' || order.payment_status === 'credit' || 
+          order.payment_method === 'partial_payment' || order.payment_method === 'full_credit') {
+        
+        console.log(`Creating virtual credit_details for order ${order.order_number}`);
+        // Create virtual credit details based on order information
+        const creditAmount = order.total_amount;
+        const startDate = order.created_at;
+        
+        // Calculate default end date (30 days from creation)
+        const endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + (customer?.credit_period_days || 30));
+        
+        const virtualCreditDetails = {
+          amount: creditAmount,
+          period: customer?.credit_period_days || 30,
+          start_date: startDate,
+          end_date: endDate.toISOString(),
+          type: 'credit',
+          description: 'Auto-generated credit details'
+        };
+        
+        console.log(`Virtual credit details for order ${order.order_number}:`, virtualCreditDetails);
+        
+        return {
+          ...order,
+          credit_details: virtualCreditDetails
+        };
+      }
+      
+      return order;
+    });
+  };
+  
+  // Process orders to add credit details if missing
+  const processedOrders = orders.length > 0 ? addCreditDetailsFromPaymentInfo(orders) : [];
+  
   // Filter orders based on search
-  const filteredOrders = orders.filter(order => 
+  const filteredOrders = processedOrders.filter(order => 
     (order.order_number?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
     (order.status?.toLowerCase() || '').includes(searchQuery.toLowerCase())
   );
+  
+  // Log the final filtered orders
+  useEffect(() => {
+    console.log('Filtered orders after processing:', filteredOrders.length);
+    if (filteredOrders.length > 0) {
+      console.log('First filtered order example:', filteredOrders[0]);
+    }
+  }, [filteredOrders]);
   
   // Helper for status badge
   const getStatusBadge = (status: string) => {
@@ -91,14 +184,43 @@ export default function CustomerOrders() {
   // Helper for payment status badge
   const getPaymentStatusBadge = (status: string) => {
     switch (status) {
-      case 'paid':
-        return <Badge className="bg-green-600">Paid</Badge>;
-      case 'partial':
-        return <Badge className="bg-yellow-500">Partially Paid</Badge>;
-      case 'unpaid':
-        return <Badge variant="destructive">Unpaid</Badge>;
+      case 'full_payment':
+        return <Badge className="bg-green-600">Full Payment</Badge>;
+      case 'partial_payment':
+        return <Badge className="bg-yellow-500">Partial Payment</Badge>;
+      case 'full_credit':
+        return <Badge className="bg-blue-500">Full Credit</Badge>;
+      case 'pending':
+        return <Badge variant="outline">Pending</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+  
+  // Helper function to safely format dates
+  const formatDate = (dateString: string | null | undefined, formatStr = 'MMM d, yyyy') => {
+    if (!dateString) return 'N/A';
+    try {
+      return format(new Date(dateString), formatStr);
+    } catch (error) {
+      console.error('Error formatting date:', dateString, error);
+      return 'Invalid Date';
+    }
+  };
+
+  // Helper for payment method
+  const formatPaymentMethod = (method: string) => {
+    if (!method) return 'N/A';
+    
+    switch (method.toLowerCase()) {
+      case 'cash':
+        return 'Cash';
+      case 'card':
+        return 'Card';
+      case 'cheque':
+        return 'Cheque';
+      default:
+        return method.charAt(0).toUpperCase() + method.slice(1);
     }
   };
   
@@ -151,26 +273,77 @@ export default function CustomerOrders() {
                   <TableHead>Total</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Payment</TableHead>
+                  <TableHead>Credit</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center">Loading...</TableCell>
+                    <TableCell colSpan={7} className="text-center">Loading...</TableCell>
                   </TableRow>
                 ) : filteredOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center">No orders found</TableCell>
+                    <TableCell colSpan={7} className="text-center">No orders found</TableCell>
                   </TableRow>
                 ) : (
                   filteredOrders.map((order) => (
                     <TableRow key={order.id}>
                       <TableCell className="font-medium">{order.order_number}</TableCell>
-                      <TableCell>{format(new Date(order.created_at), 'MMM d, yyyy')}</TableCell>
-                      <TableCell>${order.total_amount.toFixed(2)}</TableCell>
+                      <TableCell>{formatDate(order.created_at)}</TableCell>
+                      <TableCell>${parseFloat(order.total_amount.toString()).toFixed(2)}</TableCell>
                       <TableCell>{getStatusBadge(order.status)}</TableCell>
-                      <TableCell>{getPaymentStatusBadge(order.payment_status)}</TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <div>{getPaymentStatusBadge(order.payment_status)}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {formatPaymentMethod(order.payment_method)}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {order.credit_details ? (
+                          (() => {
+                            // Log credit details when rendering
+                            console.log(`Rendering credit cell for order ${order.order_number}:`, {
+                              order_id: order.id,
+                              amount: order.credit_details.amount,
+                              end_date: order.credit_details.end_date,
+                              due_date: (order.credit_details as any).due_date, 
+                              date_to_display: order.credit_details.end_date || (order.credit_details as any).due_date,
+                              is_overdue: new Date() > new Date(order.credit_details.end_date || (order.credit_details as any).due_date),
+                              order_status: order.status,
+                              credit_status: order.credit_details.status
+                            });
+                            
+                            // Determine credit status based on both order status and credit period status
+                            const isCancelled = order.status === 'cancelled' || order.credit_details.status === 'cancelled';
+                            const isOverdue = !isCancelled && new Date() > new Date(order.credit_details.end_date || (order.credit_details as any).due_date);
+                            
+                            return (
+                              <div className="text-sm">
+                                <div className="font-medium">${order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount.toString()).toFixed(2)}</div>
+                                <div className="text-muted-foreground">
+                                  Due: {formatDate(order.credit_details.end_date || (order.credit_details as any).due_date, 'MMM d, yyyy')}
+                                </div>
+                                <div className="text-xs">
+                                  {isCancelled 
+                                    ? <span className="text-gray-600">Inactive</span>
+                                    : isOverdue
+                                      ? <span className="text-red-600">Overdue</span>
+                                      : <span className="text-green-600">Active</span>
+                                  }
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  Period: {order.credit_details.period || "N/A"} days
+                                </div>
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          <span className="text-muted-foreground">No credit</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <div className="flex space-x-2">
                           <Button 
@@ -187,7 +360,7 @@ export default function CustomerOrders() {
                             onClick={() => navigate(`/sales/orders/${order.id}/edit`)}
                           >
                             <Edit className="h-4 w-4 mr-2" />
-                            Edit
+                            Update
                           </Button>
                         </div>
                       </TableCell>
@@ -210,13 +383,16 @@ export default function CustomerOrders() {
               <p className="text-sm font-medium">Credit Information</p>
               <p className="text-sm">Credit Limit: ${(customer.credit_limit || 0).toFixed(2)}</p>
               <p className="text-sm">Current Credit: ${(customer.current_credit || 0).toFixed(2)}</p>
-              {customer.active_credit && (
+              <p className="text-sm">Allowed Credit Period: {customer.credit_period_days || 0} days</p>
+              {/* {customer.active_credit && (
                 <div className="mt-2">
                   <p className="text-sm font-medium text-primary">Active Credit</p>
                   <p className="text-sm">Amount: ${customer.active_credit.amount.toFixed(2)}</p>
+                  <p className="text-sm">Period: {customer.active_credit.period} days</p>
+                  <p className="text-sm">Start: {new Date(customer.active_credit.start_date).toLocaleDateString()}</p>
                   <p className="text-sm">Due: {new Date(customer.active_credit.end_date).toLocaleDateString()}</p>
                 </div>
-              )}
+              )} */}
             </div>
           </CardFooter>
         )}
