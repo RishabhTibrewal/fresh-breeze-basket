@@ -1,14 +1,14 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard,
-  Users,
   ShoppingCart,
+  Users,
   CreditCard,
-  Settings,
-  LogOut
+  LogOut,
+  BarChart3,
 } from 'lucide-react';
 
 const SalesLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -16,41 +16,45 @@ const SalesLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
   const { signOut } = useAuth();
 
-  const handleSignOut = async () => {
-    await signOut();
-    navigate('/auth');
-  };
-
   const isActive = (path: string) => {
     return location.pathname === path;
   };
 
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      navigate('/login');
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
+
   const menuItems = [
     {
+      label: 'Dashboard',
       path: '/sales',
       icon: <LayoutDashboard className="w-5 h-5" />,
-      label: 'Dashboard'
     },
     {
-      path: '/sales/customers',
-      icon: <Users className="w-5 h-5" />,
-      label: 'Customers'
-    },
-    {
+      label: 'Orders',
       path: '/sales/orders',
       icon: <ShoppingCart className="w-5 h-5" />,
-      label: 'Orders'
     },
     {
-      path: '/sales/credit',
+      label: 'Customers',
+      path: '/sales/customers',
+      icon: <Users className="w-5 h-5" />,
+    },
+    {
+      label: 'Credit Management',
+      path: '/sales/credit-management',
       icon: <CreditCard className="w-5 h-5" />,
-      label: 'Credit Management'
     },
     {
-      path: '/sales/settings',
-      icon: <Settings className="w-5 h-5" />,
-      label: 'Settings'
-    }
+      label: 'Sales Analytics',
+      path: '/sales/analytics',
+      icon: <BarChart3 className="w-5 h-5" />,
+    },
   ];
 
   return (

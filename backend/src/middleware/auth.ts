@@ -51,14 +51,34 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         throw new AuthenticationError('Invalid authentication token');
       }
 
+      // Fetch user's role from profiles table
+      let userRole = 'authenticated'; // Default role
+      try {
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+
+        if (profileError) {
+          console.warn(`Could not fetch profile for user ${user.id}:`, profileError.message);
+          // Stick with default role 'authenticated' or handle as error if profile is mandatory
+        } else if (profile && profile.role) {
+          userRole = profile.role; // Assign actual role from profile
+        }
+      } catch (profileFetchError) {
+        console.error(`Exception fetching profile for user ${user.id}:`, profileFetchError);
+        // Stick with default role or handle error
+      }
+
       // Add user info to request
       req.user = {
         id: user.id,
         email: user.email || '',
-        role: 'authenticated'
+        role: userRole // Use the fetched role
       };
 
-      console.log('User authenticated successfully:', { id: user.id, email: user.email });
+      console.log('User authenticated successfully:', { id: user.id, email: user.email, role: userRole });
       next();
     } catch (authError) {
       console.error('Auth error:', authError);

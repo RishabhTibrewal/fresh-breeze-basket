@@ -52,31 +52,45 @@ export default function Products() {
 
   // Set initial values from URL params
   useEffect(() => {
-    if (categories && categoryFromUrl) {
-      // Check if categoryFromUrl is a category ID
+    if (categoryFromUrl && categories) {
       const categoryById = categories.find(c => c.id === categoryFromUrl);
-      
-      // Check if categoryFromUrl is a category name/slug
       const categoryByName = categories.find(c => 
         c.name.toLowerCase() === categoryFromUrl.toLowerCase() || 
         (c.slug && c.slug.toLowerCase() === categoryFromUrl.toLowerCase())
       );
       
-      if (categoryById && !selectedCategories.includes(categoryById.id)) {
-        setSelectedCategories(prev => [...prev, categoryById.id]);
-      } else if (categoryByName && !selectedCategories.includes(categoryByName.id)) {
-        setSelectedCategories(prev => [...prev, categoryByName.id]);
+      let categoryToSet: string | null = null;
+      if (categoryById) {
+        categoryToSet = categoryById.id;
+      } else if (categoryByName) {
+        categoryToSet = categoryByName.id;
       }
+
+      if (categoryToSet && !selectedCategories.includes(categoryToSet)) {
+        setSelectedCategories([categoryToSet]); // Set to an array with the single category
+      } else if (!categoryToSet && selectedCategories.length > 0) {
+        // This case might occur if categoryFromUrl is invalid but categories were previously set
+        setSelectedCategories([]);
+      }
+    } else if (!categoryFromUrl) {
+      // If no categoryFromUrl, clear selected categories
+      setSelectedCategories([]);
     }
     
     if (urlSearchQuery) {
       setSearchQuery(urlSearchQuery);
+    } else {
+      // Optionally clear search query if not in URL
+      // setSearchQuery(''); 
     }
     
     if (discountParam === 'true') {
       setShowDiscountedOnly(true);
+    } else {
+      // Optionally clear discount if not in URL
+      // setShowDiscountedOnly(false);
     }
-  }, [categoryFromUrl, urlSearchQuery, discountParam, categories, selectedCategories]);
+  }, [categoryFromUrl, urlSearchQuery, discountParam, categories]); // Removed selectedCategories from dependencies
 
   // Fetch products
   const { data: products, isLoading: isLoadingProducts, error: productsError } = useQuery({

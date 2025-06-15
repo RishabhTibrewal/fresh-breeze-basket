@@ -43,12 +43,13 @@ import {
   orderRoutes,
   paymentRoutes,
   categoryRoutes,
-  adminRoutes
+  adminRoutes,
+  customerRoutes,
+  creditPeriodRoutes
 } from './routes';
 import productImagesRouter from './routes/productImages';
 import inventoryRouter from './routes/inventory';
 import cartRouter from './routes/cart';
-import customerRouter from './routes/customerRoutes';
 import salesOrderRouter from './routes/orderRoutes';
 
 // Initialize Express app
@@ -126,7 +127,8 @@ app.use('/api/product-images', productImagesRouter);
 app.use('/api/inventory', inventoryRouter);
 app.use('/api/cart', cartRouter);
 app.use('/api/admin', adminRoutes);
-app.use('/api/customer', customerRouter);
+app.use('/api/customer', customerRoutes);
+app.use('/api/credit-period', creditPeriodRoutes);
 app.use('/api/sales/orders', salesOrderRouter);
 
 // Final error handling middleware

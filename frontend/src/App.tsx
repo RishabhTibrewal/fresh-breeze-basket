@@ -47,6 +47,10 @@ import SalesDashboard from "./pages/sales/Dashboard";
 import Customers from "./pages/sales/Customers";
 import CustomerOrders from "./pages/sales/CustomerOrders";
 import CreateOrder from "./pages/sales/CreateOrder";
+import OrderDetail from "./pages/sales/OrderDetail";
+import OrderUpdate from "./pages/sales/OrderUpdate";
+import Orders from "./pages/sales/Orders";
+import CreditManagement from "./pages/sales/CreditManagement";
 import SalesProtectedRoute from "./components/auth/SalesProtectedRoute";
 
 // Create a new QueryClient instance inside the component
@@ -115,11 +119,11 @@ const App: React.FC = () => {
                     <Route path="customers" element={<Customers />} />
                     <Route path="customers/:customerId/orders" element={<CustomerOrders />} />
                     <Route path="orders/create" element={<CreateOrder />} />
-                    <Route path="orders/:orderId" element={<div>Order Details</div>} />
-                    <Route path="orders/:orderId/edit" element={<div>Edit Order</div>} />
-                    <Route path="orders" element={<div>Orders Management</div>} />
-                    <Route path="credit" element={<div>Credit Management</div>} />
-                    <Route path="settings" element={<div>Sales Settings</div>} />
+                    <Route path="orders/:orderId" element={<OrderDetail />} />
+                    <Route path="orders/:orderId/edit" element={<OrderUpdate />} />
+                    <Route path="orders" element={<Orders />} />
+                    <Route path="credit-management" element={<CreditManagement />} />
+                    <Route path="analytics" element={<div>Sales Analytics</div>} />
                   </Route>
                   
                   {/* Catch-all route */}

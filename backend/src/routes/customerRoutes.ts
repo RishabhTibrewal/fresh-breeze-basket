@@ -7,7 +7,8 @@ import {
   createCustomerWithUser,
   updateCustomer,
   deleteCustomer,
-  addAddressForCustomer
+  addAddressForCustomer,
+  getCustomersWithCredit
 } from '../controllers/customerController';
 import { getCustomerAddresses } from '../controllers/auth';
 import { orderController } from '../controllers/orderController';
@@ -19,6 +20,9 @@ router.use(protect);
 
 // Get all customers
 router.get('/', getCustomers);
+
+// Get all customers with credit information
+router.get('/credit', getCustomersWithCredit);
 
 // Get customer by ID
 router.get('/:id', getCustomerById);

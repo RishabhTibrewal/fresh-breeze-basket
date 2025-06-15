@@ -749,6 +749,24 @@ ON public.credit_periods FOR ALL TO authenticated
 USING (public.is_admin(auth.uid()))
 WITH CHECK (public.is_admin(auth.uid()));
 
+-- Sales executives can update credit periods for their customers
+CREATE POLICY "Sales executives can update credit periods for their customers"
+ON public.credit_periods FOR UPDATE TO authenticated
+USING (
+    EXISTS (
+        SELECT 1
+        FROM public.customers c
+        WHERE c.id = public.credit_periods.customer_id AND c.sales_executive_id = auth.uid()
+    )
+)
+WITH CHECK (
+    EXISTS (
+        SELECT 1
+        FROM public.customers c
+        WHERE c.id = public.credit_periods.customer_id AND c.sales_executive_id = auth.uid()
+    )
+);
+
 -- Add trigger to update updated_at timestamp for customers
 CREATE TRIGGER update_customers_updated_at
     BEFORE UPDATE ON public.customers

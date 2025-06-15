@@ -60,12 +60,11 @@ import CustomerAddressForm from "./CustomerAddressForm";
 const orderFormSchema = z.object({
   customer_id: z.string().min(1, "Customer is required"),
   notes: z.string().optional(),
-  payment_method: z.enum(['full_credit', 'partial_payment', 'full_payment'], {
-    required_error: "Payment method is required",
-  }),
-  payment_status: z.enum(['pending', 'partial', 'paid', 'credit'], {
+  payment_status: z.enum(['full_payment', 'partial_payment', 'full_credit'], {
     required_error: "Payment status is required",
   }),
+  payment_method: z.enum(['cash', 'card', 'cheque']).optional(),
+  payment_type: z.enum(['full_payment', 'partial_payment', 'full_credit']).optional(),
   shipping_address_id: z.string().min(1, "Shipping address is required"),
   billing_address_id: z.string().optional(),
   partial_payment_amount: z.number().optional(),
@@ -173,8 +172,9 @@ export default function CreateOrder() {
     defaultValues: {
       customer_id: customerId || "",
       notes: "",
-      payment_method: "full_payment",
-      payment_status: "paid",
+      payment_status: "full_payment",
+      payment_method: "cash",
+      payment_type: "full_payment",
       shipping_address_id: "",
       billing_address_id: "",
       partial_payment_amount: undefined,
@@ -184,8 +184,10 @@ export default function CreateOrder() {
   
   const isLoading = customerLoading || productsLoading || addressesLoading;
   
-  // Watch payment method to conditionally render fields
-  const paymentMethod = form.watch("payment_method");
+  // Watch payment status to conditionally render fields
+  const paymentStatus = form.watch("payment_status");
+  // Watch payment type for backward compatibility with existing code
+  const paymentType = form.watch("payment_type");
   
   // Debug products loading
   useEffect(() => {
@@ -228,23 +230,31 @@ export default function CreateOrder() {
     }
   }, [addresses, form]);
   
-  // Handle payment method change
+  // Handle payment status change
   useEffect(() => {
-    const method = form.getValues('payment_method');
+    const status = form.getValues('payment_status');
     
-    // Update payment status based on payment method
-    if (method === 'full_payment') {
-      form.setValue('payment_status', 'paid');
+    // Keep payment_type in sync with payment_status for backward compatibility
+    form.setValue('payment_type', status);
+    
+    // Update form fields based on payment status
+    if (status === 'full_payment') {
       // Clear credit fields
       form.setValue('credit_period', undefined);
       form.setValue('partial_payment_amount', undefined);
-    } else if (method === 'partial_payment') {
-      form.setValue('payment_status', 'partial');
-    } else if (method === 'full_credit') {
-      form.setValue('payment_status', 'credit');
+    } else if (status === 'partial_payment') {
+      // Ensure payment method is set for partial payment
+      if (!form.getValues('payment_method')) {
+        form.setValue('payment_method', 'cash');
+      }
+    } else if (status === 'full_credit') {
       form.setValue('partial_payment_amount', undefined);
+      // Ensure payment method is set for full credit
+      if (!form.getValues('payment_method')) {
+        form.setValue('payment_method', 'cash');
+      }
     }
-  }, [form.watch('payment_method'), form]);
+  }, [form.watch('payment_status')]);
   
   // Handle address added
   const handleAddressAdded = (address: any) => {
@@ -344,6 +354,9 @@ export default function CreateOrder() {
         };
       }
       
+      // This console.log was already good for seeing what data object contains
+      console.log('Form data for mutation:', data);
+      
       const orderData: OrderData = {
         ...data,
         items,
@@ -351,7 +364,7 @@ export default function CreateOrder() {
       };
       
       // Add credit period if needed
-      if (data.payment_method === 'full_credit' || data.payment_method === 'partial_payment') {
+      if (data.payment_status === 'full_credit' || data.payment_status === 'partial_payment') {
         // Calculate dates for credit period
         const startDate = new Date();
         const endDate = new Date();
@@ -359,25 +372,30 @@ export default function CreateOrder() {
         
         // Add credit details
         orderData.credit_details = {
-          amount: data.payment_method === 'full_credit' ? totalAmount : 
+          amount: data.payment_status === 'full_credit' ? totalAmount : 
                  (totalAmount - (data.partial_payment_amount || 0)),
           period: data.credit_period || 30,
           start_date: startDate.toISOString().split('T')[0],
           end_date: endDate.toISOString().split('T')[0],
           type: 'credit',
-          description: `Credit for order - ${data.payment_method === 'full_credit' ? 'Full Credit' : 'Partial Payment'}`
+          description: `Credit for order - ${data.payment_status === 'full_credit' ? 'Full Credit' : 'Partial Payment'}`
         };
       }
       
+      // Log the final object being sent to the service
+      console.log('Final orderData being sent to customerService.createOrderForCustomer:', orderData);
+      
       return await customerService.createOrderForCustomer(data.customer_id, orderData);
     },
-    onSuccess: () => {
+    onSuccess: (response) => { // Add response to onSuccess to log it
+      console.log('Order creation API response in onSuccess:', response);
       queryClient.invalidateQueries({ queryKey: ['customerOrders', customerId] });
       toast.success('Order created successfully');
       navigate(`/sales/customers/${customerId}/orders`);
     },
     onError: (error: any) => {
-      toast.error(`Failed to create order: ${error.message || 'Unknown error'}`);
+      console.error('Order creation mutation error:', error.response ? error.response.data : error.message);
+      toast.error(`Failed to create order: ${error.response?.data?.error || error.message || 'Unknown error'}`);
     },
   });
   
@@ -388,20 +406,23 @@ export default function CreateOrder() {
       return;
     }
     
+    console.log('Submitting order with payment status:', data.payment_status);
+    console.log('Payment method:', data.payment_method);
+    
     // Validate payment data
-    if (data.payment_method === 'partial_payment' && (!data.partial_payment_amount || data.partial_payment_amount <= 0)) {
+    if (data.payment_status === 'partial_payment' && (!data.partial_payment_amount || data.partial_payment_amount <= 0)) {
       toast.error('Please enter a valid partial payment amount');
       return;
     }
     
-    if ((data.payment_method === 'partial_payment' || data.payment_method === 'full_credit') && 
+    if ((data.payment_status === 'partial_payment' || data.payment_status === 'full_credit') && 
         (!data.credit_period || data.credit_period <= 0)) {
       toast.error('Please enter a valid credit period');
       return;
     }
     
     // Validate partial payment amount doesn't exceed total
-    if (data.payment_method === 'partial_payment' && 
+    if (data.payment_status === 'partial_payment' && 
         data.partial_payment_amount && 
         data.partial_payment_amount >= totalAmount) {
       toast.error('Partial payment amount must be less than the total order amount');
@@ -419,6 +440,9 @@ export default function CreateOrder() {
       items: processedItems,
       total_amount: totalAmount
     });
+    
+    // Log exact values being sent
+    console.log('Final order submission with payment_status:', data.payment_status);
   };
   
   return (
@@ -724,60 +748,94 @@ export default function CreateOrder() {
                             <h3 className="text-lg font-medium mb-4">Payment Information</h3>
                             
                             <div className="space-y-6">
-                              {/* Payment Method */}
+                              {/* Payment Status */}
                     <FormField
                       control={form.control}
-                      name="payment_method"
+                      name="payment_status"
                       render={({ field }) => (
-                                <FormItem className="space-y-2">
-                          <FormLabel>Payment Method *</FormLabel>
-                                  <div className="space-y-4">
-                                    <RadioGroup
-                              onValueChange={field.onChange} 
+                        <FormItem className="space-y-2">
+                          <FormLabel>Payment Option *</FormLabel>
+                          <div className="space-y-4">
+                            <RadioGroup
+                              onValueChange={(value) => {
+                                // Update both payment_status and payment_type for compatibility
+                                field.onChange(value);
+                                form.setValue('payment_type', value as 'full_payment' | 'partial_payment' | 'full_credit');
+                              }} 
                               defaultValue={field.value}
-                                      className="flex flex-col space-y-3"
-                                    >
-                                      <div className="flex items-center space-x-3 border p-4 rounded-md">
-                                        <RadioGroupItem value="full_payment" id="full_payment" />
-                                        <label 
-                                          htmlFor="full_payment"
-                                          className="flex-1 cursor-pointer text-sm"
-                                        >
-                                          <div className="font-medium">Full Payment</div>
-                                          <div className="text-muted-foreground">Customer pays full amount today</div>
-                                        </label>
-                                      </div>
-                                      
-                                      <div className="flex items-center space-x-3 border p-4 rounded-md">
-                                        <RadioGroupItem value="partial_payment" id="partial_payment" />
-                                        <label 
-                                          htmlFor="partial_payment"
-                                          className="flex-1 cursor-pointer text-sm"
-                                        >
-                                          <div className="font-medium">Partial Payment</div>
-                                          <div className="text-muted-foreground">Customer pays part of the amount today and the rest on credit</div>
-                                        </label>
-                                      </div>
-                                      
-                                      <div className="flex items-center space-x-3 border p-4 rounded-md">
-                                        <RadioGroupItem value="full_credit" id="full_credit" />
-                                        <label 
-                                          htmlFor="full_credit"
-                                          className="flex-1 cursor-pointer text-sm"
-                                        >
-                                          <div className="font-medium">Full Credit</div>
-                                          <div className="text-muted-foreground">Customer pays full amount later</div>
-                                        </label>
-                                      </div>
-                                    </RadioGroup>
-                                  </div>
+                              className="flex flex-col space-y-3"
+                            >
+                              <div className="flex items-center space-x-3 border p-4 rounded-md">
+                                <RadioGroupItem value="full_payment" id="full_payment" />
+                                <label 
+                                  htmlFor="full_payment"
+                                  className="flex-1 cursor-pointer text-sm"
+                                >
+                                  <div className="font-medium">Full Payment</div>
+                                  <div className="text-muted-foreground">Customer pays full amount today</div>
+                                </label>
+                              </div>
+                              
+                              <div className="flex items-center space-x-3 border p-4 rounded-md">
+                                <RadioGroupItem value="partial_payment" id="partial_payment" />
+                                <label 
+                                  htmlFor="partial_payment"
+                                  className="flex-1 cursor-pointer text-sm"
+                                >
+                                  <div className="font-medium">Partial Payment</div>
+                                  <div className="text-muted-foreground">Customer pays part of the amount today and the rest on credit</div>
+                                </label>
+                              </div>
+                              
+                              <div className="flex items-center space-x-3 border p-4 rounded-md">
+                                <RadioGroupItem value="full_credit" id="full_credit" />
+                                <label 
+                                  htmlFor="full_credit"
+                                  className="flex-1 cursor-pointer text-sm"
+                                >
+                                  <div className="font-medium">Full Credit</div>
+                                  <div className="text-muted-foreground">Customer pays full amount later</div>
+                                </label>
+                              </div>
+                            </RadioGroup>
+                          </div>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
                       
+                              {/* Payment Method */}
+                              <FormField
+                                control={form.control}
+                                name="payment_method"
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>Payment Method *</FormLabel>
+                                    <Select
+                                      onValueChange={field.onChange}
+                                      defaultValue={field.value}
+                                    >
+                                      <FormControl>
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select payment method" />
+                                        </SelectTrigger>
+                                      </FormControl>
+                                      <SelectContent>
+                                        <SelectItem value="cash">Cash</SelectItem>
+                                        <SelectItem value="card">Card</SelectItem>
+                                        <SelectItem value="cheque">Cheque</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                    <FormDescription>
+                                      How will the customer make the payment?
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                  
                               {/* Partial Payment Amount (Only for Partial Payment) */}
-                              {paymentMethod === 'partial_payment' && (
+                              {paymentStatus === 'partial_payment' && (
                     <FormField
                       control={form.control}
                                 name="partial_payment_amount"
@@ -804,7 +862,7 @@ export default function CreateOrder() {
                               )}
                   
                               {/* Credit Period (For Credit & Partial Payment) */}
-                              {(paymentMethod === 'full_credit' || paymentMethod === 'partial_payment') && (
+                              {(paymentStatus === 'full_credit' || paymentStatus === 'partial_payment') && (
                     <FormField
                       control={form.control}
                                 name="credit_period"
@@ -815,13 +873,19 @@ export default function CreateOrder() {
                                       <Input
                                         type="number"
                                         min="1"
-                                        placeholder="30"
-                                        onChange={(e) => field.onChange(parseInt(e.target.value))}
+                                        max={customer?.credit_period_days || 30}
+                                        placeholder={`Max: ${customer?.credit_period_days || 30} days`}
+                                        onChange={(e) => {
+                                          const value = parseInt(e.target.value);
+                                          if (value <= (customer?.credit_period_days || 30)) {
+                                            field.onChange(value);
+                                          }
+                                        }}
                                         value={field.value === undefined ? '' : field.value}
                                       />
                         </FormControl>
                                       <FormDescription>
-                                        Number of days until payment is due
+                                        Number of days until payment is due (Maximum: {customer?.credit_period_days || 30} days)
                                       </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -862,7 +926,7 @@ export default function CreateOrder() {
                                 <span>${totalAmount.toFixed(2)}</span>
                               </div>
                               
-                              {paymentMethod === 'partial_payment' && (
+                              {paymentStatus === 'partial_payment' && (
                                 <>
                                   <div className="flex justify-between">
                                     <span>Paying Now:</span>
@@ -875,19 +939,29 @@ export default function CreateOrder() {
                                 </>
                               )}
                               
-                              {paymentMethod === 'full_credit' && (
+                              <div className="flex justify-between">
+                                <span>Payment Method:</span>
+                                <span>{form.getValues('payment_method')?.charAt(0).toUpperCase() + form.getValues('payment_method')?.slice(1) || 'Cash'}</span>
+                              </div>
+                              
+                              {paymentStatus === 'full_credit' && (
                                 <div className="flex justify-between">
                                   <span>On Credit:</span>
                                   <span>${totalAmount.toFixed(2)}</span>
                                 </div>
                               )}
                               
-                              {(paymentMethod === 'full_credit' || paymentMethod === 'partial_payment') && (
+                              {(paymentStatus === 'full_credit' || paymentStatus === 'partial_payment') && (
                                 <div className="flex justify-between">
                                   <span>Credit Period:</span>
                                   <span>{form.getValues('credit_period') || 0} days</span>
                                 </div>
                               )}
+                              
+                              <div className="flex justify-between">
+                                <span>Payment Status:</span>
+                                <span>{form.getValues('payment_status')?.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</span>
+                              </div>
                             </div>
                           </div>
                         </div>

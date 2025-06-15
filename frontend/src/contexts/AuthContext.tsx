@@ -209,6 +209,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const userIsAdmin = profileData.role === 'admin';
         console.log('User admin status from profile:', userIsAdmin);
         setIsAdmin(userIsAdmin);
+        
+        // Store the role in localStorage for API components to access
+        localStorage.setItem('userRole', profileData.role);
       }
       
       setIsLoading(false);
@@ -329,10 +332,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Explicitly remove all tokens
       localStorage.removeItem('supabase_token');
       localStorage.removeItem('token'); // Remove backend token if exists
+      localStorage.removeItem('userRole'); // Remove cached user role
+      localStorage.removeItem('currentCustomerId'); // Remove any stored customer ID
       console.log('All tokens removed after sign out');
       
+      // Reset all state before navigation
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+      setIsAdmin(false);
+      
       toast.success('Successfully signed out!');
-      navigate('/auth');
+      
+      // Use setTimeout to ensure state updates are complete before navigation
+      setTimeout(() => {
+        navigate('/auth', { replace: true });
+      }, 0);
     } catch (error) {
       console.error('Error signing out:', error);
       throw error;
