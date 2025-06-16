@@ -155,7 +155,7 @@ const Account = () => {
         
         try {
           // Make a direct fetch request to check exact response
-          const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'}/auth/addresses`, {
+          const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'https://rishabh.dtsanskar.tech/api' || 'http://localhost:5000/api'}/auth/addresses`, {
             headers: {
               'Authorization': `Bearer ${sessionData.session.access_token}`,
               'Content-Type': 'application/json'
