@@ -54,7 +54,7 @@ export const categoriesService = {
 };
 
 export const fetchCategories = async (): Promise<ProductCategory[]> => {
-  const response = await fetch(`${API_BASE_URL}/api/categories`);
+  const response = await fetch(`${API_BASE_URL}/categories`);
   if (!response.ok) {
     throw new Error('Failed to fetch categories');
   }
