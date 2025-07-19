@@ -176,7 +176,8 @@ CREATE TABLE IF NOT EXISTS public.payments (
     transaction_references JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT valid_status CHECK (status IN ('pending', 'completed', 'failed', 'refunded'))
+    CONSTRAINT valid_status CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
+    CONSTRAINT unique_stripe_payment_intent UNIQUE (stripe_payment_intent_id)
 );
 
 -- Cart Table
@@ -772,3 +773,10 @@ CREATE TRIGGER update_customers_updated_at
     BEFORE UPDATE ON public.customers
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column(); 
+
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow service role to insert payments"
+  ON payments
+  FOR INSERT
+  USING (auth.role() = 'service_role');

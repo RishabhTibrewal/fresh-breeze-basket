@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { User, Package, CreditCard, Settings, LogOut, ChevronLeft } from 'lucide-react';
+import { User, Package, CreditCard, Settings, LogOut, ChevronLeft, Receipt } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { UserNav } from '@/components/user/UserNav';
@@ -29,6 +29,12 @@ const AccountLayout = () => {
       href: '/account/orders', 
       icon: Package, 
       active: pathname === '/account/orders' || pathname.startsWith('/account/orders/') 
+    },
+    { 
+      name: 'Payment History', 
+      href: '/account/payments', 
+      icon: Receipt, 
+      active: pathname === '/account/payments' 
     },
     { 
       name: 'Payment Methods', 

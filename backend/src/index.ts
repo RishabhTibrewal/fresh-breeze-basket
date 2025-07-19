@@ -62,7 +62,16 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   credentials: true,
 }));
-app.use(express.json());
+
+// JSON parsing middleware - exclude webhook route
+app.use((req, res, next) => {
+  if (req.path === '/api/payments/webhook') {
+    // Skip JSON parsing for webhook route
+    next();
+  } else {
+    express.json()(req, res, next);
+  }
+});
 
 // Request logging middleware
 app.use((req, res, next) => {

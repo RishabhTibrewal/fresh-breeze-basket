@@ -26,6 +26,7 @@ import ProfilePage from "./pages/account/ProfilePage";
 import AddressPage from "./pages/account/AddressPage";
 import OrdersPage from "./pages/account/OrdersPage";
 import PaymentMethodsPage from "./pages/account/PaymentMethodsPage";
+import PaymentHistoryPage from "./pages/account/PaymentHistoryPage";
 import SettingsPage from "./pages/account/SettingsPage";
 import OrderDetailsPage from "./pages/account/OrderDetailsPage";
 import CustomerProfilePage from "./pages/account/CustomerProfilePage";
@@ -52,6 +53,7 @@ import OrderUpdate from "./pages/sales/OrderUpdate";
 import Orders from "./pages/sales/Orders";
 import CreditManagement from "./pages/sales/CreditManagement";
 import SalesProtectedRoute from "./components/auth/SalesProtectedRoute";
+import { TestPayment } from './components/TestPayment';
 
 // Create a new QueryClient instance inside the component
 const App: React.FC = () => {
@@ -79,6 +81,7 @@ const App: React.FC = () => {
                   <Route path="/shipping" element={<Shipping />} />
                   <Route path="/returns" element={<Returns />} />
                   <Route path="/auth" element={<Auth />} />
+                  <Route path="/test-payment" element={<TestPayment />} />
                   
                   {/* Protected Routes */}
                   <Route path="/account" element={<ProtectedRoute><AccountLayout /></ProtectedRoute>}>
@@ -87,6 +90,7 @@ const App: React.FC = () => {
                     <Route path="address" element={<AddressPage />} />
                     <Route path="orders" element={<OrdersPage />} />
                     <Route path="orders/:id" element={<OrderDetailsPage />} />
+                    <Route path="payments" element={<PaymentHistoryPage />} />
                     <Route path="payment" element={<PaymentMethodsPage />} />
                     <Route path="settings" element={<SettingsPage />} />
                   </Route>

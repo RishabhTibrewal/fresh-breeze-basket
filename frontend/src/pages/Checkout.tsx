@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { CheckCircle, Plus, MapPin, CreditCard, Loader2 } from "lucide-react";
+import { CheckCircle, Plus, MapPin, CreditCard, Loader2, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
 import Navbar from "@/components/Navbar";
@@ -12,6 +12,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
+import { PaymentForm } from "@/components/PaymentForm";
+import { StripeProvider } from "@/components/StripeProvider";
 
 import { addressApi } from "@/api/addresses";
 import { ordersService } from "@/api/orders";
@@ -19,6 +21,8 @@ import { productsService } from "@/api/products";
 import { useCart } from "@/contexts/CartContext";
 import { Address } from "@/types/database";
 import AddressForm from "./account/AddressForm";
+import { API_BASE_URL } from "@/config";
+import { paymentsService } from '@/api/payments';
 
 export default function CheckoutPage() {
   const navigate = useNavigate();
@@ -27,6 +31,11 @@ export default function CheckoutPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+  const [showPayment, setShowPayment] = useState(false);
+  const [orderData, setOrderData] = useState<any>(null);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  const [isInitializingPayment, setIsInitializingPayment] = useState(false);
 
   // Fetch user's addresses
   const { 
@@ -54,7 +63,7 @@ export default function CheckoutPage() {
   // Create order mutation
   const createOrder = useMutation({
     mutationFn: ordersService.create,
-    onSuccess: () => {
+    onSuccess: (data) => {
       toast.success("Order placed successfully!");
       clearCart();
       setIsProcessing(false);
@@ -70,7 +79,7 @@ export default function CheckoutPage() {
     }
   });
 
-  const handlePlaceOrder = async () => {
+  const handleProceedToPayment = async () => {
     if (!selectedAddressId) {
       toast.error("Please select a delivery address");
       return;
@@ -83,6 +92,7 @@ export default function CheckoutPage() {
 
     try {
       setIsProcessing(true);
+      setIsInitializingPayment(true);
       
       // Get the selected address details
       const selectedAddress = addresses.find(addr => addr.id === selectedAddressId);
@@ -90,6 +100,7 @@ export default function CheckoutPage() {
       if (!selectedAddress) {
         toast.error("Selected address not found");
         setIsProcessing(false);
+        setIsInitializingPayment(false);
         return;
       }
       
@@ -113,6 +124,7 @@ export default function CheckoutPage() {
       if (validProducts.length !== productIds.length) {
         toast.error("Some products are unavailable. Please refresh and try again.");
         setIsProcessing(false);
+        setIsInitializingPayment(false);
         return;
       }
       
@@ -135,32 +147,107 @@ export default function CheckoutPage() {
       const taxAmount = subtotal * taxRate;
       const totalAmount = subtotal + shippingCost + taxAmount;
       
-      // Prepare order data with only IDs, explicitly not including address objects
-      const orderData = {
+      // Store order data for payment step (don't create order yet)
+      const orderDataToSave = {
         items,
         shipping_address_id: selectedAddressId,
-        billing_address_id: selectedAddressId, // Using same address for billing and shipping
-        payment_method: 'card', // Default to card payment
+        billing_address_id: selectedAddressId,
+        payment_method: 'card',
         total_amount: totalAmount,
         tax_amount: taxAmount,
-        tax_rate: taxRate
+        tax_rate: taxRate,
+        status: 'pending',
+        payment_status: 'pending'
       };
 
-      // Log the data being sent to the backend
-      console.log("Order Data being sent to backend:", orderData);
-      console.log("Selected Address ID:", selectedAddressId);
-      console.log("Addresses:", addresses);
-
-      // Create the order
-      const result = await createOrder.mutateAsync(orderData);
+      console.log('Preparing order data for payment:', orderDataToSave);
       
-      // If successful, the createOrder.onSuccess will handle navigation and cart clearing
+      // Create payment intent first (without order ID)
+      const paymentResponse = await fetch(`${API_BASE_URL}/payments/create-payment-intent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          amount: totalAmount
+        }),
+      });
+
+      if (!paymentResponse.ok) {
+        const errorData = await paymentResponse.text();
+        console.error('Payment intent creation failed:', {
+          status: paymentResponse.status,
+          statusText: paymentResponse.statusText,
+          error: errorData
+        });
+        throw new Error(`Failed to create payment intent: ${paymentResponse.status} ${paymentResponse.statusText}`);
+      }
+
+      const { clientSecret: secret, paymentIntentId } = await paymentResponse.json();
+      setClientSecret(secret);
+      setPaymentIntentId(paymentIntentId);
+      
+      // Store order data for after payment (include payment intent ID)
+      setOrderData({
+        ...orderDataToSave,
+        payment_intent_id: paymentIntentId
+      });
+      setShowPayment(true);
+      setIsProcessing(false);
+      setIsInitializingPayment(false);
       
     } catch (error) {
-      console.error("Error placing order:", error);
-      toast.error("Failed to place order");
+      console.error("Error preparing payment:", error);
+      toast.error("Failed to prepare payment");
+      setIsProcessing(false);
+      setIsInitializingPayment(false);
+    }
+  };
+
+  const handlePaymentSuccess = async () => {
+    if (!orderData) {
+      toast.error("Order data not found");
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      
+      console.log('Creating order with data:', orderData);
+      console.log('Payment intent ID in orderData:', orderData.payment_intent_id);
+      
+      // Create the order after successful payment
+      const orderResult = await createOrder.mutateAsync(orderData);
+      const orderId = orderResult.order_id;
+      
+      console.log('Order created after payment with ID:', orderId);
+      
+      toast.success("Order placed successfully!");
+      clearCart();
+      setIsProcessing(false);
+      navigate("/thank-you");
+      
+    } catch (error) {
+      console.error("Error creating order after payment:", error);
+      toast.error("Payment successful but order creation failed. Please contact support.");
       setIsProcessing(false);
     }
+  };
+
+  const handlePaymentFailure = () => {
+    // Reset payment state and go back to checkout
+    setShowPayment(false);
+    setOrderData(null);
+    setClientSecret(null);
+    setPaymentIntentId(null);
+    toast.error("Payment failed. Please try again.");
+  };
+
+  const handleBackToCheckout = () => {
+    setShowPayment(false);
+    setOrderData(null);
+    setClientSecret(null);
+    setPaymentIntentId(null);
   };
 
   // Handle address added
@@ -175,6 +262,12 @@ export default function CheckoutPage() {
     setShowAddressForm(false);
     setEditingAddressId(null);
   };
+
+  // Calculate totals
+  const subtotal = cartState.subtotal;
+  const shippingCost = subtotal >= 100 ? 0 : 10;
+  const taxAmount = subtotal * 0.05;
+  const totalAmount = subtotal + shippingCost + taxAmount;
 
   // Handle loading state
   if (isLoadingAddresses) {
@@ -209,6 +302,130 @@ export default function CheckoutPage() {
     );
   }
 
+  // Payment step
+  if (showPayment) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Navbar />
+        <main className="flex-grow bg-gray-50 py-8">
+          <div className="container mx-auto px-4 max-w-4xl">
+            <div className="mb-6">
+              <Button 
+                variant="ghost" 
+                onClick={handleBackToCheckout}
+                className="mb-4"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Checkout
+              </Button>
+              <h1 className="text-2xl md:text-3xl font-bold">Complete Payment</h1>
+              <p className="text-gray-600 mt-2">Secure payment powered by Stripe</p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Payment Form */}
+              <div className="bg-white rounded-lg shadow-md p-6">
+                <h2 className="text-xl font-semibold mb-6">Payment Details</h2>
+                {clientSecret ? (
+                  <StripeProvider clientSecret={clientSecret}>
+                    <PaymentForm 
+                      amount={totalAmount} 
+                      clientSecret={clientSecret}
+                      onSuccess={handlePaymentSuccess} 
+                      onFailure={handlePaymentFailure}
+                    />
+                  </StripeProvider>
+                ) : (
+                  <div className="text-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                    <p className="text-gray-600">Initializing payment...</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Order Summary */}
+              <div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Order Summary</CardTitle>
+                    <CardDescription>Review your order details</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Products */}
+                    <div className="space-y-3">
+                      {cartState.items.map((item) => (
+                        <div key={item.id} className="flex justify-between">
+                          <div className="flex-1">
+                            <div className="font-medium">{item.name}</div>
+                            <div className="text-sm text-gray-500">
+                              {item.quantity} x {item.sale_price ? (
+                                <>
+                                  <span className="text-red-500">AED {item.sale_price.toFixed(2)}</span>
+                                  <span className="line-through ml-1 text-gray-400">AED {item.price.toFixed(2)}</span>
+                                </>
+                              ) : (
+                                <span>AED {item.price.toFixed(2)}</span>
+                              )}
+                              <span className="ml-1">/{item.unit} {item.unit_type}</span>
+                            </div>
+                          </div>
+                          <div className="text-right font-medium">
+                            AED {((item.sale_price || item.price) * item.quantity).toFixed(2)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <Separator />
+
+                    {/* Totals */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Subtotal</span>
+                        <span className="font-medium">AED {subtotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Shipping</span>
+                        <span className="font-medium">
+                          {shippingCost === 0 ? "Free" : `AED ${shippingCost.toFixed(2)}`}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Tax (5%)</span>
+                        <span className="font-medium">AED {taxAmount.toFixed(2)}</span>
+                      </div>
+                      <Separator />
+                      <div className="flex justify-between text-lg font-bold">
+                        <span>Total</span>
+                        <span>AED {totalAmount.toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    {/* Security Notice */}
+                    <div className="mt-4 p-3 bg-green-50 rounded-md">
+                      <h4 className="text-sm font-medium text-green-800 mb-1">Secure Payment</h4>
+                      <p className="text-xs text-green-700">
+                        • Your payment information is encrypted and secure
+                      </p>
+                      <p className="text-xs text-green-700">
+                        • We never store your card details
+                      </p>
+                      <p className="text-xs text-green-700">
+                        • Powered by Stripe for maximum security
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  // Main checkout step
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
@@ -298,12 +515,12 @@ export default function CheckoutPage() {
                     <RadioGroupItem value="card" id="payment-card" checked={true} />
                     <Label htmlFor="payment-card" className="flex items-center cursor-pointer">
                       <CreditCard className="h-5 w-5 mr-2" />
-                      <span>Pay with Card (Secure payment)</span>
+                      <span>Pay with Card (Secure payment via Stripe)</span>
                     </Label>
                   </div>
                 </RadioGroup>
                 <p className="text-sm text-gray-500 mt-4">
-                  Your card will be charged after you proceed to payment. All transactions are secure and encrypted.
+                  Your card will be charged securely through Stripe. All transactions are encrypted and secure.
                 </p>
               </div>
             </div>
@@ -347,24 +564,22 @@ export default function CheckoutPage() {
                   <div className="space-y-2">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Subtotal</span>
-                      <span className="font-medium">AED {cartState.subtotal.toFixed(2)}</span>
+                      <span className="font-medium">AED {subtotal.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Shipping</span>
                       <span className="font-medium">
-                        {cartState.subtotal >= 100 ? "Free" : "AED 10.00"}
+                        {shippingCost === 0 ? "Free" : `AED ${shippingCost.toFixed(2)}`}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Tax (5%)</span>
-                      <span className="font-medium">AED {(cartState.subtotal * 0.05).toFixed(2)}</span>
+                      <span className="font-medium">AED {taxAmount.toFixed(2)}</span>
                     </div>
                     <Separator />
                     <div className="flex justify-between text-lg font-bold">
                       <span>Total</span>
-                      <span>
-                        AED {(cartState.subtotal + (cartState.subtotal >= 100 ? 0 : 10) + (cartState.subtotal * 0.05)).toFixed(2)}
-                      </span>
+                      <span>AED {totalAmount.toFixed(2)}</span>
                     </div>
                   </div>
 
@@ -385,7 +600,7 @@ export default function CheckoutPage() {
                 <CardFooter>
                   <Button 
                     className="w-full"
-                    onClick={handlePlaceOrder}
+                    onClick={handleProceedToPayment}
                     disabled={isProcessing || !selectedAddressId || cartState.items.length === 0}
                   >
                     {isProcessing ? (

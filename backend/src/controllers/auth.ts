@@ -522,6 +522,62 @@ export const getAddresses = async (req: Request, res: Response) => {
   }
 };
 
+// Get address by ID
+export const getAddressById = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication token required'
+      });
+    }
+    
+    console.log(`Getting address ${id} for user ${userId}`);
+    
+    // Create client with auth context
+    const authClient = createAuthClient(token);
+    
+    const { data, error } = await authClient
+      .from('addresses')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+    
+    if (error) {
+      console.error('Supabase error when fetching address:', error);
+      return res.status(404).json({
+        success: false,
+        message: 'Address not found or does not belong to user'
+      });
+    }
+    
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        message: 'Address not found'
+      });
+    }
+    
+    console.log(`Found address ${id} for user ${userId}`);
+    
+    res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error: any) {
+    console.error('Unhandled error in getAddressById:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Error getting address'
+    });
+  }
+};
+
 // Update address
 export const updateAddress = async (req: Request, res: Response) => {
   try {

@@ -7,6 +7,7 @@ import {
   updateProfile,
   addAddress,
   getAddresses,
+  getAddressById,
   deleteAddress,
   updateAddress,
   checkAdminStatus,
@@ -27,6 +28,7 @@ router.get('/me', protect, getCurrentUser);
 router.put('/profile', protect, updateProfile);
 router.post('/addresses', protect, addAddress);
 router.get('/addresses', protect, getAddresses);
+router.get('/addresses/:id', protect, getAddressById);
 router.put('/addresses/:id', protect, updateAddress);
 router.delete('/addresses/:id', protect, deleteAddress);
 router.get('/check-admin', protect, checkAdminStatus);

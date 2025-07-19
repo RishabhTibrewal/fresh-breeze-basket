@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabase } from '../config/supabase';
+import { supabaseAdmin } from '../lib/supabase';
 import { ApiError } from '../middleware/error';
 import { stripeClient } from '../config';
 import { scheduleOrderProcessing } from '../utils/orderScheduler';
@@ -327,13 +328,15 @@ export const createOrder = async (req: Request, res: Response) => {
       payment_status: req_payment_status,
       total_amount,
       credit_period,
-      partial_payment_amount
+      partial_payment_amount,
+      payment_intent_id
     } = req.body;
     const userId = req.user.id;
 
     console.log('createOrder for user ID:', userId);
     console.log('Received payment_status from request body:', req_payment_status);
     console.log('Received payment_method:', payment_method);
+    console.log('Received payment_intent_id:', payment_intent_id);
     
     if (!items || !items.length) {
       throw new ApiError(400, 'No items provided');
@@ -475,6 +478,14 @@ export const createOrder = async (req: Request, res: Response) => {
     
     // Create order
     console.log('Creating order with payment_status from request:', req_payment_status);
+    
+    // Determine final payment status
+    let finalPaymentStatus = req_payment_status;
+    if (payment_intent_id) {
+      finalPaymentStatus = 'paid';
+      console.log('Payment intent ID provided, setting payment_status to paid');
+    }
+    
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
@@ -483,8 +494,9 @@ export const createOrder = async (req: Request, res: Response) => {
         shipping_address_id: finalShippingAddressId,
         billing_address_id: finalBillingAddressId,
         total_amount,
-        payment_status: req_payment_status,
-        payment_method: payment_method 
+        payment_status: finalPaymentStatus,
+        payment_method: payment_method,
+        payment_intent_id: payment_intent_id 
       })
       .select('*')
       .single();
@@ -500,6 +512,82 @@ export const createOrder = async (req: Request, res: Response) => {
       });
     }
     console.log('Order created in DB with ID:', order.id, 'and resulting payment_status:', order.payment_status);
+
+    // If we have a payment intent ID, update the payment record to link it to this order
+    if (payment_intent_id) {
+      console.log('Linking payment record to order:', order.id);
+      
+      // First check if payment record exists
+      const { data: existingPayment, error: checkError } = await supabaseAdmin
+        .from('payments')
+        .select('id, order_id')
+        .eq('stripe_payment_intent_id', payment_intent_id)
+        .single();
+      
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.error('Error checking payment record:', checkError);
+      } else if (existingPayment) {
+        // Payment record exists, update it with order_id
+        const { error: paymentUpdateError } = await supabaseAdmin
+          .from('payments')
+          .update({
+            order_id: order.id,
+            updated_at: new Date()
+          })
+          .eq('stripe_payment_intent_id', payment_intent_id);
+
+        if (paymentUpdateError) {
+          console.error('Error updating payment record with order_id:', paymentUpdateError);
+        } else {
+          console.log('Successfully linked existing payment record to order');
+        }
+      } else {
+        // Payment record doesn't exist, create it with order_id
+        console.log('Payment record not found, creating new one with order_id');
+        const { error: paymentCreateError } = await supabaseAdmin
+          .from('payments')
+          .insert({
+            order_id: order.id,
+            amount: total_amount,
+            status: 'completed',
+            payment_method: 'card',
+            stripe_payment_intent_id: payment_intent_id,
+            payment_gateway_response: {
+              source: 'order_creation',
+              created_at: new Date().toISOString(),
+              payment_intent_id: payment_intent_id
+            },
+            transaction_references: {
+              order_created: true,
+              stripe_payment_intent_id: payment_intent_id
+            }
+          });
+
+        if (paymentCreateError) {
+          console.error('Error creating payment record:', paymentCreateError);
+          // Check if it's a duplicate key error
+          if (paymentCreateError.code === '23505') {
+            console.log('Duplicate payment record detected, attempting to update existing record');
+            // Try to update the existing record instead
+            const { error: updateError } = await supabaseAdmin
+              .from('payments')
+              .update({
+                order_id: order.id,
+                updated_at: new Date()
+              })
+              .eq('stripe_payment_intent_id', payment_intent_id);
+
+            if (updateError) {
+              console.error('Error updating existing payment record:', updateError);
+            } else {
+              console.log('Successfully updated existing payment record with order_id');
+            }
+          }
+        } else {
+          console.log('Successfully created payment record with order_id');
+        }
+      }
+    }
 
     // If payment status is credit or partial, create credit period
     if (req_payment_status === 'full_credit' || req_payment_status === 'partial_payment') {
