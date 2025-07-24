@@ -23,6 +23,7 @@ import { Address } from "@/types/database";
 import AddressForm from "./account/AddressForm";
 import { API_BASE_URL } from "@/config";
 import { paymentsService } from '@/api/payments';
+import  apiClient  from '@/lib/apiClient';
 
 export default function CheckoutPage() {
   const navigate = useNavigate();
@@ -163,34 +164,16 @@ export default function CheckoutPage() {
       console.log('Preparing order data for payment:', orderDataToSave);
       
       // Create payment intent first (without order ID)
-      const paymentResponse = await fetch(`${API_BASE_URL}/payments/create-payment-intent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          amount: totalAmount
-        }),
+      const { data } = await apiClient.post('/payments/create-payment-intent', {
+        amount: totalAmount
       });
-
-      if (!paymentResponse.ok) {
-        const errorData = await paymentResponse.text();
-        console.error('Payment intent creation failed:', {
-          status: paymentResponse.status,
-          statusText: paymentResponse.statusText,
-          error: errorData
-        });
-        throw new Error(`Failed to create payment intent: ${paymentResponse.status} ${paymentResponse.statusText}`);
-      }
-
-      const { clientSecret: secret, paymentIntentId } = await paymentResponse.json();
-      setClientSecret(secret);
-      setPaymentIntentId(paymentIntentId);
+      setClientSecret(data.clientSecret);
+      setPaymentIntentId(data.paymentIntentId);
       
       // Store order data for after payment (include payment intent ID)
       setOrderData({
         ...orderDataToSave,
-        payment_intent_id: paymentIntentId
+        payment_intent_id: data.paymentIntentId
       });
       setShowPayment(true);
       setIsProcessing(false);
