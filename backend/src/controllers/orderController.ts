@@ -93,13 +93,6 @@ export const orderController = {
       const calculatedTotalAmount = total_amount || (subtotal + shipping_fee + tax);
       console.log('Calculated total_amount:', calculatedTotalAmount);
 
-      // Check if customer has enough credit for credit-based payment methods
-      if ((payment_method === 'full_credit' || payment_method === 'partial_payment') && 
-          (customer.current_credit + (payment_method === 'full_credit' ? calculatedTotalAmount : (calculatedTotalAmount - (partial_payment_amount || 0)))) > customer.credit_limit) {
-        console.error('Credit limit exceeded. Current credit:', customer.current_credit, 'Credit limit:', customer.credit_limit);
-        return res.status(400).json({ error: 'Credit limit exceeded' });
-      }
-
       console.log('Creating order with payment status:', payment_status);
 
       // Use the payment_status from the frontend directly if provided, otherwise determine based on payment_method
@@ -128,6 +121,50 @@ export const orderController = {
       }
 
       console.log('Creating order with final payment status:', orderPaymentStatus);
+
+      // Check credit limit BEFORE creating the order (only if customer has a credit limit set)
+      const isCreditOrder = orderPaymentStatus === 'credit' || orderPaymentStatus === 'partial';
+      const isFullCreditForLimitCheck = orderPaymentStatus === 'credit';
+      
+      if (isCreditOrder && customer.credit_limit && customer.credit_limit > 0) {
+        // Calculate the credit amount for this order
+        const creditAmount = isFullCreditForLimitCheck
+          ? calculatedTotalAmount
+          : (calculatedTotalAmount - (partial_payment_amount || 0));
+        
+        // Calculate projected total credit after this order
+        const currentCredit = parseFloat(customer.current_credit?.toString() || '0');
+        const creditLimit = parseFloat(customer.credit_limit?.toString() || '0');
+        const projectedCredit = currentCredit + creditAmount;
+        
+        console.log('Credit limit check:', {
+          currentCredit,
+          creditLimit,
+          creditAmount,
+          projectedCredit,
+          isFullCredit: isFullCreditForLimitCheck
+        });
+        
+        // Check if this order would exceed the credit limit
+        if (projectedCredit > creditLimit) {
+          console.error('Credit limit exceeded:', {
+            currentCredit,
+            creditLimit,
+            creditAmount,
+            projectedCredit
+          });
+          return res.status(400).json({ 
+            error: 'Credit limit exceeded for this customer',
+            details: {
+              currentCredit: currentCredit.toFixed(2),
+              creditLimit: creditLimit.toFixed(2),
+              orderCreditAmount: creditAmount.toFixed(2),
+              projectedTotal: projectedCredit.toFixed(2),
+              availableCredit: Math.max(0, creditLimit - currentCredit).toFixed(2)
+            }
+          });
+        }
+      }
 
       // Create order record data object for better logging
       const orderData = {
@@ -282,19 +319,9 @@ export const orderController = {
         }
       }
 
-      // Update product stock
-      for (const item of items as OrderItemInput[]) {
-        // Call update_stock function
-        const { error: stockError } = await supabase.rpc('update_stock', {
-          p_id: item.product_id,
-          quantity: -item.quantity
-        });
-
-        if (stockError) {
-          console.error('Error updating stock for product', item.product_id, ':', stockError);
-          // Continue processing - don't fail the order if stock update fails
-        }
-      }
+      // Note: Inventory will be updated when order status changes from 'pending' to next stage
+      // This allows negative stock for sales dashboard orders when status is updated
+      // Inventory update is handled in updateOrderStatus function
 
       res.status(201).json(order);
     } catch (error: any) {

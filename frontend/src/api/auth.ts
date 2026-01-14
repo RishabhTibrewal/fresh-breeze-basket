@@ -25,13 +25,10 @@ export interface UserProfile {
 }
 
 export interface UpdateProfileData {
-  name?: string;
+  first_name?: string;
+  last_name?: string;
   phone?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  country?: string;
-  postalCode?: string;
+  avatar_url?: string;
 }
 
 export interface UpdateRoleData {
@@ -67,8 +64,20 @@ export const authService = {
   },
 
   async updateProfile(profileData: UpdateProfileData): Promise<UserProfile> {
-    const { data } = await apiClient.put<UserProfile>('/auth/profile', profileData);
-    return data;
+    console.log('[authService.updateProfile] Called with data:', profileData);
+    console.log('[authService.updateProfile] Making PUT request to /auth/profile');
+    try {
+      const response = await apiClient.put<{ success: boolean; data: UserProfile }>('/auth/profile', profileData);
+      console.log('[authService.updateProfile] API response:', response);
+      console.log('[authService.updateProfile] Response data:', response.data);
+      // Backend returns { success: true, data: ... }
+      const result = response.data.success ? response.data.data : response.data as any;
+      console.log('[authService.updateProfile] Returning result:', result);
+      return result;
+    } catch (error) {
+      console.error('[authService.updateProfile] API call failed:', error);
+      throw error;
+    }
   },
 
   async checkAdminStatus(): Promise<any> {

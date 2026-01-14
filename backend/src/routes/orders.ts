@@ -7,8 +7,10 @@ import {
   getUserOrders,
   cancelOrder,
   getSalesOrders,
-  getSalesDashboardStats
+  getSalesDashboardStats,
+  getSalesAnalytics
 } from '../controllers';
+import { getCurrentSalesTarget } from '../controllers/admin';
 import { protect, adminOnly } from '../middleware/auth';
 
 const router = express.Router();
@@ -19,6 +21,8 @@ router.get('/my-orders', protect, getUserOrders);
 // Sales executive routes - must be before /:id route
 router.get('/sales', protect, getSalesOrders);
 router.get('/sales/dashboard-stats', protect, getSalesDashboardStats);
+router.get('/sales/analytics', protect, getSalesAnalytics);
+router.get('/sales/current-target', protect, getCurrentSalesTarget);
 
 // Admin only routes
 router.get('/', protect, adminOnly, getOrders);

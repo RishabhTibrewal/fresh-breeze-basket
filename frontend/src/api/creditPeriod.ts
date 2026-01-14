@@ -27,7 +27,12 @@ export const creditPeriodService = {
         return response.data.data;
       }
       return null;
-    } catch (error) {
+    } catch (error: any) {
+      // Handle 404 as a normal case (no credit period for this order)
+      if (error.response?.status === 404) {
+        console.log('No credit period found for order ID:', orderId);
+        return null;
+      }
       console.error('Error fetching credit period for order:', error);
       return null;
     }

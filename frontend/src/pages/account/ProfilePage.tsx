@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import * as z from 'zod';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { authService } from '@/api/auth';
 import {
   Card,
   CardContent,
@@ -31,7 +32,7 @@ const profileSchema = z.object({
 });
 
 export default function ProfilePage() {
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const profileForm = useForm<z.infer<typeof profileSchema>>({
@@ -51,12 +52,29 @@ export default function ProfilePage() {
   });
 
   const onProfileSubmit = async (values: z.infer<typeof profileSchema>) => {
+    console.log('=== PROFILE PAGE FORM SUBMISSION STARTED ===');
+    console.log('Profile form submitted with values:', values);
     setIsSubmitting(true);
     try {
-      // TODO: Implement profile update logic here
+      console.log('Calling authService.updateProfile from ProfilePage...');
+      // Use backend API endpoint to update profile
+      const result = await authService.updateProfile({
+        first_name: values.firstName,
+        last_name: values.lastName,
+        phone: values.phone,
+      });
+      console.log('Profile update successful, result:', result);
+
+      // Refresh profile in AuthContext to update the UI
+      await refreshProfile();
+
       toast.success('Profile updated successfully!');
+      console.log('=== PROFILE PAGE FORM SUBMISSION COMPLETED SUCCESSFULLY ===');
     } catch (error: any) {
-      toast.error(error.message || 'Failed to update profile');
+      console.error('=== PROFILE PAGE FORM SUBMISSION ERROR ===');
+      console.error('Error updating profile:', error);
+      console.error('Error details:', error.response?.data || error.message);
+      toast.error(error.response?.data?.message || error.message || 'Failed to update profile');
     } finally {
       setIsSubmitting(false);
     }

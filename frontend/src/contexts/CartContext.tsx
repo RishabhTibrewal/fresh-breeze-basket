@@ -49,6 +49,7 @@ const CartContext = createContext<{
   setIsCartOpen: (isOpen: boolean) => void;
   isSyncing: boolean;
   syncCartWithBackend: () => Promise<void>;
+  loadBackendCart: () => Promise<void>;
 }>({
   state: initialState,
   dispatch: () => null,
@@ -60,6 +61,7 @@ const CartContext = createContext<{
   setIsCartOpen: () => null,
   isSyncing: false,
   syncCartWithBackend: async () => {},
+  loadBackendCart: async () => {},
 });
 
 // Calculate the cart totals
@@ -169,6 +171,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isSyncing, setIsSyncing] = useState(false);
   const [cartItemIds, setCartItemIds] = useState<Record<string, string>>({});
   const [pendingChanges, setPendingChanges] = useState(false);
+  const [cartLoaded, setCartLoaded] = useState(false); // Track if cart has been loaded from backend
   
   // Create a ref to track previous user state
   const previousUserRef = useRef<boolean>();
@@ -211,8 +214,15 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Helper to load cart from backend
   const loadBackendCart = useCallback(async () => {
+    // Skip if cart is already loaded
+    if (cartLoaded) {
+      console.log('Cart already loaded, skipping...');
+      return;
+    }
+    
     try {
       setIsSyncing(true);
+      console.log('Loading cart from backend...');
       const backendCart = await cartService.getCart();
       
       // Check for empty cart response
@@ -264,6 +274,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           cartItemId: item.id
         } });
       });
+      
+      setCartLoaded(true); // Mark cart as loaded
     } catch (e) {
       console.error("Full error:", e.response?.data || e);
       
@@ -282,7 +294,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setIsSyncing(false);
     }
-  }, [dispatch]);
+  }, [dispatch, cartLoaded]);
 
   // Helper to merge local cart into backend cart
   const mergeLocalToBackend = useCallback(async () => {
@@ -307,26 +319,31 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // On mount or auth change: load appropriate cart
+  // On mount or auth change: handle cart appropriately
   useEffect(() => {
     if (authLoading) return;
     if (user) {
-      // On login: merge local cart, then load backend cart
-      mergeLocalToBackend().then(loadBackendCart);
+      // On login: merge local cart to backend (no GET call)
+      // Cart will be loaded lazily when user opens cart drawer or navigates to cart page
+      mergeLocalToBackend().then(() => {
+        // Reset cart loaded flag when user changes, so cart can be loaded on demand
+        setCartLoaded(false);
+      });
     } else {
       // On logout or guest: load local cart
       dispatch({ type: 'CLEAR_CART' });
       loadLocalCart();
+      setCartLoaded(false); // Reset flag for logged out users
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, authLoading]);
 
-  // Remove periodic sync interval
-  // We'll only sync at critical moments instead
+  // Load cart when cart drawer opens (lazy loading)
   useEffect(() => {
-    if (!user) return;
-    // No interval-based sync anymore
-  }, [user]);
+    if (user && isCartOpen && !cartLoaded) {
+      loadBackendCart();
+    }
+  }, [user, isCartOpen, cartLoaded, loadBackendCart]);
 
   // Replace this function to handle syncing at critical moments
   const syncCartWithBackend = async () => {
@@ -415,9 +432,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Send to backend immediately
         await cartService.addItem(product.id, quantity);
         
-        // Then refresh the entire cart to ensure consistency
-        await loadBackendCart();
-        
+        // Backend and local state are now consistent for this operation,
+        // so avoid an extra GET /cart here to reduce network chatter.
         setPendingChanges(false);
         toast({ title: 'Added to cart', description: `${quantity} × ${product.name} added to your cart` });
       } catch (e) {
@@ -455,9 +471,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
         }
         
-        // Refresh the entire cart to ensure consistency
-        await loadBackendCart();
-        
+        // Local state and backend are now consistent for this item,
+        // so skip a full cart reload to prevent extra GET /cart calls.
         setPendingChanges(false);
         toast({ title: 'Removed from cart', description: 'Item removed from your cart' });
       } catch (e) {
@@ -498,9 +513,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
         
-        // Refresh the cart to ensure consistency
-        await loadBackendCart();
-        
+        // We know the backend update succeeded, and local state already
+        // reflects the new quantity, so avoid an extra GET /cart here.
         setPendingChanges(false);
       } catch (e) {
         toast({ title: 'Error', description: 'Failed to update item quantity' });
@@ -548,6 +562,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('cart');
       setCartItemIds({});
       setPendingChanges(false);
+      setCartLoaded(false); // Reset cart loaded flag on logout
     }
     
     // Update the ref to track previous login state
@@ -567,6 +582,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsCartOpen,
         isSyncing,
         syncCartWithBackend,
+        loadBackendCart,
       }}
     >
       {children}

@@ -350,24 +350,28 @@ export default function OrderUpdate() {
   };
 
   if (orderLoading || creditPeriodLoading || (!!creditPeriod?.customer_id && customerLoading)) {
-    return <div className="container mx-auto py-8">Loading order and customer details...</div>;
+    return (
+      <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6">
+        <div className="text-center py-8 text-sm sm:text-base">Loading order and customer details...</div>
+      </div>
+    );
   }
 
   if (isError || !order) {
     return (
-      <div className="container mx-auto py-8">
+      <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>
+          <AlertTitle className="text-sm sm:text-base">Error</AlertTitle>
+          <AlertDescription className="text-xs sm:text-sm">
             Failed to load order. Please try again or contact support.
           </AlertDescription>
         </Alert>
         <Button 
-          className="mt-4"
+          className="mt-4 w-full sm:w-auto text-sm sm:text-base"
           onClick={() => navigate('/sales/orders')}
         >
-          <ArrowLeft className="mr-2 h-4 w-4" />
+          <ArrowLeft className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
           Back to Orders
         </Button>
       </div>
@@ -379,43 +383,45 @@ export default function OrderUpdate() {
   }
 
   return (
-    <div className="container mx-auto py-8">
+    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
       <Button 
         variant="outline" 
-        className="mb-4"
+        className="mb-3 sm:mb-4 w-full sm:w-auto text-sm sm:text-base"
         onClick={() => navigate(`/sales/orders/${orderId}`)}
       >
-        <ArrowLeft className="mr-2 h-4 w-4" />
+        <ArrowLeft className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
         Back to Order Details
       </Button>
       
-      <Card>
-        <CardHeader>
-          <CardTitle>Update Order #{(order as any).order_number || `ID: ${order.id}`}</CardTitle>
-          <CardDescription>
+      <Card className="w-full min-w-0 overflow-hidden">
+        <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
+          <CardTitle className="text-base sm:text-lg lg:text-xl break-words">
+            Update Order #{(order as any).order_number || `ID: ${order.id}`}
+          </CardTitle>
+          <CardDescription className="text-xs sm:text-sm mt-1 break-words">
             Update status, payment information, and notes for this order.
           </CardDescription>
         </CardHeader>
         
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)}>
-            <CardContent className="space-y-6">
+            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6 space-y-4 sm:space-y-6">
               {error && (
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
-                  <AlertTitle>Error</AlertTitle>
-                  <AlertDescription>{error}</AlertDescription>
+                  <AlertTitle className="text-sm sm:text-base">Error</AlertTitle>
+                  <AlertDescription className="text-xs sm:text-sm break-words">{error}</AlertDescription>
                 </Alert>
               )}
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                 {/* Order Status */}
                 <FormField
                   control={form.control}
                   name="status"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Order Status</FormLabel>
+                      <FormLabel className="text-xs sm:text-sm">Order Status</FormLabel>
                       <Select 
                         onValueChange={field.onChange} 
                         defaultValue={field.value}
@@ -423,24 +429,24 @@ export default function OrderUpdate() {
                         disabled={order.status === 'cancelled'}
                       >
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
                             <SelectValue placeholder="Select order status" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="pending">Pending</SelectItem>
-                          <SelectItem value="processing">Processing</SelectItem>
-                          <SelectItem value="shipped">Shipped</SelectItem>
-                          <SelectItem value="delivered">Delivered</SelectItem>
-                          <SelectItem value="cancelled">Cancelled</SelectItem>
+                          <SelectItem value="pending" className="text-sm">Pending</SelectItem>
+                          <SelectItem value="processing" className="text-sm">Processing</SelectItem>
+                          <SelectItem value="shipped" className="text-sm">Shipped</SelectItem>
+                          <SelectItem value="delivered" className="text-sm">Delivered</SelectItem>
+                          <SelectItem value="cancelled" className="text-sm">Cancelled</SelectItem>
                         </SelectContent>
                       </Select>
-                      <FormDescription>
+                      <FormDescription className="text-xs sm:text-sm">
                         {order.status === 'cancelled' 
                           ? "Cancelled orders cannot be updated further" 
                           : "Current status of the order"}
                       </FormDescription>
-                      <FormMessage />
+                      <FormMessage className="text-xs" />
                     </FormItem>
                   )}
                 />
@@ -451,10 +457,10 @@ export default function OrderUpdate() {
                   name="payment_status"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>
+                      <FormLabel className="text-xs sm:text-sm">
                         Payment Status 
                         {(
-                          <span className="ml-1 text-sm font-normal text-muted-foreground">
+                          <span className="ml-1 text-xs font-normal text-muted-foreground">
                             (Current: {
                               (originalPaymentStatus === '' || originalPaymentStatus === 'pending')
                                 ? 'Pending' 
@@ -470,49 +476,39 @@ export default function OrderUpdate() {
                         disabled={originalPaymentStatus === 'full_payment'}
                       >
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
                             <SelectValue placeholder="Select payment status" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {/* Full Payment: Always a valid target state (unless original is full_payment, then field is disabled) */}
-                          <SelectItem 
-                            value="full_payment"
-                            // No specific disable here, as it's a final state. Main select disabled if already full_payment.
-                          >
+                          <SelectItem value="full_payment" className="text-sm">
                             Full Payment
                           </SelectItem>
-
-                          {/* Partial Payment: */}
-                          {/* Allowed from: pending, full_credit, or if already partial_payment (for more payments) */}
-                          {/* Disabled if: original is full_payment (main select covers this) */}
                           <SelectItem
                             value="partial_payment"
-                            disabled={originalPaymentStatus === 'full_payment'} // Covered by main select disable
+                            disabled={originalPaymentStatus === 'full_payment'}
+                            className="text-sm"
                           >
                             Partial Payment
                           </SelectItem>
-                          
-                          {/* Full Credit: */}
-                          {/* Allowed from: pending */}
-                          {/* Disabled if: original is partial_payment or full_payment */}
                           <SelectItem 
                             value="full_credit" 
                             disabled={
                               originalPaymentStatus === 'partial_payment' || 
                               originalPaymentStatus === 'full_payment'
                             }
+                            className="text-sm"
                           >
                             Full Credit
                           </SelectItem>
                         </SelectContent>
                       </Select>
-                      <FormDescription>
+                      <FormDescription className="text-xs sm:text-sm">
                         {originalPaymentStatus === 'full_payment' 
                           ? "Payment status cannot be changed after Full Payment" 
                           : "Select a new payment status for this order"}
                       </FormDescription>
-                      <FormMessage />
+                      <FormMessage className="text-xs" />
                     </FormItem>
                   )}
                 />
@@ -524,27 +520,27 @@ export default function OrderUpdate() {
                     name="payment_method"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Payment Method *</FormLabel>
+                        <FormLabel className="text-xs sm:text-sm">Payment Method *</FormLabel>
                         <Select 
                           onValueChange={field.onChange}
                           defaultValue={field.value}
                           value={field.value}
                         >
                           <FormControl>
-                            <SelectTrigger>
+                            <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
                               <SelectValue placeholder="Select payment method" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="cash">Cash</SelectItem>
-                            <SelectItem value="card">Card</SelectItem>
-                            <SelectItem value="cheque">Cheque</SelectItem>
+                            <SelectItem value="cash" className="text-sm">Cash</SelectItem>
+                            <SelectItem value="card" className="text-sm">Card</SelectItem>
+                            <SelectItem value="cheque" className="text-sm">Cheque</SelectItem>
                           </SelectContent>
                         </Select>
-                        <FormDescription>
+                        <FormDescription className="text-xs sm:text-sm">
                           Method of payment
                         </FormDescription>
-                        <FormMessage />
+                        <FormMessage className="text-xs" />
                       </FormItem>
                     )}
                   />
@@ -557,13 +553,14 @@ export default function OrderUpdate() {
                     name="partial_payment_amount"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Partial Payment Amount *</FormLabel>
+                        <FormLabel className="text-xs sm:text-sm">Partial Payment Amount *</FormLabel>
                         <FormControl>
                           <Input
                             type="number"
                             min="0.01"
                             step="0.01"
                             placeholder="Enter payment amount"
+                            className="text-sm sm:text-base h-9 sm:h-10"
                             {...field}
                             onChange={(e) => {
                               const value = parseFloat(e.target.value);
@@ -572,10 +569,10 @@ export default function OrderUpdate() {
                             value={field.value === undefined ? '' : field.value}
                           />
                         </FormControl>
-                        <FormDescription>
+                        <FormDescription className="text-xs sm:text-sm">
                           Amount paid in this transaction
                         </FormDescription>
-                        <FormMessage />
+                        <FormMessage className="text-xs" />
                       </FormItem>
                     )}
                   />
@@ -587,17 +584,18 @@ export default function OrderUpdate() {
                   name="tracking_number"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Tracking Number</FormLabel>
+                      <FormLabel className="text-xs sm:text-sm">Tracking Number</FormLabel>
                       <FormControl>
                         <Input 
                           placeholder="Enter tracking number" 
+                          className="text-sm sm:text-base h-9 sm:h-10"
                           {...field}
                         />
                       </FormControl>
-                      <FormDescription>
+                      <FormDescription className="text-xs sm:text-sm">
                         Enter shipping tracking number if available
                       </FormDescription>
-                      <FormMessage />
+                      <FormMessage className="text-xs" />
                     </FormItem>
                   )}
                 />
@@ -608,17 +606,18 @@ export default function OrderUpdate() {
                   name="estimated_delivery"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Estimated Delivery Date</FormLabel>
+                      <FormLabel className="text-xs sm:text-sm">Estimated Delivery Date</FormLabel>
                       <FormControl>
                         <Input 
                           type="date" 
+                          className="text-sm sm:text-base h-9 sm:h-10"
                           {...field}
                         />
                       </FormControl>
-                      <FormDescription>
+                      <FormDescription className="text-xs sm:text-sm">
                         Expected date of delivery
                       </FormDescription>
-                      <FormMessage />
+                      <FormMessage className="text-xs" />
                     </FormItem>
                   )}
                 />
@@ -630,34 +629,35 @@ export default function OrderUpdate() {
                 name="notes"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Order Notes</FormLabel>
+                    <FormLabel className="text-xs sm:text-sm">Order Notes</FormLabel>
                     <FormControl>
                       <Textarea
                         placeholder="Add any special instructions or notes for this order"
+                        className="text-sm sm:text-base min-h-[80px] sm:min-h-[100px]"
                         {...field}
                       />
                     </FormControl>
-                    <FormDescription>
+                    <FormDescription className="text-xs sm:text-sm">
                       Additional information about this order
                     </FormDescription>
-                    <FormMessage />
+                    <FormMessage className="text-xs" />
                   </FormItem>
                 )}
               />
               
               {/* Credit Information */}
               {creditPeriod && (
-                <div className="border rounded-md p-4 bg-muted/50">
-                  <h3 className="font-medium mb-2">Credit Information</h3>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="border rounded-md p-3 sm:p-4 bg-muted/50 min-w-0">
+                  <h3 className="font-medium mb-2 text-sm sm:text-base">Credit Information</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm">
                     <div className="text-muted-foreground">Credit Amount:</div>
-                    <div>${parseFloat(creditPeriod.amount.toString()).toFixed(2)}</div>
+                    <div className="break-words">${parseFloat(creditPeriod.amount.toString()).toFixed(2)}</div>
                     
                     <div className="text-muted-foreground">Credit Period:</div>
-                    <div>{creditPeriod.period} days</div>
+                    <div className="break-words">{creditPeriod.period} days</div>
                     
                     <div className="text-muted-foreground">Due Date:</div>
-                    <div>{new Date(creditPeriod.end_date || creditPeriod.due_date).toLocaleDateString()}</div>
+                    <div className="break-words">{new Date(creditPeriod.end_date || creditPeriod.due_date).toLocaleDateString()}</div>
                     
                     <div className="text-muted-foreground">Status:</div>
                     <div>
@@ -675,41 +675,42 @@ export default function OrderUpdate() {
 
               {/* Customer Credit Limit Info */}
               {customer && (
-                 <div className="border rounded-md p-4 bg-muted/50 mt-4">
-                  <h3 className="font-medium mb-2">Customer Credit Details</h3>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
+                 <div className="border rounded-md p-3 sm:p-4 bg-muted/50 mt-3 sm:mt-4 min-w-0">
+                  <h3 className="font-medium mb-2 text-sm sm:text-base">Customer Credit Details</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm">
                     <div className="text-muted-foreground">Credit Limit:</div>
-                    <div>${(customer.credit_limit || 0).toFixed(2)}</div>
+                    <div className="break-words">${(customer.credit_limit || 0).toFixed(2)}</div>
                     <div className="text-muted-foreground">Current Outstanding Credit:</div>
-                    <div>${(customer.current_credit || 0).toFixed(2)}</div>
+                    <div className="break-words">${(customer.current_credit || 0).toFixed(2)}</div>
                   </div>
                 </div>
               )}
               
               {/* Order Summary Information */}
-              <div className="border rounded-md p-4">
-                <h3 className="font-medium mb-2">Order Summary</h3>
-                <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="border rounded-md p-3 sm:p-4 min-w-0">
+                <h3 className="font-medium mb-2 text-sm sm:text-base">Order Summary</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm">
                   <div className="text-muted-foreground">Order Date:</div>
-                  <div>{new Date(order.created_at).toLocaleDateString()}</div>
+                  <div className="break-words">{new Date(order.created_at).toLocaleDateString()}</div>
                   
                   <div className="text-muted-foreground">Total Amount:</div>
-                  <div>${parseFloat(order.total_amount.toString()).toFixed(2)}</div>
+                  <div className="break-words">${parseFloat(order.total_amount.toString()).toFixed(2)}</div>
                   
                   <div className="text-muted-foreground">Current Payment Method:</div>
-                  <div>{order.payment_method || 'Not specified'}</div>
+                  <div className="break-words">{order.payment_method || 'Not specified'}</div>
                   
                   <div className="text-muted-foreground">Items:</div>
-                  <div>{order.items?.length || 0} items</div>
+                  <div className="break-words">{order.items?.length || 0} items</div>
                 </div>
               </div>
             </CardContent>
             
-            <CardFooter className="flex justify-between border-t p-4">
+            <CardFooter className="flex flex-col sm:flex-row justify-between gap-2 sm:gap-0 border-t p-3 sm:p-4">
               <Button 
                 variant="outline" 
                 type="button"
                 onClick={() => navigate(`/sales/orders/${orderId}`)}
+                className="w-full sm:w-auto text-sm sm:text-base"
               >
                 Cancel
               </Button>
@@ -717,6 +718,7 @@ export default function OrderUpdate() {
               <Button 
                 type="submit" 
                 disabled={loading}
+                className="w-full sm:w-auto text-sm sm:text-base"
               >
                 {loading ? 'Updating...' : 'Update Order'}
               </Button>

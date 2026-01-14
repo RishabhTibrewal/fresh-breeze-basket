@@ -40,7 +40,11 @@ import CategoryList from "./pages/admin/CategoryList";
 import AdminOrderList from "./pages/admin/AdminOrderList";
 import AdminOrderDetails from "./pages/admin/AdminOrderDetails";
 import CustomerList from "./pages/admin/CustomerList";
+import AdminCustomerDetails from "./pages/admin/AdminCustomerDetails";
 import AdminCheck from "./pages/admin/AdminCheck";
+import AdminSettings from "./pages/admin/AdminSettings";
+import SalesTargets from "./pages/admin/SalesTargets";
+import AdminLeads from "./pages/admin/Leads";
 
 // Sales Executive Routes
 import SalesLayout from "./layouts/SalesLayout";
@@ -52,6 +56,8 @@ import OrderDetail from "./pages/sales/OrderDetail";
 import OrderUpdate from "./pages/sales/OrderUpdate";
 import Orders from "./pages/sales/Orders";
 import CreditManagement from "./pages/sales/CreditManagement";
+import SalesAnalytics from "./pages/sales/SalesAnalytics";
+import Leads from "./pages/sales/Leads";
 import SalesProtectedRoute from "./components/auth/SalesProtectedRoute";
 import { TestPayment } from './components/TestPayment';
 
@@ -107,7 +113,10 @@ const App: React.FC = () => {
                     <Route path="orders" element={<AdminOrderList />} />
                     <Route path="orders/:id" element={<AdminOrderDetails />} />
                     <Route path="customers" element={<CustomerList />} />
-                    <Route path="settings" element={<div>Admin Settings</div>} />
+                    <Route path="customers/:id" element={<AdminCustomerDetails />} />
+                    <Route path="settings" element={<AdminSettings />} />
+                    <Route path="sales-targets" element={<SalesTargets />} />
+                    <Route path="leads" element={<AdminLeads />} />
                     <Route path="check" element={<AdminCheck />} />
                   </Route>
                   
@@ -127,7 +136,8 @@ const App: React.FC = () => {
                     <Route path="orders/:orderId/edit" element={<OrderUpdate />} />
                     <Route path="orders" element={<Orders />} />
                     <Route path="credit-management" element={<CreditManagement />} />
-                    <Route path="analytics" element={<div>Sales Analytics</div>} />
+                    <Route path="analytics" element={<SalesAnalytics />} />
+                    <Route path="leads" element={<Leads />} />
                   </Route>
                   
                   {/* Catch-all route */}

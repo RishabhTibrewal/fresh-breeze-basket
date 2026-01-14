@@ -62,7 +62,7 @@ const formSchema = z.object({
 
 type FormSchema = z.infer<typeof formSchema>;
 
-const UNIT_TYPES = ['kg', 'g', 'lb', 'oz', 'piece', 'bunch', 'pack'];
+const UNIT_TYPES = ['kg', 'g', 'lb', 'oz', 'piece', 'bunch', 'pack', 'bag'];
 const BADGE_OPTIONS = [
   { value: 'new', label: 'New' },
   { value: 'sale', label: 'Sale' },
@@ -266,7 +266,7 @@ export default function ProductForm() {
             </p>
           </div>
           {isEditMode && (
-            <Link to={`/products/${product?.id}`} target="_blank">
+            <Link to={`/products/${product?.id}`}>
               <Button variant="outline" className="bg-green-600 text-white hover:bg-green-700">
                 View Product
               </Button>

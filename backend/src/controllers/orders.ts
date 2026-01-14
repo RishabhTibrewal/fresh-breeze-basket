@@ -255,8 +255,8 @@ export const getOrderById = async (req: Request, res: Response) => {
       order.order_items = orderItems;
     }
     
-    // Get credit details if applicable
-    if (order.payment_status === 'credit') {
+    // Get credit details if applicable (for both credit and partial payment status)
+    if (order.payment_status === 'credit' || order.payment_status === 'partial') {
       const { data: creditPeriod, error: creditError } = await supabase
         .from('credit_periods')
         .select('*')
@@ -824,11 +824,6 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       updateData.inventory_updated = false;
     }
     
-    // Set inventory_updated flag when processing an order
-    if (status === 'processing') {
-      updateData.inventory_updated = true;
-    }
-    
     // Add tracking number if provided
     if (tracking_number) {
       updateData.tracking_number = tracking_number;
@@ -869,6 +864,91 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       }
     }
     
+    // Check if this order was created through sales dashboard
+    // Sales dashboard orders have a customer record associated with the user_id
+    const { data: customer } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('user_id', currentOrder.user_id)
+      .single();
+    
+    const isSalesDashboardOrder = !!customer;
+    
+    // If status is being changed from 'pending' to next stage and inventory hasn't been updated yet,
+    // reduce product stock counts
+    const isMovingFromPending = currentOrder.status === 'pending' && status !== 'pending' && status !== 'cancelled';
+    
+    if (isMovingFromPending && !currentOrder.inventory_updated) {
+      console.log(`Order ${id} status changed from pending to ${status}. Reducing inventory...`);
+      console.log(`Is sales dashboard order: ${isSalesDashboardOrder}`);
+      
+      const orderItems = currentOrder.order_items;
+      
+      if (orderItems && orderItems.length > 0) {
+        // Process each item and update stock
+        for (const item of orderItems) {
+          try {
+            // First get the current stock
+            const { data: product, error: productError } = await supabase
+              .from('products')
+              .select('stock_count')
+              .eq('id', item.product_id)
+              .single();
+            
+            if (productError) {
+              console.error(`Error fetching product ${item.product_id}:`, productError);
+              continue;
+            }
+            
+            // Calculate new stock count
+            // For sales dashboard orders, allow negative stock
+            // For regular orders, prevent negative stock
+            let newStockCount: number;
+            if (isSalesDashboardOrder) {
+              // Allow negative stock for sales dashboard orders
+              newStockCount = product.stock_count - item.quantity;
+              console.log(`Sales order: Allowing negative stock. ${product.stock_count} - ${item.quantity} = ${newStockCount}`);
+            } else {
+              // Regular orders: prevent negative stock
+              newStockCount = Math.max(0, product.stock_count - item.quantity);
+              if (product.stock_count - item.quantity < 0) {
+                console.warn(`Regular order: Insufficient stock for product ${item.product_id}. Stock would go negative, setting to 0.`);
+              }
+            }
+            
+            // Update the product stock
+            // RLS policy now allows sales executives to update products
+            const { data: updatedProducts, error: updateError } = await supabase
+              .from('products')
+              .update({ stock_count: newStockCount })
+              .eq('id', item.product_id)
+              .select('stock_count');
+            
+            if (updateError) {
+              console.error(`Error updating stock for product ${item.product_id}:`, updateError);
+              console.error(`Update error details:`, JSON.stringify(updateError, null, 2));
+            } else if (!updatedProducts || updatedProducts.length === 0) {
+              console.error(`No rows updated for product ${item.product_id}. Product may not exist.`);
+            } else {
+              const updatedProduct = updatedProducts[0];
+              console.log(`Stock reduced for product ${item.product_id}: ${product.stock_count} -> ${newStockCount} (Sales order: ${isSalesDashboardOrder})`);
+              // Verify the update actually persisted
+              if (updatedProduct && updatedProduct.stock_count !== newStockCount) {
+                console.warn(`WARNING: Stock update may have been blocked! Expected: ${newStockCount}, Actual: ${updatedProduct.stock_count}`);
+              } else {
+                console.log(`Stock update verified: ${updatedProduct?.stock_count}`);
+              }
+            }
+          } catch (err) {
+            console.error(`Error processing item ${item.product_id}:`, err);
+          }
+        }
+        
+        // Mark inventory as updated
+        updateData.inventory_updated = true;
+      }
+    }
+    
     // Update order
     const { data, error } = await supabase
       .from('orders')
@@ -901,12 +981,20 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           
           let paymentAmountToProcess = 0;
           
+          // Helper to append to existing description instead of overwriting
+          const appendDescription = (entry: string) => {
+            const existing = creditPeriod.description || '';
+            return existing ? `${existing}\n${entry}` : entry;
+          };
+          
           // Handle different payment scenarios
           if (dbPaymentStatus === 'paid') {
             // Full payment - set amount to 0
             paymentAmountToProcess = parseFloat(creditPeriod.amount.toString());
             creditUpdateData.amount = 0;
-            creditUpdateData.description = `Fully paid off on ${new Date().toISOString().split('T')[0]} via ${payment_method}`;
+            creditUpdateData.description = appendDescription(
+              `Fully paid off on ${new Date().toISOString().split('T')[0]} via ${payment_method}`
+            );
           } else if (dbPaymentStatus === 'partial' && partial_payment_amount) {
             const currentAmount = parseFloat(creditPeriod.amount.toString());
             // Ensure payment amount is a number
@@ -917,13 +1005,17 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
               // If payment is greater than or equal to the balance, treat as full payment
               paymentAmountToProcess = currentAmount;
               creditUpdateData.amount = 0;
-              creditUpdateData.description = `Fully paid off on ${new Date().toISOString().split('T')[0]} via ${payment_method}`;
+              creditUpdateData.description = appendDescription(
+                `Fully paid off on ${new Date().toISOString().split('T')[0]} via ${payment_method}`
+              );
             } else {
               // Regular partial payment
               paymentAmountToProcess = parsedPaymentAmount;
               const remainingAmount = currentAmount - parsedPaymentAmount;
               creditUpdateData.amount = remainingAmount;
-              creditUpdateData.description = `Partial payment of $${parsedPaymentAmount.toFixed(2)} received on ${new Date().toISOString().split('T')[0]} via ${payment_method}. Remaining: $${remainingAmount.toFixed(2)}`;
+              creditUpdateData.description = appendDescription(
+                `Partial payment of $${parsedPaymentAmount.toFixed(2)} received on ${new Date().toISOString().split('T')[0]} via ${payment_method}. Remaining: $${remainingAmount.toFixed(2)}`
+              );
             }
           }
           
@@ -1024,11 +1116,17 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           }
         }
         
-        // Mark credit period as cancelled and update its description (no status field)
+        // Mark credit period as cancelled and append to its description (no status field)
+        const existingDescription = creditPeriod.description || '';
+        const cancellationEntry = `Order Cancelled on ${new Date().toISOString().split('T')[0]}`;
+        const newDescription = existingDescription
+          ? `${existingDescription}\n${cancellationEntry}`
+          : cancellationEntry;
+
         const creditUpdateResult = await supabase
           .from('credit_periods')
           .update({
-            description: 'Order Cancelled',
+            description: newDescription,
             // amount: 0, // Set amount to 0 since the credit is cancelled
             end_date: new Date().toISOString().split('T')[0] // Set end date to current date
           })
@@ -1037,50 +1135,6 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           console.error('Error updating credit period:', creditUpdateResult.error);
         } else {
           console.log('Credit period updated successfully');
-        }
-      }
-    }
-    
-    // If status is being changed to 'processing' and inventory hasn't been updated yet,
-    // reduce product stock counts
-    if (status === 'processing' && currentOrder.status !== 'processing' && !currentOrder.inventory_updated) {
-      console.log(`Order ${id} status changed to processing. Reducing inventory...`);
-      
-      const orderItems = currentOrder.order_items;
-      
-      if (orderItems && orderItems.length > 0) {
-        // Process each item and update stock
-        for (const item of orderItems) {
-          try {
-            // First get the current stock
-            const { data: product, error: productError } = await supabase
-              .from('products')
-              .select('stock_count')
-              .eq('id', item.product_id)
-              .single();
-            
-            if (productError) {
-              console.error(`Error fetching product ${item.product_id}:`, productError);
-              continue;
-            }
-            
-            // Calculate new stock count
-            const newStockCount = Math.max(0, product.stock_count - item.quantity);
-            
-            // Update the product stock
-            const { error: updateError } = await supabase
-              .from('products')
-              .update({ stock_count: newStockCount })
-              .eq('id', item.product_id);
-            
-            if (updateError) {
-              console.error(`Error updating stock for product ${item.product_id}:`, updateError);
-            } else {
-              console.log(`Stock reduced for product ${item.product_id}: ${product.stock_count} -> ${newStockCount}`);
-            }
-          } catch (err) {
-            console.error(`Error processing item ${item.product_id}:`, err);
-          }
         }
       }
     }
@@ -1212,10 +1266,10 @@ export const cancelOrder = async (req: Request, res: Response) => {
       throw new ApiError(400, updateError.message);
     }
     
-    // If the order was in processing status and inventory was already updated,
+    // If inventory was already updated for this order (regardless of current status),
     // we need to restore the inventory
-    if (order.status === 'processing' && order.inventory_updated) {
-      console.log(`Order ${id} was in processing state and had inventory updated. Restoring inventory...`);
+    if (order.inventory_updated) {
+      console.log(`Order ${id} had inventory updated. Restoring inventory...`);
       
       // Get the order items
       const orderItems = order.order_items;
@@ -1460,5 +1514,310 @@ export const getSalesDashboardStats = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error in getSalesDashboardStats:', error);
     res.status(500).json({ error: 'Failed to fetch sales dashboard stats' });
+  }
+};
+
+// Get detailed sales analytics for sales executive
+export const getSalesAnalytics = async (req: Request, res: Response) => {
+  try {
+    const sales_executive_id = req.user?.id;
+    const { period = '30' } = req.query; // Default to last 30 days
+    const days = parseInt(period as string, 10);
+
+    // Calculate date range
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    // Get all customers for this sales executive
+    const { data: customers, error: customersError } = await supabase
+      .from('customers')
+      .select('id, user_id, name, current_credit, credit_limit')
+      .eq('sales_executive_id', sales_executive_id);
+
+    if (customersError) {
+      console.error('Error fetching customers:', customersError);
+      return res.status(500).json({ error: 'Failed to fetch customers' });
+    }
+
+    const customerUserIds = customers?.map(c => c.user_id) || [];
+
+    if (customerUserIds.length === 0) {
+      return res.json({
+        revenue: {
+          total: 0,
+          paid: 0,
+          credit: 0,
+          daily: [],
+          monthly: []
+        },
+        orders: {
+          total: 0,
+          byStatus: {},
+          byPaymentMethod: {},
+          daily: []
+        },
+        customers: {
+          total: customers?.length || 0,
+          topCustomers: [],
+          creditSummary: {
+            totalCredit: 0,
+            totalLimit: 0,
+            utilizationRate: 0
+          }
+        },
+        products: {
+          topProducts: []
+        },
+        trends: {
+          revenueGrowth: 0,
+          orderGrowth: 0
+        }
+      });
+    }
+
+    // Get all orders for these customers within the date range
+    const { data: orders, error: ordersError } = await supabase
+      .from('orders')
+      .select('id, user_id, total_amount, status, payment_status, payment_method, created_at')
+      .in('user_id', customerUserIds)
+      .gte('created_at', startDate.toISOString())
+      .lte('created_at', endDate.toISOString())
+      .order('created_at', { ascending: false });
+
+    if (ordersError) {
+      console.error('Error fetching orders:', ordersError);
+      return res.status(500).json({ error: 'Failed to fetch orders' });
+    }
+
+    const filteredOrders = orders?.filter(order => order.status !== 'cancelled') || [];
+
+    // Get credit periods for orders with partial or credit payments to calculate actual amounts
+    const orderIds = filteredOrders.map(o => o.id);
+    const { data: creditPeriods, error: creditError } = await supabase
+      .from('credit_periods')
+      .select('order_id, amount')
+      .in('order_id', orderIds);
+
+    // Create a map of order_id to credit amount (unpaid amount)
+    const creditAmountMap = new Map<string, number>();
+    if (creditPeriods && !creditError) {
+      creditPeriods.forEach(cp => {
+        creditAmountMap.set(cp.order_id, parseFloat(cp.amount?.toString() || '0'));
+      });
+    }
+
+    // Calculate revenue metrics
+    const totalRevenue = filteredOrders.reduce((sum, order) => sum + parseFloat(order.total_amount || '0'), 0);
+    
+    // Paid Revenue: Full payment orders (full amount) + Partial payment orders (only the paid portion)
+    const paidRevenue = filteredOrders.reduce((sum, order) => {
+      if (order.payment_status === 'full_payment' || order.payment_status === 'paid') {
+        // Full payment - count entire amount
+        return sum + parseFloat(order.total_amount || '0');
+      } else if (order.payment_status === 'partial_payment' || order.payment_status === 'partial') {
+        // Partial payment - calculate paid amount: total_amount - unpaid_amount (from credit_periods)
+        const totalAmount = parseFloat(order.total_amount || '0');
+        const unpaidAmount = creditAmountMap.get(order.id) || 0;
+        const paidAmount = totalAmount - unpaidAmount;
+        return sum + Math.max(0, paidAmount); // Ensure non-negative
+      }
+      return sum;
+    }, 0);
+    
+    // Credit Revenue: Full credit orders (full amount) + Partial payment orders (unpaid portion)
+    const creditRevenue = filteredOrders.reduce((sum, order) => {
+      if (order.payment_status === 'credit' || order.payment_status === 'full_credit') {
+        // Full credit - count entire amount
+        return sum + parseFloat(order.total_amount || '0');
+      } else if (order.payment_status === 'partial_payment' || order.payment_status === 'partial') {
+        // Partial payment - count only the unpaid portion (from credit_periods)
+        const unpaidAmount = creditAmountMap.get(order.id) || 0;
+        return sum + unpaidAmount;
+      }
+      return sum;
+    }, 0);
+
+    // Daily revenue breakdown
+    const dailyRevenue: { [key: string]: number } = {};
+    filteredOrders.forEach(order => {
+      const date = new Date(order.created_at).toISOString().split('T')[0];
+      dailyRevenue[date] = (dailyRevenue[date] || 0) + parseFloat(order.total_amount || '0');
+    });
+
+    const dailyRevenueArray = Object.entries(dailyRevenue)
+      .map(([date, amount]) => ({ date, amount }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Monthly revenue breakdown
+    const monthlyRevenue: { [key: string]: number } = {};
+    filteredOrders.forEach(order => {
+      const date = new Date(order.created_at);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      monthlyRevenue[monthKey] = (monthlyRevenue[monthKey] || 0) + parseFloat(order.total_amount || '0');
+    });
+
+    const monthlyRevenueArray = Object.entries(monthlyRevenue)
+      .map(([month, amount]) => ({ month, amount }))
+      .sort((a, b) => a.month.localeCompare(b.month));
+
+    // Orders by status
+    const ordersByStatus: { [key: string]: number } = {};
+    filteredOrders.forEach(order => {
+      ordersByStatus[order.status] = (ordersByStatus[order.status] || 0) + 1;
+    });
+
+    // Orders by payment method
+    const ordersByPaymentMethod: { [key: string]: number } = {};
+    filteredOrders.forEach(order => {
+      const method = order.payment_method || 'unknown';
+      ordersByPaymentMethod[method] = (ordersByPaymentMethod[method] || 0) + 1;
+    });
+
+    // Daily orders count
+    const dailyOrders: { [key: string]: number } = {};
+    filteredOrders.forEach(order => {
+      const date = new Date(order.created_at).toISOString().split('T')[0];
+      dailyOrders[date] = (dailyOrders[date] || 0) + 1;
+    });
+
+    const dailyOrdersArray = Object.entries(dailyOrders)
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Top customers by revenue
+    const customerRevenue: { [key: string]: { name: string; revenue: number; orderCount: number } } = {};
+    filteredOrders.forEach(order => {
+      const customer = customers?.find(c => c.user_id === order.user_id);
+      if (customer) {
+        if (!customerRevenue[customer.id]) {
+          customerRevenue[customer.id] = {
+            name: customer.name,
+            revenue: 0,
+            orderCount: 0
+          };
+        }
+        customerRevenue[customer.id].revenue += parseFloat(order.total_amount || '0');
+        customerRevenue[customer.id].orderCount += 1;
+      }
+    });
+
+    const topCustomers = Object.entries(customerRevenue)
+      .map(([id, data]) => ({ id, ...data }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+
+    // Credit summary
+    const totalCredit = customers?.reduce((sum, c) => sum + parseFloat(c.current_credit || '0'), 0) || 0;
+    const totalLimit = customers?.reduce((sum, c) => sum + parseFloat(c.credit_limit || '0'), 0) || 0;
+    const utilizationRate = totalLimit > 0 ? (totalCredit / totalLimit) * 100 : 0;
+
+    // Get top products (need to fetch order items)
+    const productOrderIds = filteredOrders.map(o => o.id);
+    const { data: orderItems, error: itemsError } = await supabase
+      .from('order_items')
+      .select('product_id, quantity, price, product:products(name)')
+      .in('order_id', productOrderIds);
+
+    const productSales: { [key: string]: { name: string; quantity: number; revenue: number } } = {};
+    if (orderItems && !itemsError) {
+      orderItems.forEach(item => {
+        const productId = item.product_id;
+        const productName = (item.product as any)?.name || 'Unknown Product';
+        if (!productSales[productId]) {
+          productSales[productId] = {
+            name: productName,
+            quantity: 0,
+            revenue: 0
+          };
+        }
+        productSales[productId].quantity += item.quantity || 0;
+        productSales[productId].revenue += (item.quantity || 0) * parseFloat(item.price || '0');
+      });
+    }
+
+    const topProducts = Object.entries(productSales)
+      .map(([id, data]) => ({ id, ...data }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+
+    // Calculate growth trends (compare first half vs second half of period)
+    const midpoint = new Date(startDate.getTime() + (endDate.getTime() - startDate.getTime()) / 2);
+    const firstHalfOrders = filteredOrders.filter(o => new Date(o.created_at) < midpoint);
+    const secondHalfOrders = filteredOrders.filter(o => new Date(o.created_at) >= midpoint);
+
+    const firstHalfRevenue = firstHalfOrders.reduce((sum, o) => sum + parseFloat(o.total_amount || '0'), 0);
+    const secondHalfRevenue = secondHalfOrders.reduce((sum, o) => sum + parseFloat(o.total_amount || '0'), 0);
+    const revenueGrowth = firstHalfRevenue > 0 ? ((secondHalfRevenue - firstHalfRevenue) / firstHalfRevenue) * 100 : 0;
+
+    const orderGrowth = firstHalfOrders.length > 0 
+      ? ((secondHalfOrders.length - firstHalfOrders.length) / firstHalfOrders.length) * 100 
+      : 0;
+
+    // Get current active sales target
+    const today = new Date().toISOString().split('T')[0];
+    const { data: currentTarget } = await supabase
+      .from('sales_targets')
+      .select('*')
+      .eq('sales_executive_id', sales_executive_id)
+      .eq('is_active', true)
+      .lte('period_start', today)
+      .gte('period_end', today)
+      .order('period_start', { ascending: false })
+      .limit(1)
+      .single();
+
+    let targetProgress = null;
+    if (currentTarget) {
+      const targetAmount = parseFloat(currentTarget.target_amount?.toString() || '0');
+      const progressPercentage = targetAmount > 0 ? (totalRevenue / targetAmount) * 100 : 0;
+      const remaining = Math.max(0, targetAmount - totalRevenue);
+      
+      targetProgress = {
+        targetAmount,
+        currentRevenue: totalRevenue,
+        progressPercentage: Math.round(progressPercentage * 100) / 100,
+        remaining,
+        periodType: currentTarget.period_type,
+        periodStart: currentTarget.period_start,
+        periodEnd: currentTarget.period_end
+      };
+    }
+
+    res.json({
+      revenue: {
+        total: totalRevenue,
+        paid: paidRevenue,
+        credit: creditRevenue,
+        daily: dailyRevenueArray,
+        monthly: monthlyRevenueArray
+      },
+      orders: {
+        total: filteredOrders.length,
+        byStatus: ordersByStatus,
+        byPaymentMethod: ordersByPaymentMethod,
+        daily: dailyOrdersArray
+      },
+      customers: {
+        total: customers?.length || 0,
+        topCustomers,
+        creditSummary: {
+          totalCredit,
+          totalLimit,
+          utilizationRate: Math.round(utilizationRate * 100) / 100
+        }
+      },
+      products: {
+        topProducts
+      },
+      trends: {
+        revenueGrowth: Math.round(revenueGrowth * 100) / 100,
+        orderGrowth: Math.round(orderGrowth * 100) / 100
+      },
+      target: targetProgress
+    });
+  } catch (error) {
+    console.error('Error in getSalesAnalytics:', error);
+    res.status(500).json({ error: 'Failed to fetch sales analytics' });
   }
 }; 

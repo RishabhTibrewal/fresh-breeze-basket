@@ -25,7 +25,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { toast } from '@/hooks/use-toast';
-import { ordersService } from '@/api/orders';
+import { ordersService, type OrdersResponse } from '@/api/orders';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
@@ -160,7 +160,7 @@ export default function ProductList() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Link to={`/products/${product.id}`} target="_blank">
+                      <Link to={`/products/${product.id}`}>
                         <Button variant="ghost" size="sm">
                           View
                         </Button>
@@ -209,12 +209,14 @@ export default function ProductList() {
 export function AdminOrderList() {
   const [searchTerm, setSearchTerm] = useState('');
 
-  const { data: orders, isLoading, refetch } = useQuery({
+  const { data: ordersResponse, isLoading, refetch } = useQuery<OrdersResponse>({
     queryKey: ['admin-orders'],
-    queryFn: ordersService.getAll,
+    queryFn: () => ordersService.getAll(),
   });
 
-  const filteredOrders = orders?.filter(order =>
+  const orders = ordersResponse?.data ?? [];
+
+  const filteredOrders = orders.filter(order =>
     order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (order.status && order.status.toLowerCase().includes(searchTerm.toLowerCase()))
   ) || [];

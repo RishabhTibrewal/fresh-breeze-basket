@@ -35,11 +35,11 @@ const SalesDashboard = () => {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-1/3" />
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
+        <Skeleton className="h-6 sm:h-8 w-1/2 sm:w-1/3" />
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
           {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} className="h-32" />
+            <Skeleton key={i} className="h-24 sm:h-32" />
           ))}
         </div>
       </div>
@@ -48,32 +48,34 @@ const SalesDashboard = () => {
 
   if (error) {
     return (
-      <div className="p-6 bg-destructive/10 border border-destructive rounded-lg text-center">
-        <h3 className="text-lg font-semibold text-destructive">Error Loading Dashboard</h3>
-        <p className="text-muted-foreground mt-2">Failed to load dashboard statistics. Please try again later.</p>
-        <button 
-          onClick={() => window.location.reload()} 
-          className="mt-4 bg-primary text-white px-4 py-2 rounded-md"
-        >
-          Retry
-        </button>
+      <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6">
+        <div className="p-3 sm:p-6 bg-destructive/10 border border-destructive rounded-lg text-center">
+          <h3 className="text-base sm:text-lg font-semibold text-destructive">Error Loading Dashboard</h3>
+          <p className="text-sm sm:text-base text-muted-foreground mt-2">Failed to load dashboard statistics. Please try again later.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 bg-primary text-white px-3 sm:px-4 py-2 rounded-md text-sm sm:text-base"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Sales Dashboard</h1>
+    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4">
+        <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold break-words">Sales Dashboard</h1>
         {profile?.role !== 'sales' && (
-          <Button onClick={handleUpdateRole}>
+          <Button onClick={handleUpdateRole} className="w-full sm:w-auto text-sm sm:text-base">
             Update Role to Sales
           </Button>
         )}
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Total Customers</CardTitle>
@@ -117,10 +119,10 @@ const SalesDashboard = () => {
 
       {/* Recent Orders */}
       <Card>
-        <CardHeader>
-          <CardTitle>Recent Orders</CardTitle>
+        <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
+          <CardTitle className="text-base sm:text-lg lg:text-xl">Recent Orders</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
           <div className="space-y-4">
             {data?.recentOrders?.length === 0 ? (
               <div className="text-center py-6 text-muted-foreground">No recent orders</div>

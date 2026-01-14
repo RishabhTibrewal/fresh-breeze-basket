@@ -3,6 +3,7 @@ import { protect } from '../middleware/auth';
 import {
   getCustomers,
   getCustomerById,
+  getCustomerByUserId,
   createCustomer,
   createCustomerWithUser,
   updateCustomer,
@@ -23,6 +24,9 @@ router.get('/', getCustomers);
 
 // Get all customers with credit information
 router.get('/credit', getCustomersWithCredit);
+
+// Get customer by user_id (for admin)
+router.get('/by-user/:userId', getCustomerByUserId);
 
 // Get customer by ID
 router.get('/:id', getCustomerById);

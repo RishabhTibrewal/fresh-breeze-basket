@@ -316,5 +316,11 @@ export const ordersService = {
   async getSalesDashboardStats() {
     const { data } = await apiClient.get('/orders/sales/dashboard-stats');
     return data;
+  },
+
+  // Get detailed sales analytics for the logged-in sales executive
+  async getSalesAnalytics(period: number = 30) {
+    const { data } = await apiClient.get(`/orders/sales/analytics?period=${period}`);
+    return data;
   }
 }; 

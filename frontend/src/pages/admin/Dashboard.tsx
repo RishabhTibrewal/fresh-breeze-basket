@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Link, Outlet, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Package, 
@@ -7,8 +7,11 @@ import {
   Users, 
   Settings,
   LogOut,
-  Grid
+  Grid,
+  Target,
+  UserCheck
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { 
   SidebarProvider, 
   Sidebar, 
@@ -29,6 +32,22 @@ import { toast } from 'sonner';
 const AdminDashboard = () => {
   const { isAdmin, profile, signOut, user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const menuItems = [
+    { path: '/admin', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/admin/products', icon: Package, label: 'Products' },
+    { path: '/admin/orders', icon: ShoppingCart, label: 'Orders' },
+    { path: '/admin/customers', icon: Users, label: 'Customers' },
+    { path: '/admin/leads', icon: UserCheck, label: 'Leads' },
+  ];
+
+  const isActive = (path: string) => {
+    if (path === '/admin') {
+      return location.pathname === '/admin';
+    }
+    return location.pathname.startsWith(path);
+  };
   
   useEffect(() => {
     // Enhanced debugging logs
@@ -59,7 +78,27 @@ const AdminDashboard = () => {
   return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full">
-        <Sidebar>
+        {/* Mobile Header */}
+        <div className="md:hidden fixed top-0 left-0 right-0 bg-white border-b z-50">
+          <div className="flex items-center justify-between p-4">
+            <Link to="/admin" className="text-xl font-bold text-primary flex items-center">
+              <span className="font-playfair">Fresh</span>
+              <span className="text-primary-light">Basket</span>
+              <span className="ml-2 text-xs bg-primary text-white px-2 py-0.5 rounded-md">Admin</span>
+            </Link>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={signOut}
+              className="text-red-600"
+            >
+              <LogOut className="h-5 w-5" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Desktop Sidebar */}
+        <Sidebar className="hidden md:flex">
           <SidebarHeader className="p-4 border-b border-border">
             <Link to="/admin" className="flex items-center">
               <div className="text-xl font-bold text-primary flex items-center">
@@ -122,6 +161,22 @@ const AdminDashboard = () => {
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip="Sales Targets">
+                      <Link to="/admin/sales-targets">
+                        <Target className="h-4 w-4" />
+                        <span>Sales Targets</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip="Leads">
+                      <Link to="/admin/leads">
+                        <UserCheck className="h-4 w-4" />
+                        <span>Leads</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -154,8 +209,32 @@ const AdminDashboard = () => {
             </SidebarMenu>
           </SidebarFooter>
         </Sidebar>
-        <SidebarInset>
-          <div className="container p-4 mx-auto">
+
+        {/* Mobile Bottom Navigation */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t z-50">
+          <nav className="flex justify-around items-center px-2 py-2">
+            {menuItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`flex flex-col items-center justify-center px-2 py-2 rounded-md min-w-[60px] ${
+                    isActive(item.path)
+                      ? 'text-primary'
+                      : 'text-gray-600'
+                  }`}
+                >
+                  <Icon className="h-5 w-5" />
+                  <span className="text-xs mt-1 text-center">{item.label.length > 8 ? item.label.substring(0, 8) : item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        <SidebarInset className="overflow-x-hidden">
+          <div className="w-full max-w-full min-w-0 px-2 sm:px-4 lg:px-6 mx-auto pt-16 md:pt-4 pb-20 md:pb-4 overflow-x-hidden">
             <Outlet />
           </div>
         </SidebarInset>

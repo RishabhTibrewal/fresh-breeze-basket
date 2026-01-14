@@ -9,6 +9,9 @@ import apiClient from '@/lib/apiClient';
 declare global {
   interface Window {
     _sessionRefreshInterval: NodeJS.Timeout | null;
+    _isRefreshingSession: boolean;
+    _lastRefreshAttempt: number;
+    _refreshBackoffMs: number;
   }
 }
 
@@ -21,6 +24,7 @@ type AuthContextType = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, firstName: string, lastName: string, phone: string) => Promise<void>;
   signOut: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -85,11 +89,89 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // Session refresh function with rate limit handling
+  const refreshSessionSafely = useCallback(async () => {
+    // Prevent concurrent refresh attempts
+    if (window._isRefreshingSession) {
+      console.log('Session refresh already in progress, skipping...');
+      return;
+    }
+
+    // Check if we're in a backoff period due to rate limiting
+    const now = Date.now();
+    if (window._lastRefreshAttempt && window._refreshBackoffMs) {
+      const timeSinceLastAttempt = now - window._lastRefreshAttempt;
+      if (timeSinceLastAttempt < window._refreshBackoffMs) {
+        const remainingMs = window._refreshBackoffMs - timeSinceLastAttempt;
+        console.log(`Skipping refresh - in backoff period. Retry in ${Math.ceil(remainingMs / 1000)}s`);
+        return;
+      }
+    }
+
+    window._isRefreshingSession = true;
+    window._lastRefreshAttempt = now;
+
+    try {
+      console.log('Refreshing session...');
+      const { data, error } = await supabase.auth.refreshSession();
+      
+      if (error) {
+        // Handle rate limit errors gracefully
+        if (error.message?.includes('rate limit') || error.status === 429) {
+          console.warn('Rate limit hit during session refresh, implementing backoff');
+          // Exponential backoff: start with 1 minute, max 10 minutes
+          window._refreshBackoffMs = Math.min(
+            (window._refreshBackoffMs || 60000) * 2,
+            10 * 60 * 1000
+          );
+          // Don't sign out user, just wait and retry later
+          toast.warning('Session refresh rate limited. Will retry shortly.');
+        } else {
+          console.error('Error refreshing session:', error);
+          // For other errors, reset backoff
+          window._refreshBackoffMs = 0;
+        }
+      } else if (data && data.session) {
+        console.log('Session refreshed successfully');
+        // Reset backoff on successful refresh
+        window._refreshBackoffMs = 0;
+      }
+    } catch (refreshError: any) {
+      console.error('Error during session refresh:', refreshError);
+      // Handle rate limit in catch block as well
+      if (refreshError?.status === 429 || refreshError?.message?.includes('rate limit')) {
+        window._refreshBackoffMs = Math.min(
+          (window._refreshBackoffMs || 60000) * 2,
+          10 * 60 * 1000
+        );
+        toast.warning('Session refresh rate limited. Will retry shortly.');
+      } else {
+        window._refreshBackoffMs = 0;
+      }
+    } finally {
+      window._isRefreshingSession = false;
+    }
+  }, []);
+
   useEffect(() => {
+    // Initialize global variables
+    if (typeof window !== 'undefined') {
+      window._isRefreshingSession = false;
+      window._lastRefreshAttempt = 0;
+      window._refreshBackoffMs = 0;
+    }
+
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, currentSession) => {
         console.log('Auth state changed:', event, currentSession?.user?.id);
+        
+        // Clear any existing refresh interval before creating a new one
+        if (window._sessionRefreshInterval) {
+          clearInterval(window._sessionRefreshInterval);
+          window._sessionRefreshInterval = null;
+        }
+
         setSession(currentSession);
         setUser(currentSession?.user ?? null);
         
@@ -98,21 +180,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           localStorage.setItem('supabase_token', currentSession.access_token);
           console.log('Token stored in localStorage');
           
+          // Reset backoff when we get a new session
+          window._refreshBackoffMs = 0;
+          
           // Set a session refresh interval to prevent automatic logout
-          const refreshIntervalId = setInterval(async () => {
-            try {
-              console.log('Refreshing session...');
-              const { data, error } = await supabase.auth.refreshSession();
-              
-              if (error) {
-                console.error('Error refreshing session:', error);
-              } else if (data && data.session) {
-                console.log('Session refreshed successfully');
-              }
-            } catch (refreshError) {
-              console.error('Error during session refresh:', refreshError);
-            }
-          }, 10 * 60 * 1000); // Refresh every 10 minutes
+          // Use a longer interval (15 minutes) to reduce rate limit issues
+          const refreshIntervalId = setInterval(() => {
+            refreshSessionSafely();
+          }, 15 * 60 * 1000); // Refresh every 15 minutes
           
           // Store the interval ID so we can clear it later
           window._sessionRefreshInterval = refreshIntervalId;
@@ -120,11 +195,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           localStorage.removeItem('supabase_token');
           console.log('Token removed from localStorage');
           
-          // Clear the refresh interval when logged out
-          if (window._sessionRefreshInterval) {
-            clearInterval(window._sessionRefreshInterval);
-            window._sessionRefreshInterval = null;
-          }
+          // Reset refresh state
+          window._isRefreshingSession = false;
+          window._lastRefreshAttempt = 0;
+          window._refreshBackoffMs = 0;
         }
         
         // Clear profile state if user is signed out
@@ -167,8 +241,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, [syncBackendSession]);
+    return () => {
+      subscription.unsubscribe();
+      // Clear refresh interval on unmount
+      if (window._sessionRefreshInterval) {
+        clearInterval(window._sessionRefreshInterval);
+        window._sessionRefreshInterval = null;
+      }
+    };
+  }, [syncBackendSession, refreshSessionSafely]);
 
   const fetchUserProfile = async (userId: string) => {
     try {
@@ -321,6 +402,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         window._sessionRefreshInterval = null;
       }
       
+      // Reset refresh state
+      window._isRefreshingSession = false;
+      window._lastRefreshAttempt = 0;
+      window._refreshBackoffMs = 0;
+      
       // Then log out from Supabase
       const { error } = await supabase.auth.signOut();
       
@@ -354,6 +440,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Function to refresh profile (bypasses cooldown)
+  const refreshProfile = async () => {
+    if (!user?.id) return;
+    // Clear cooldown to allow immediate refetch
+    localStorage.removeItem('last_profile_fetch');
+    await fetchUserProfile(user.id);
+  };
+
   const value = {
     session,
     user,
@@ -362,7 +456,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isLoading,
     signIn,
     signUp,
-    signOut
+    signOut,
+    refreshProfile
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

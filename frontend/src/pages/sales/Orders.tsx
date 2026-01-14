@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from '@/components/ui/badge';
-import { Search, Plus, Eye, Edit } from "lucide-react";
+import { Search, Plus, Eye, Edit, Calendar, DollarSign, User, CreditCard } from "lucide-react";
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import apiClient from '@/lib/apiClient';
@@ -166,93 +166,192 @@ export default function Orders() {
   };
   
   return (
-    <div className="container mx-auto py-6">
-      <Card>
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <div>
-              <CardTitle>Order Management</CardTitle>
-              <CardDescription>
+    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
+      <Card className="w-full min-w-0 overflow-hidden">
+        <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 min-w-0">
+            <div className="min-w-0 flex-1">
+              <CardTitle className="text-xl sm:text-2xl lg:text-3xl break-words">Order Management</CardTitle>
+              <CardDescription className="text-xs sm:text-sm mt-1 break-words">
                 View and manage all orders from your customers
               </CardDescription>
             </div>
-            <Button onClick={() => navigate('/sales/customers')}>
-              <Plus className="mr-2 h-4 w-4" />
+            <Button 
+              onClick={() => navigate('/sales/customers')}
+              className="w-full sm:w-auto text-sm sm:text-base flex-shrink-0"
+            >
+              <Plus className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
               Create New Order
             </Button>
           </div>
         </CardHeader>
         
-        <CardContent>
-          <div className="flex items-center space-x-2 mb-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+        <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2 mb-3 sm:mb-4 min-w-0">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
               <Input
-                placeholder="Search orders by order number, customer, or status..."
+                placeholder="Search orders..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8"
+                className="pl-9 sm:pl-8 text-sm sm:text-base h-9 sm:h-10 w-full min-w-0"
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by status" />
+              <SelectTrigger className="w-full sm:w-[140px] lg:w-[180px] text-sm sm:text-base h-9 sm:h-10 min-w-0">
+                <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="processing">Processing</SelectItem>
-                <SelectItem value="shipped">Shipped</SelectItem>
-                <SelectItem value="delivered">Delivered</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
+                <SelectItem value="all" className="text-sm">All Statuses</SelectItem>
+                <SelectItem value="pending" className="text-sm">Pending</SelectItem>
+                <SelectItem value="processing" className="text-sm">Processing</SelectItem>
+                <SelectItem value="shipped" className="text-sm">Shipped</SelectItem>
+                <SelectItem value="delivered" className="text-sm">Delivered</SelectItem>
+                <SelectItem value="cancelled" className="text-sm">Cancelled</SelectItem>
               </SelectContent>
             </Select>
             <Select value={paymentFilter} onValueChange={setPaymentFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by payment" />
+              <SelectTrigger className="w-full sm:w-[140px] lg:w-[180px] text-sm sm:text-base h-9 sm:h-10 min-w-0">
+                <SelectValue placeholder="Payment" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Payments</SelectItem>
-                <SelectItem value="full_payment">Full Payment</SelectItem>
-                <SelectItem value="partial_payment">Partial Payment</SelectItem>
-                <SelectItem value="full_credit">Full Credit</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="all" className="text-sm">All Payments</SelectItem>
+                <SelectItem value="full_payment" className="text-sm">Full Payment</SelectItem>
+                <SelectItem value="partial_payment" className="text-sm">Partial Payment</SelectItem>
+                <SelectItem value="full_credit" className="text-sm">Full Credit</SelectItem>
+                <SelectItem value="pending" className="text-sm">Pending</SelectItem>
               </SelectContent>
             </Select>
           </div>
           
-          <div className="rounded-md border">
-            <Table>
+          {/* Mobile Card View */}
+          <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
+            {isLoading ? (
+              <div className="text-center py-8 text-muted-foreground text-sm">Loading...</div>
+            ) : filteredOrders.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground text-sm">No orders found</div>
+            ) : (
+              filteredOrders.map((order) => (
+                <Card key={order.id} className="p-3 w-full min-w-0 overflow-hidden cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => navigate(`/sales/orders/${order.id}`)}>
+                  <div className="space-y-2.5 min-w-0">
+                    <div className="flex items-start justify-between gap-2 min-w-0">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm mb-1 break-words">
+                          Order #{order.order_number}
+                        </div>
+                        <div className="text-base font-bold text-green-600 mb-2">
+                          ${parseFloat(order.total_amount).toFixed(2)}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1.5 flex-shrink-0">
+                        {getStatusBadge(order.status)}
+                        {getPaymentStatusBadge(order.payment_status)}
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-1 text-xs min-w-0">
+                      <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                        <User className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate">{order.customer?.name || 'N/A'}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                        <Calendar className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate">{formatDate(order.created_at)}</span>
+                      </div>
+                      {order.payment_method && (
+                        <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                          <span className="text-xs">Method: {formatPaymentMethod(order.payment_method)}</span>
+                        </div>
+                      )}
+                      {order.credit_details && (
+                        <div className="flex items-center gap-1.5 text-muted-foreground min-w-0 pt-1 border-t">
+                          <CreditCard className="h-3 w-3 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-xs">
+                              ${order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount).toFixed(2)}
+                            </div>
+                            <div className="text-xs">
+                              Due: {formatDate(order.credit_details.end_date || order.credit_details.due_date, 'MMM d, yyyy')}
+                            </div>
+                            <div className="text-xs mt-0.5">
+                              {order.credit_details.description === 'Order Cancelled' ? (
+                                <span className="font-semibold text-gray-600">Cancelled</span>
+                              ) : new Date() > new Date(order.credit_details.end_date || order.credit_details.due_date) ? (
+                                <span className="font-semibold text-red-600">Overdue</span>
+                              ) : (
+                                <span className="font-semibold text-green-600">Active</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="flex gap-1.5 pt-2 border-t">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/sales/orders/${order.id}`);
+                        }}
+                        className="flex-1 text-xs h-8"
+                      >
+                        <Eye className="h-3.5 w-3.5 mr-1.5" />
+                        View
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/sales/orders/${order.id}/edit`);
+                        }}
+                        className="flex-1 text-xs h-8"
+                      >
+                        <Edit className="h-3.5 w-3.5 mr-1.5" />
+                        Update
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block w-full min-w-0 overflow-x-auto">
+            <Table className="min-w-[700px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Order #</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Payment</TableHead>
-                  <TableHead>Credit</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="px-2">Order #</TableHead>
+                  <TableHead className="px-2">Customer</TableHead>
+                  <TableHead className="px-2">Date</TableHead>
+                  <TableHead className="px-2">Total</TableHead>
+                  <TableHead className="px-2">Status</TableHead>
+                  <TableHead className="px-2">Payment</TableHead>
+                  <TableHead className="px-2">Credit</TableHead>
+                  <TableHead className="px-2">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center">Loading...</TableCell>
+                    <TableCell colSpan={8} className="text-center text-sm">Loading...</TableCell>
                   </TableRow>
                 ) : filteredOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center">No orders found</TableCell>
+                    <TableCell colSpan={8} className="text-center text-sm">No orders found</TableCell>
                   </TableRow>
                 ) : (
                   filteredOrders.map((order) => (
                     <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.order_number}</TableCell>
-                      <TableCell>{order.customer?.name || 'N/A'}</TableCell>
-                      <TableCell>{formatDate(order.created_at)}</TableCell>
-                      <TableCell>${parseFloat(order.total_amount).toFixed(2)}</TableCell>
-                      <TableCell>{getStatusBadge(order.status)}</TableCell>
-                      <TableCell>
+                      <TableCell className="px-2 py-2 font-medium text-sm">{order.order_number}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm">{order.customer?.name || 'N/A'}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm">{formatDate(order.created_at)}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm font-medium">${parseFloat(order.total_amount).toFixed(2)}</TableCell>
+                      <TableCell className="px-2 py-2">{getStatusBadge(order.status)}</TableCell>
+                      <TableCell className="px-2 py-2">
                         <div className="space-y-1">
                           <div>{getPaymentStatusBadge(order.payment_status)}</div>
                           <div className="text-xs text-muted-foreground">
@@ -260,9 +359,9 @@ export default function Orders() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-2 py-2">
                         {order.credit_details ? (
-                          <div className="text-sm">
+                          <div className="text-xs sm:text-sm">
                             <div className="font-medium">${order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount).toFixed(2)}</div>
                             <div className="text-muted-foreground">
                               Due: {formatDate(order.credit_details.end_date || order.credit_details.due_date, 'MMM d, yyyy')}
@@ -278,26 +377,26 @@ export default function Orders() {
                             </div>
                           </div>
                         ) : (
-                          <span className="text-muted-foreground">No credit</span>
+                          <span className="text-muted-foreground text-sm">No credit</span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        <div className="flex space-x-2">
+                      <TableCell className="px-2 py-2">
+                        <div className="flex gap-1">
                           <Button 
                             variant="outline" 
                             size="sm"
                             onClick={() => navigate(`/sales/orders/${order.id}`)}
+                            className="h-8 w-8 p-0"
                           >
-                            <Eye className="h-4 w-4 mr-2" />
-                            View
+                            <Eye className="h-4 w-4" />
                           </Button>
                           <Button 
                             variant="outline" 
                             size="sm"
                             onClick={() => navigate(`/sales/orders/${order.id}/edit`)}
+                            className="h-8 w-8 p-0"
                           >
-                            <Edit className="h-4 w-4 mr-2" />
-                            Update
+                            <Edit className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
 
 interface Customer {
@@ -25,9 +25,21 @@ interface Customer {
 // Get all customers
 export const getCustomers = async (req: Request, res: Response) => {
   try {
-    const { data: customers, error } = await supabase
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+
+    // Build query - filter by sales_executive_id if user is a sales executive
+    let query = supabase
       .from('customers')
       .select('*');
+
+    // If user is a sales executive, only show their customers
+    if (userRole === 'sales' && userId) {
+      query = query.eq('sales_executive_id', userId);
+    }
+    // Admins can see all customers (no filter)
+
+    const { data: customers, error } = await query;
 
     if (error) throw error;
 
@@ -147,6 +159,155 @@ export const getCustomerById = async (req: Request, res: Response) => {
     res.json(transformedCustomer);
   } catch (error) {
     console.error('Error fetching customer:', error);
+    throw new AppError('Failed to fetch customer', 500);
+  }
+};
+
+// Get customer by user_id (for admin to view customer details from user profile)
+export const getCustomerByUserId = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+
+    // First, get the profile information (this should always exist)
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !profile) {
+      return res.status(404).json({
+        success: false,
+        message: 'User profile not found'
+      });
+    }
+
+    // Then, try to get the customer details by user_id (may not exist)
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    // If customer doesn't exist, this is a retail customer (profile only, no customer record)
+    // Retail customers can still have orders, so fetch them
+    if (customerError || !customer) {
+      // PGRST116 is the "not found" error code - this is expected for retail customers
+      if (customerError && customerError.code !== 'PGRST116') {
+        console.error('Error fetching customer (unexpected):', customerError);
+      } else {
+        console.log(`Retail customer (profile only) - user ${userId}, fetching orders...`);
+      }
+      
+      // For retail customers, fetch their orders using user_id
+      const { data: retailOrders, error: retailOrdersError } = await supabase
+        .from('orders')
+        .select('id, total_amount, status, created_at, payment_status')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      
+      if (retailOrdersError) {
+        console.error('Error fetching retail customer orders:', retailOrdersError);
+      }
+      
+      // Calculate order metrics for retail customer
+      const filteredRetailOrders = retailOrders?.filter(order => order.status !== 'cancelled') || [];
+      const retailTotalOrders = filteredRetailOrders.length;
+      const retailTotalSpent = filteredRetailOrders.reduce((sum, order) => sum + parseFloat(order.total_amount.toString()), 0) || 0;
+      
+      // Get last order date
+      let lastRetailOrder = null;
+      if (filteredRetailOrders.length > 0) {
+        const orderDates = filteredRetailOrders.map(order => new Date(order.created_at).getTime());
+        const lastOrderDate = new Date(Math.max(...orderDates));
+        lastRetailOrder = lastOrderDate.toISOString().split('T')[0];
+      }
+      
+      // Return profile data with order information for retail customers
+      return res.json({
+        id: null,
+        user_id: userId,
+        name: profile.first_name || profile.last_name 
+          ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() 
+          : profile.email || 'Unknown',
+        email: profile.email,
+        phone: profile.phone || null,
+        trn_number: null,
+        totalOrders: retailTotalOrders,
+        totalSpent: retailTotalSpent,
+        lastOrder: lastRetailOrder,
+        credit_limit: 0,
+        current_credit: 0,
+        credit_period_days: 0,
+        credit_periods: [],
+        orders: filteredRetailOrders || [], // Include orders for retail customers
+        profile: profile,
+        sales_executive_id: null,
+        created_at: profile.created_at,
+        updated_at: profile.updated_at,
+        isCustomerRecord: false // Flag to indicate retail customer (no customer record)
+      });
+    }
+
+    // Get order information (using user_id from customer)
+    const { data: orders, error: ordersError } = await supabase
+      .from('orders')
+      .select('id, total_amount, status, created_at, payment_status')
+      .eq('user_id', customer.user_id);
+    
+    if (ordersError) {
+      console.error('Error fetching customer orders:', ordersError);
+    }
+
+    // Get credit periods information (complete ledger)
+    const { data: creditPeriods, error: creditError } = await supabase
+      .from('credit_periods')
+      .select('*')
+      .eq('customer_id', customer.id)
+      .order('created_at', { ascending: false });
+
+    if (creditError) {
+      console.error('Error fetching credit periods:', creditError);
+    }
+
+    // Calculate order metrics
+    const filteredOrders = orders?.filter(order => order.status !== 'cancelled') || [];
+    const totalOrders = filteredOrders.length;
+    const totalSpent = filteredOrders.reduce((sum, order) => sum + parseFloat(order.total_amount.toString()), 0) || 0;
+    
+    // Get last order date from orders if available
+    let lastOrderDate = customer.last_order_date || null;
+    if (filteredOrders.length > 0 && !lastOrderDate) {
+      const orderDates = filteredOrders.map(order => new Date(order.created_at).getTime());
+      const lastOrder = new Date(Math.max(...orderDates));
+      lastOrderDate = lastOrder.toISOString().split('T')[0];
+    }
+
+    const transformedCustomer = {
+      id: customer.id,
+      user_id: customer.user_id,
+      name: customer.name,
+      email: customer.email,
+      phone: customer.phone,
+      trn_number: customer.trn_number,
+      totalOrders,
+      totalSpent,
+      lastOrder: lastOrderDate,
+      credit_limit: customer.credit_limit,
+      current_credit: customer.current_credit,
+      credit_period_days: customer.credit_period_days,
+      credit_periods: creditPeriods || [],
+      orders: filteredOrders || [], // Include orders for wholesale customers too
+      profile: profile || null,
+      sales_executive_id: customer.sales_executive_id,
+      created_at: customer.created_at,
+      updated_at: customer.updated_at,
+      isCustomerRecord: true // Flag to indicate wholesale customer (has customer record)
+    };
+
+    res.json(transformedCustomer);
+  } catch (error) {
+    console.error('Error fetching customer by user_id:', error);
     throw new AppError('Failed to fetch customer', 500);
   }
 };
@@ -382,43 +543,65 @@ async function addCreditPeriod(req: Request, res: Response) {
     const { customer_id, amount, period, start_date, end_date, description } = req.body;
     const sales_executive_id = req.user?.id;
 
-    // Verify the customer belongs to this sales executive
+    // Verify the customer belongs to this sales executive and load credit info
     const { data: customer, error: customerError } = await supabase
       .from('customers')
-      .select('id')
+      .select('id, credit_limit, current_credit')
       .eq('id', customer_id)
       .eq('sales_executive_id', sales_executive_id)
       .single();
 
-    if (customerError) throw customerError;
+    if (customerError || !customer) {
+      throw customerError || new Error('Customer not found');
+    }
+
+    const creditLimit = parseFloat(customer.credit_limit?.toString() || '0');
+    const currentCredit = parseFloat(customer.current_credit?.toString() || '0');
+    const creditToAdd = parseFloat(amount?.toString() || '0');
+    const projectedCredit = currentCredit + creditToAdd;
+
+    // Enforce credit limit before creating credit period
+    if (creditLimit > 0 && projectedCredit > creditLimit) {
+      return res.status(400).json({
+        error: 'Credit limit exceeded for this customer',
+        details: {
+          creditLimit,
+          currentCredit,
+          creditToAdd,
+          projectedCredit,
+        },
+      });
+    }
 
     // Add credit period
     const { data: creditPeriod, error: creditError } = await supabase
       .from('credit_periods')
       .insert({
         customer_id,
-        amount,
+        amount: creditToAdd,
         period,
         start_date,
         end_date,
         type: 'credit',
-        description
+        description,
       })
       .select()
       .single();
 
     if (creditError) throw creditError;
 
-    // Update customer's current credit
+    // Update customer's current credit (increment, don't reset)
+    const newCurrentCredit = projectedCredit;
     const { error: updateError } = await supabase
       .from('customers')
-      .update({ current_credit: amount })
+      .update({ current_credit: newCurrentCredit })
       .eq('id', customer_id);
 
     if (updateError) throw updateError;
 
     res.status(201).json(creditPeriod);
   } catch (error: any) {
+    console.error('Error adding credit period:', error);
     res.status(500).json({ error: error.message });
   }
 }
@@ -537,23 +720,138 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
 
     console.log('Authenticated user ID:', sales_executive_id);
     
-    // Use the SECURITY DEFINER function to create customer with user
-    console.log('Using create_customer_with_user RPC function');
-    const { data: customer, error } = await supabase.rpc('create_customer_with_user', {
-      p_name: name,
-      p_email: email,
-      p_phone: phone,
-      p_trn_number: trn_number,
-      p_credit_period_days: credit_period_days || 0,
-      p_credit_limit: credit_limit || 0,
-      p_current_credit: current_credit || 0,
-      p_sales_executive_id: sales_executive_id,
-      p_password: password
+    // Use Supabase Auth Admin API to create user (proper way instead of RPC)
+    if (!supabaseAdmin) {
+      throw new AppError('Service role key not configured. Cannot create users.', 500);
+    }
+
+    console.log('Creating user with Supabase Auth Admin API...');
+    
+    let userId: string;
+    
+    // Try to create new user with Supabase Auth Admin API
+    const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true, // Auto-confirm email so user can login immediately
+      user_metadata: {
+        name,
+        phone
+      }
     });
 
-    if (error) {
-      console.error('RPC error:', error);
-      throw new AppError(`Failed to create customer: ${error.message}`, 500);
+    if (createUserError) {
+      // If user already exists, get the existing user
+      if (createUserError.message?.includes('already exists') || createUserError.message?.includes('User already registered')) {
+        console.log('User already exists, fetching existing user...');
+        const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+        const existingUser = existingUsers?.users.find(u => u.email === email);
+        
+        if (!existingUser) {
+          throw new AppError('User exists but could not be retrieved', 500);
+        }
+        
+        userId = existingUser.id;
+        console.log('Using existing user with ID:', userId);
+      } else {
+        console.error('Error creating user:', createUserError);
+        throw new AppError(`Failed to create user: ${createUserError.message}`, 500);
+      }
+    } else {
+      if (!newUser.user) {
+        throw new AppError('Failed to create user: No user data returned', 500);
+      }
+
+      userId = newUser.user.id;
+      console.log('User created successfully with ID:', userId);
+    }
+
+    // Create or update profile
+    const { data: existingProfile, error: profileCheckError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (profileCheckError && profileCheckError.code !== 'PGRST116') {
+      console.error('Error checking profile:', profileCheckError);
+    }
+
+    if (!existingProfile) {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: userId,
+          email: email,
+          role: 'user'
+        });
+
+      if (profileError) {
+        console.error('Error creating profile:', profileError);
+        // Continue anyway as profile might have been created by trigger
+      }
+    }
+
+    // Create or update customer
+    const { data: existingCustomer, error: customerCheckError } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    let customer;
+    
+    if (existingCustomer) {
+      // Update existing customer
+      const { data: updatedCustomer, error: updateError } = await supabase
+        .from('customers')
+        .update({
+          name,
+          email,
+          phone,
+          trn_number,
+          credit_period_days: credit_period_days || 0,
+          credit_limit: credit_limit || 0,
+          current_credit: current_credit || 0,
+          sales_executive_id,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingCustomer.id)
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error('Error updating customer:', updateError);
+        throw new AppError(`Failed to update customer: ${updateError.message}`, 500);
+      }
+
+      customer = updatedCustomer;
+    } else {
+      // Create new customer
+      const { data: newCustomer, error: customerError } = await supabase
+        .from('customers')
+        .insert({
+          name,
+          email,
+          phone,
+          trn_number,
+          credit_period_days: credit_period_days || 0,
+          credit_limit: credit_limit || 0,
+          current_credit: current_credit || 0,
+          sales_executive_id,
+          user_id: userId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (customerError) {
+        console.error('Error creating customer:', customerError);
+        throw new AppError(`Failed to create customer: ${customerError.message}`, 500);
+      }
+
+      customer = newCustomer;
     }
 
     console.log('Customer with user created successfully:', customer);
@@ -561,7 +859,7 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
     // Return structured response with user and customer data
     res.status(201).json({
       user: {
-        id: customer.user_id,
+        id: userId,
         email: email
       },
       customer: customer
@@ -669,13 +967,7 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
         phone,
         credit_limit,
         current_credit,
-        credit_period_days,
-        active_credit:credit_periods!inner(
-          amount,
-          period,
-          start_date,
-          end_date
-        )
+        credit_period_days
       `)
       .eq('sales_executive_id', sales_executive_id)
       .order('name');
@@ -684,11 +976,57 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
       throw new AppError(`Error fetching customers: ${error.message}`, 500);
     }
 
-    // Transform the data to match the frontend interface
-    const transformedCustomers = customers.map(customer => ({
+    // For each customer, calculate overdue credit
+    const transformedCustomers = await Promise.all(
+      customers.map(async (customer) => {
+        // Get all credit periods for this customer
+        const { data: creditPeriods, error: creditError } = await supabase
+          .from('credit_periods')
+          .select('amount, end_date, start_date, period')
+          .eq('customer_id', customer.id)
+          .order('end_date', { ascending: false });
+
+        if (creditError) {
+          console.error(`Error fetching credit periods for customer ${customer.id}:`, creditError);
+        }
+
+        // Calculate overdue credit: credit periods where end_date has passed AND amount > 0
+        const now = new Date();
+        let overdueAmount = 0;
+        let latestOverduePeriod = null;
+
+        if (creditPeriods && creditPeriods.length > 0) {
+          for (const period of creditPeriods) {
+            const endDate = new Date(period.end_date);
+            const amount = parseFloat(period.amount.toString());
+            
+            // Check if this period is overdue (end_date passed and amount > 0)
+            if (endDate < now && amount > 0) {
+              overdueAmount += amount;
+              // Keep track of the most recent overdue period for display
+              if (!latestOverduePeriod || endDate > new Date(latestOverduePeriod.end_date)) {
+                latestOverduePeriod = {
+                  amount: amount,
+                  period: period.period,
+                  start_date: period.start_date,
+                  end_date: period.end_date
+                };
+              }
+            }
+          }
+        }
+
+        return {
       ...customer,
-      active_credit: customer.active_credit?.[0] || null
-    }));
+          overdue_credit: overdueAmount > 0 ? {
+            amount: overdueAmount,
+            period: latestOverduePeriod?.period || 0,
+            start_date: latestOverduePeriod?.start_date || null,
+            end_date: latestOverduePeriod?.end_date || null
+          } : null
+        };
+      })
+    );
 
     return res.status(200).json({
       success: true,

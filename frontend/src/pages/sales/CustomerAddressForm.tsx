@@ -99,39 +99,39 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
   };
 
   return (
-    <div className="space-y-6 w-full">
+    <div className="space-y-4 sm:space-y-6 w-full min-w-0">
       <div className="flex justify-between items-center">
-        <h3 className="text-lg font-medium">Add New Address</h3>
-        <Button variant="ghost" size="icon" onClick={onClose}>
+        <h3 className="text-base sm:text-lg font-medium break-words">Add New Address</h3>
+        <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0">
           <X className="h-4 w-4" />
         </Button>
       </div>
       
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
           <FormField
             control={form.control}
             name="address_type"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Address Type</FormLabel>
+                <FormLabel className="text-xs sm:text-sm">Address Type</FormLabel>
                 <Select 
                   onValueChange={field.onChange} 
                   defaultValue={field.value}
                   value={field.value}
                 >
                   <FormControl>
-                    <SelectTrigger>
+                    <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
                       <SelectValue placeholder="Select address type" />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value="shipping">Shipping</SelectItem>
-                    <SelectItem value="billing">Billing</SelectItem>
-                    <SelectItem value="both">Both (Shipping & Billing)</SelectItem>
+                    <SelectItem value="shipping" className="text-sm">Shipping</SelectItem>
+                    <SelectItem value="billing" className="text-sm">Billing</SelectItem>
+                    <SelectItem value="both" className="text-sm">Both (Shipping & Billing)</SelectItem>
                   </SelectContent>
                 </Select>
-                <FormMessage />
+                <FormMessage className="text-xs" />
               </FormItem>
             )}
           />
@@ -141,11 +141,15 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
             name="address_line1"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Address Line 1</FormLabel>
+                <FormLabel className="text-xs sm:text-sm">Address Line 1</FormLabel>
                 <FormControl>
-                  <Input placeholder="Street address, P.O. box, company name" {...field} />
+                  <Input 
+                    placeholder="Street address, P.O. box, company name" 
+                    className="text-sm sm:text-base h-9 sm:h-10"
+                    {...field} 
+                  />
                 </FormControl>
-                <FormMessage />
+                <FormMessage className="text-xs" />
               </FormItem>
             )}
           />
@@ -155,26 +159,30 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
             name="address_line2"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Address Line 2 (Optional)</FormLabel>
+                <FormLabel className="text-xs sm:text-sm">Address Line 2 (Optional)</FormLabel>
                 <FormControl>
-                  <Input placeholder="Apartment, suite, unit, building, floor, etc." {...field} />
+                  <Input 
+                    placeholder="Apartment, suite, unit, building, floor, etc." 
+                    className="text-sm sm:text-base h-9 sm:h-10"
+                    {...field} 
+                  />
                 </FormControl>
-                <FormMessage />
+                <FormMessage className="text-xs" />
               </FormItem>
             )}
           />
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
             <FormField
               control={form.control}
               name="city"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>City</FormLabel>
+                  <FormLabel className="text-xs sm:text-sm">City</FormLabel>
                   <FormControl>
-                    <Input placeholder="City" {...field} />
+                    <Input placeholder="City" className="text-sm sm:text-base h-9 sm:h-10" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-xs" />
                 </FormItem>
               )}
             />
@@ -184,27 +192,27 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
               name="state"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>State/Province (Optional)</FormLabel>
+                  <FormLabel className="text-xs sm:text-sm">State/Province (Optional)</FormLabel>
                   <FormControl>
-                    <Input placeholder="State or province" {...field} />
+                    <Input placeholder="State or province" className="text-sm sm:text-base h-9 sm:h-10" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-xs" />
                 </FormItem>
               )}
             />
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
             <FormField
               control={form.control}
               name="postal_code"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Postal/ZIP Code (Optional)</FormLabel>
+                  <FormLabel className="text-xs sm:text-sm">Postal/ZIP Code (Optional)</FormLabel>
                   <FormControl>
-                    <Input placeholder="Postal or ZIP code" {...field} />
+                    <Input placeholder="Postal or ZIP code" className="text-sm sm:text-base h-9 sm:h-10" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-xs" />
                 </FormItem>
               )}
             />
@@ -214,11 +222,11 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
               name="country"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Country</FormLabel>
+                  <FormLabel className="text-xs sm:text-sm">Country</FormLabel>
                   <FormControl>
-                    <Input placeholder="Country" {...field} />
+                    <Input placeholder="Country" className="text-sm sm:text-base h-9 sm:h-10" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-xs" />
                 </FormItem>
               )}
             />
@@ -228,15 +236,16 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
             control={form.control}
             name="is_default"
             render={({ field }) => (
-              <FormItem className="flex flex-row items-start space-x-3 space-y-0 py-2">
+              <FormItem className="flex flex-row items-start space-x-2 sm:space-x-3 space-y-0 py-2">
                 <FormControl>
                   <Checkbox
                     checked={field.value}
                     onCheckedChange={field.onChange}
+                    className="mt-0.5"
                   />
                 </FormControl>
                 <div className="space-y-1 leading-none">
-                  <FormLabel>
+                  <FormLabel className="text-xs sm:text-sm cursor-pointer">
                     Set as default address
                   </FormLabel>
                 </div>
@@ -244,18 +253,20 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
             )}
           />
           
-          <div className="flex justify-end space-x-4">
+          <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-4 pt-2">
             <Button
               type="button"
               variant="outline"
               onClick={onClose}
               disabled={isSubmitting}
+              className="w-full sm:w-auto text-sm sm:text-base"
             >
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={isSubmitting}
+              className="w-full sm:w-auto text-sm sm:text-base"
             >
               {isSubmitting ? 'Saving...' : 'Save Address'}
             </Button>

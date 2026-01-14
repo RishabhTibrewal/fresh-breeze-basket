@@ -51,6 +51,7 @@ import productImagesRouter from './routes/productImages';
 import inventoryRouter from './routes/inventory';
 import cartRouter from './routes/cart';
 import salesOrderRouter from './routes/orderRoutes';
+import leadsRouter from './routes/leadsRoutes';
 
 // Initialize Express app
 export const app = express();
@@ -139,6 +140,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/customer', customerRoutes);
 app.use('/api/credit-period', creditPeriodRoutes);
 app.use('/api/sales/orders', salesOrderRouter);
+app.use('/api/leads', leadsRouter);
 
 // Final error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

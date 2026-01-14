@@ -8,6 +8,54 @@ const rateLimit = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
 const MAX_REQUESTS = 100;
 
+// In-memory role cache to avoid fetching role on every request
+const roleCache = new Map<string, { role: string; expiresAt: number }>();
+const ROLE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache TTL
+
+// Helper function to get role from cache or database
+const getUserRole = async (userId: string): Promise<string> => {
+  // Check cache first
+  const cached = roleCache.get(userId);
+  const now = Date.now();
+  
+  if (cached && now < cached.expiresAt) {
+    return cached.role;
+  }
+  
+  // Cache miss or expired - fetch from database
+  try {
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !profile || !profile.role) {
+      // Default role if profile not found (matches database default)
+      return 'user';
+    }
+    
+    const role = profile.role;
+    
+    // Cache the role
+    roleCache.set(userId, {
+      role,
+      expiresAt: now + ROLE_CACHE_TTL
+    });
+    
+    return role;
+  } catch (error) {
+    console.error(`Error fetching role for user ${userId}:`, error);
+    return 'user'; // Default role on error (matches database default)
+  }
+};
+
+// Export function to invalidate role cache (useful when role is updated)
+export const invalidateRoleCache = (userId: string): void => {
+  roleCache.delete(userId);
+  console.log(`Role cache invalidated for user ${userId}`);
+};
+
 const checkRateLimit = (ip: string): boolean => {
   const now = Date.now();
   const userLimit = rateLimit.get(ip);
@@ -51,31 +99,14 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         throw new AuthenticationError('Invalid authentication token');
       }
 
-      // Fetch user's role from profiles table
-      let userRole = 'authenticated'; // Default role
-      try {
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-
-        if (profileError) {
-          console.warn(`Could not fetch profile for user ${user.id}:`, profileError.message);
-          // Stick with default role 'authenticated' or handle as error if profile is mandatory
-        } else if (profile && profile.role) {
-          userRole = profile.role; // Assign actual role from profile
-        }
-      } catch (profileFetchError) {
-        console.error(`Exception fetching profile for user ${user.id}:`, profileFetchError);
-        // Stick with default role or handle error
-      }
+      // Get user's role (uses cache to minimize database queries)
+      const userRole = await getUserRole(user.id);
 
       // Add user info to request
       req.user = {
         id: user.id,
         email: user.email || '',
-        role: userRole // Use the fetched role
+        role: userRole // Use the fetched/cached role
       };
 
       console.log('User authenticated successfully:', { id: user.id, email: user.email, role: userRole });
@@ -95,32 +126,18 @@ export const adminOnly = async (req: Request, res: Response, next: NextFunction)
       throw new AuthenticationError('User not authenticated');
     }
 
-    console.log('Checking admin status for user:', req.user.id);
-    
-    // Check if user is admin by checking the profile(s)
-    const { data: profiles, error: profileError } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', req.user.id);
+    // Use role from req.user (already set by protect middleware)
+    // If role is not set, fetch it (in case adminOnly is used without protect)
+    let userRole = req.user.role;
       
-    if (profileError) {
-      console.error('Error fetching profile:', profileError);
-      throw new AuthorizationError('Error checking admin status');
+    if (!userRole) {
+      userRole = await getUserRole(req.user.id);
+      req.user.role = userRole;
     }
     
-    // Check if any of the returned profiles have admin role
-    const isAdmin = profiles && profiles.length > 0 && profiles.some(profile => profile.role === 'admin');
-    
-    if (!isAdmin) {
-      // If not admin, throw error
+    if (userRole !== 'admin') {
       throw new AuthorizationError('Admin access required');
     }
-    
-    // If we get here, user is admin
-    console.log('User is admin');
-    
-    // Add admin role to req.user for controllers to use
-    req.user.role = 'admin';
     
     next();
   } catch (error) {
@@ -149,13 +166,19 @@ export const isAuthenticated = async (req: Request, res: Response, next: NextFun
 
 export const isAdmin = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', req.user?.id)
-      .single();
+    if (!req.user?.id) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
 
-    if (error || !profile || profile.role !== 'admin') {
+    // Use role from req.user if available, otherwise fetch from cache/database
+    let userRole = req.user.role;
+
+    if (!userRole) {
+      userRole = await getUserRole(req.user.id);
+      req.user.role = userRole;
+    }
+
+    if (userRole !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
 
@@ -167,13 +190,19 @@ export const isAdmin = async (req: Request, res: Response, next: NextFunction) =
 
 export const isSalesExecutive = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', req.user?.id)
-      .single();
+    if (!req.user?.id) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
 
-    if (error || !profile || profile.role !== 'sales') {
+    // Use role from req.user if available, otherwise fetch from cache/database
+    let userRole = req.user.role;
+
+    if (!userRole) {
+      userRole = await getUserRole(req.user.id);
+      req.user.role = userRole;
+    }
+
+    if (userRole !== 'sales') {
       return res.status(403).json({ error: 'Sales executive access required' });
     }
 

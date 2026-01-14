@@ -553,6 +553,70 @@ export default function AdminOrderDetails() {
                 {renderBillingAddress()}
               </CardContent>
             </Card>
+
+
+            {/* Credit Period Information */}
+            {(order as any).credit_details && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="h-5 w-5" />
+                    Credit Period Details
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Credit Amount</p>
+                        <p className="font-medium">AED {((order as any).credit_details.amount || 0).toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Period</p>
+                        <p className="font-medium">{((order as any).credit_details.period || 0)} days</p>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Start Date</p>
+                        <p className="font-medium">
+                          {((order as any).credit_details.start_date 
+                            ? format(new Date((order as any).credit_details.start_date), 'MMM d, yyyy')
+                            : 'N/A')}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">End Date</p>
+                        <p className="font-medium">
+                          {((order as any).credit_details.end_date 
+                            ? format(new Date((order as any).credit_details.end_date), 'MMM d, yyyy')
+                            : 'N/A')}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {(order as any).credit_details.description && (
+                      <div>
+                        <p className="text-sm text-muted-foreground mb-2">Description</p>
+                        <div className="bg-muted p-3 rounded-md">
+                          <p className="text-sm whitespace-pre-line">{(order as any).credit_details.description}</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {((order as any).credit_details.end_date && new Date((order as any).credit_details.end_date) < new Date()) && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                        <p className="text-sm text-yellow-800 font-medium">
+                          Credit period has ended
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            
           </div>
         </TabsContent>
         

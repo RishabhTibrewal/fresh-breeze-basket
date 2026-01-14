@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from '@/components/ui/badge';
-import { Search, ArrowLeft, Plus, Eye, Edit } from "lucide-react";
+import { Search, ArrowLeft, Plus, Eye, Edit, Calendar, DollarSign, CreditCard } from "lucide-react";
 import { format } from 'date-fns';
 import { customerService, CustomerOrder } from '@/api/customer';
 import { toast } from 'sonner';
@@ -225,75 +225,177 @@ export default function CustomerOrders() {
   };
   
   return (
-    <div className="container mx-auto py-6">
+    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
       <Button 
         variant="outline" 
-        className="mb-4"
+        className="mb-3 sm:mb-4 w-full sm:w-auto text-sm sm:text-base"
         onClick={() => navigate('/sales/customers')}
       >
-        <ArrowLeft className="mr-2 h-4 w-4" />
+        <ArrowLeft className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
         Back to Customers
       </Button>
       
-      <Card>
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <div>
-              <CardTitle>Orders for {customer?.name || 'Customer'}</CardTitle>
-              <CardDescription>
+      <Card className="w-full min-w-0 overflow-hidden">
+        <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 min-w-0">
+            <div className="min-w-0 flex-1">
+              <CardTitle className="text-xl sm:text-2xl lg:text-3xl break-words">
+                Orders for {customer?.name || 'Customer'}
+              </CardTitle>
+              <CardDescription className="text-xs sm:text-sm mt-1 break-words">
                 Manage orders for this customer
               </CardDescription>
             </div>
-            <Button onClick={() => navigate(`/sales/orders/create?customerId=${customerId}`)}>
-              <Plus className="mr-2 h-4 w-4" />
+            <Button 
+              onClick={() => navigate(`/sales/orders/create?customerId=${customerId}`)}
+              className="w-full sm:w-auto text-sm sm:text-base flex-shrink-0"
+            >
+              <Plus className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
               Create New Order
             </Button>
           </div>
         </CardHeader>
         
-        <CardContent>
-          <div className="flex items-center space-x-2 mb-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+        <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+          <div className="flex items-center space-x-2 mb-3 sm:mb-4 min-w-0">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
               <Input
                 placeholder="Search orders..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8"
+                className="pl-9 sm:pl-8 text-sm sm:text-base h-9 sm:h-10 w-full min-w-0"
               />
             </div>
           </div>
           
-          <div className="rounded-md border">
-            <Table>
+          {/* Mobile Card View */}
+          <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
+            {isLoading ? (
+              <div className="text-center py-8 text-sm text-muted-foreground">Loading...</div>
+            ) : filteredOrders.length === 0 ? (
+              <div className="text-center py-8 text-sm text-muted-foreground">No orders found</div>
+            ) : (
+              filteredOrders.map((order) => (
+                <Card key={order.id} className="p-3 w-full min-w-0 overflow-hidden cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => navigate(`/sales/orders/${order.id}`)}>
+                  <div className="space-y-2.5 min-w-0">
+                    <div className="flex items-start justify-between gap-2 min-w-0">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm mb-1 break-words">
+                          Order #{order.order_number}
+                        </div>
+                        <div className="text-base font-bold text-green-600 mb-2">
+                          ${parseFloat(order.total_amount.toString()).toFixed(2)}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1.5 flex-shrink-0">
+                        {getStatusBadge(order.status)}
+                        {getPaymentStatusBadge(order.payment_status)}
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-1 text-xs min-w-0">
+                      <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                        <Calendar className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate">{formatDate(order.created_at)}</span>
+                      </div>
+                      {order.payment_method && (
+                        <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                          <span className="text-xs">Method: {formatPaymentMethod(order.payment_method)}</span>
+                        </div>
+                      )}
+                      {order.credit_details && (
+                        <div className="flex items-center gap-1.5 text-muted-foreground min-w-0 pt-1 border-t">
+                          <CreditCard className="h-3 w-3 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-xs">
+                              ${order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount.toString()).toFixed(2)}
+                            </div>
+                            <div className="text-xs">
+                              Due: {formatDate(order.credit_details.end_date || (order.credit_details as any).due_date, 'MMM d, yyyy')}
+                            </div>
+                            <div className="text-xs mt-0.5">
+                              {(() => {
+                                const isCancelled = order.status === 'cancelled' || order.credit_details.status === 'cancelled';
+                                const isOverdue = !isCancelled && new Date() > new Date(order.credit_details.end_date || (order.credit_details as any).due_date);
+                                return isCancelled 
+                                  ? <span className="font-semibold text-gray-600">Inactive</span>
+                                  : isOverdue
+                                    ? <span className="font-semibold text-red-600">Overdue</span>
+                                    : <span className="font-semibold text-green-600">Active</span>;
+                              })()}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Period: {order.credit_details.period || "N/A"} days
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="flex gap-1.5 pt-2 border-t">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/sales/orders/${order.id}`);
+                        }}
+                        className="flex-1 text-xs h-8"
+                      >
+                        <Eye className="h-3.5 w-3.5 mr-1.5" />
+                        View
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/sales/orders/${order.id}/edit`);
+                        }}
+                        className="flex-1 text-xs h-8"
+                      >
+                        <Edit className="h-3.5 w-3.5 mr-1.5" />
+                        Update
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block w-full min-w-0 overflow-x-auto">
+            <Table className="min-w-[700px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Order #</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Payment</TableHead>
-                  <TableHead>Credit</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="px-2">Order #</TableHead>
+                  <TableHead className="px-2">Date</TableHead>
+                  <TableHead className="px-2">Total</TableHead>
+                  <TableHead className="px-2">Status</TableHead>
+                  <TableHead className="px-2">Payment</TableHead>
+                  <TableHead className="px-2">Credit</TableHead>
+                  <TableHead className="px-2">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center">Loading...</TableCell>
+                    <TableCell colSpan={7} className="text-center text-sm">Loading...</TableCell>
                   </TableRow>
                 ) : filteredOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center">No orders found</TableCell>
+                    <TableCell colSpan={7} className="text-center text-sm">No orders found</TableCell>
                   </TableRow>
                 ) : (
                   filteredOrders.map((order) => (
                     <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.order_number}</TableCell>
-                      <TableCell>{formatDate(order.created_at)}</TableCell>
-                      <TableCell>${parseFloat(order.total_amount.toString()).toFixed(2)}</TableCell>
-                      <TableCell>{getStatusBadge(order.status)}</TableCell>
-                      <TableCell>
+                      <TableCell className="px-2 py-2 font-medium text-sm">{order.order_number}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm">{formatDate(order.created_at)}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm font-medium">${parseFloat(order.total_amount.toString()).toFixed(2)}</TableCell>
+                      <TableCell className="px-2 py-2">{getStatusBadge(order.status)}</TableCell>
+                      <TableCell className="px-2 py-2">
                         <div className="space-y-1">
                           <div>{getPaymentStatusBadge(order.payment_status)}</div>
                           <div className="text-xs text-muted-foreground">
@@ -301,27 +403,14 @@ export default function CustomerOrders() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-2 py-2">
                         {order.credit_details ? (
                           (() => {
-                            // Log credit details when rendering
-                            console.log(`Rendering credit cell for order ${order.order_number}:`, {
-                              order_id: order.id,
-                              amount: order.credit_details.amount,
-                              end_date: order.credit_details.end_date,
-                              due_date: (order.credit_details as any).due_date, 
-                              date_to_display: order.credit_details.end_date || (order.credit_details as any).due_date,
-                              is_overdue: new Date() > new Date(order.credit_details.end_date || (order.credit_details as any).due_date),
-                              order_status: order.status,
-                              credit_status: order.credit_details.status
-                            });
-                            
-                            // Determine credit status based on both order status and credit period status
                             const isCancelled = order.status === 'cancelled' || order.credit_details.status === 'cancelled';
                             const isOverdue = !isCancelled && new Date() > new Date(order.credit_details.end_date || (order.credit_details as any).due_date);
                             
                             return (
-                              <div className="text-sm">
+                              <div className="text-xs sm:text-sm">
                                 <div className="font-medium">${order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount.toString()).toFixed(2)}</div>
                                 <div className="text-muted-foreground">
                                   Due: {formatDate(order.credit_details.end_date || (order.credit_details as any).due_date, 'MMM d, yyyy')}
@@ -341,26 +430,26 @@ export default function CustomerOrders() {
                             );
                           })()
                         ) : (
-                          <span className="text-muted-foreground">No credit</span>
+                          <span className="text-muted-foreground text-sm">No credit</span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        <div className="flex space-x-2">
+                      <TableCell className="px-2 py-2">
+                        <div className="flex gap-1">
                           <Button 
                             variant="outline" 
                             size="sm"
                             onClick={() => navigate(`/sales/orders/${order.id}`)}
+                            className="h-8 w-8 p-0"
                           >
-                            <Eye className="h-4 w-4 mr-2" />
-                            View
+                            <Eye className="h-4 w-4" />
                           </Button>
                           <Button 
                             variant="outline" 
                             size="sm"
                             onClick={() => navigate(`/sales/orders/${order.id}/edit`)}
+                            className="h-8 w-8 p-0"
                           >
-                            <Edit className="h-4 w-4 mr-2" />
-                            Update
+                            <Edit className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>
@@ -373,26 +462,17 @@ export default function CustomerOrders() {
         </CardContent>
         
         {customer && (
-          <CardFooter className="flex justify-between">
-            <div>
-              <p className="text-sm font-medium">Customer Information</p>
-              <p className="text-sm">Email: {customer.email}</p>
-              <p className="text-sm">Phone: {customer.phone}</p>
+          <CardFooter className="flex flex-col sm:flex-row justify-between gap-4 sm:gap-0 px-3 sm:px-6 py-3 sm:py-6 border-t">
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-medium mb-1">Customer Information</p>
+              <p className="text-xs sm:text-sm break-words">Email: {customer.email}</p>
+              <p className="text-xs sm:text-sm break-words">Phone: {customer.phone}</p>
             </div>
-            <div>
-              <p className="text-sm font-medium">Credit Information</p>
-              <p className="text-sm">Credit Limit: ${(customer.credit_limit || 0).toFixed(2)}</p>
-              <p className="text-sm">Current Credit: ${(customer.current_credit || 0).toFixed(2)}</p>
-              <p className="text-sm">Allowed Credit Period: {customer.credit_period_days || 0} days</p>
-              {/* {customer.active_credit && (
-                <div className="mt-2">
-                  <p className="text-sm font-medium text-primary">Active Credit</p>
-                  <p className="text-sm">Amount: ${customer.active_credit.amount.toFixed(2)}</p>
-                  <p className="text-sm">Period: {customer.active_credit.period} days</p>
-                  <p className="text-sm">Start: {new Date(customer.active_credit.start_date).toLocaleDateString()}</p>
-                  <p className="text-sm">Due: {new Date(customer.active_credit.end_date).toLocaleDateString()}</p>
-                </div>
-              )} */}
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-medium mb-1">Credit Information</p>
+              <p className="text-xs sm:text-sm">Credit Limit: ${(customer.credit_limit || 0).toFixed(2)}</p>
+              <p className="text-xs sm:text-sm">Current Credit: ${(customer.current_credit || 0).toFixed(2)}</p>
+              <p className="text-xs sm:text-sm">Allowed Credit Period: {customer.credit_period_days || 0} days</p>
             </div>
           </CardFooter>
         )}

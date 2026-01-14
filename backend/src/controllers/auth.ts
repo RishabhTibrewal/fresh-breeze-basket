@@ -342,29 +342,61 @@ export const updateProfile = async (req: Request, res: Response) => {
     const userId = req.user.id;
     const { first_name, last_name, phone, avatar_url } = req.body;
     
+    console.log('[updateProfile] Request received:', {
+      userId,
+      body: req.body,
+      first_name,
+      last_name,
+      phone,
+      avatar_url
+    });
+    
+    // Build update object - only include fields that are provided (not undefined)
+    const updateData: any = {
+      updated_at: new Date()
+    };
+    
+    if (first_name !== undefined && first_name !== null) {
+      updateData.first_name = first_name;
+    }
+    if (last_name !== undefined && last_name !== null) {
+      updateData.last_name = last_name;
+    }
+    if (phone !== undefined && phone !== null) {
+      updateData.phone = phone;
+    }
+    if (avatar_url !== undefined && avatar_url !== null) {
+      updateData.avatar_url = avatar_url;
+    }
+    
+    console.log('[updateProfile] Update data:', updateData);
+    
     // Update profile
     const { data, error } = await supabase
       .from('profiles')
-      .update({
-        first_name: first_name || undefined,
-        last_name: last_name || undefined,
-        phone: phone || undefined,
-        avatar_url: avatar_url || undefined,
-        updated_at: new Date()
-      })
+      .update(updateData)
       .eq('id', userId)
       .select()
       .single();
     
     if (error) {
+      console.error('[updateProfile] Supabase error:', error);
       throw new ApiError(400, error.message);
     }
+    
+    if (!data) {
+      console.error('[updateProfile] No data returned from Supabase');
+      throw new ApiError(404, 'Profile not found');
+    }
+    
+    console.log('[updateProfile] Profile updated successfully:', data);
     
     res.status(200).json({
       success: true,
       data
     });
   } catch (error) {
+    console.error('[updateProfile] Error caught:', error);
     if (error instanceof ApiError) {
       throw error;
     }
@@ -849,6 +881,11 @@ export const updateRole = async (req: Request, res: Response) => {
         message: 'Failed to update role'
       });
     }
+
+    // Invalidate role cache so the new role is reflected immediately
+    // Use dynamic import to avoid circular dependency
+    const { invalidateRoleCache } = await import('../middleware/auth');
+    invalidateRoleCache(userId);
 
     return res.status(200).json({
       success: true,

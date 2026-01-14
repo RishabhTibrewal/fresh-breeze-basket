@@ -85,6 +85,11 @@ export const customerService = {
     return data;
   },
   
+  async getCustomerByUserId(userId: string): Promise<any> {
+    const { data } = await apiClient.get<any>(`/customer/by-user/${userId}`);
+    return data;
+  },
+  
   async updateCustomer(id: string, customerData: Partial<CustomerFormValues>): Promise<CustomerDetails> {
     const { data } = await apiClient.put<CustomerDetails>(`/customer/${id}`, customerData);
     return data;

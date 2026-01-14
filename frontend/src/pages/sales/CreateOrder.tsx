@@ -102,8 +102,10 @@ export default function CreateOrder() {
     product_name: string;
     quantity: number;
     unit_price: number;
+    original_price: number; // Store original product price for reference
     price: number;
     subtotal: number;
+    discount?: number; // Optional discount percentage
     image_url?: string;
     origin?: string;
     stock_count?: number;
@@ -289,6 +291,7 @@ export default function CreateOrder() {
     
     // Use sale price if available, otherwise use regular price
     const priceToUse = product.sale_price || product.price;
+    const originalPrice = product.sale_price || product.price;
     
     // Check if product already exists in the order
     const existingIndex = items.findIndex(item => item.product_id === productId);
@@ -307,8 +310,10 @@ export default function CreateOrder() {
         product_name: product.name,
         quantity: 1,
         unit_price: priceToUse,
+        original_price: originalPrice, // Store original price
         price: priceToUse,
         subtotal: priceToUse,
+        discount: 0, // No discount initially
         image_url: product.image_url,
         origin: product.origin,
         stock_count: product.stock_count,
@@ -329,6 +334,38 @@ export default function CreateOrder() {
     newItems[index].quantity = quantity;
     newItems[index].subtotal = quantity * newItems[index].unit_price;
     newItems[index].price = newItems[index].unit_price;
+    setItems(newItems);
+  };
+
+  // Update unit price for an item
+  const updateUnitPrice = (index: number, newPrice: number) => {
+    if (newPrice < 0) return;
+    
+    const newItems = [...items];
+    newItems[index].unit_price = newPrice;
+    newItems[index].subtotal = newItems[index].quantity * newPrice;
+    newItems[index].price = newPrice;
+    
+    // Calculate discount percentage if price is different from original
+    if (newItems[index].original_price > 0) {
+      const discountAmount = newItems[index].original_price - newPrice;
+      newItems[index].discount = (discountAmount / newItems[index].original_price) * 100;
+    }
+    
+    setItems(newItems);
+  };
+
+  // Update discount percentage for an item
+  const updateDiscount = (index: number, discountPercent: number) => {
+    if (discountPercent < 0 || discountPercent > 100) return;
+    
+    const newItems = [...items];
+    newItems[index].discount = discountPercent;
+    const discountAmount = (newItems[index].original_price * discountPercent) / 100;
+    newItems[index].unit_price = newItems[index].original_price - discountAmount;
+    newItems[index].subtotal = newItems[index].quantity * newItems[index].unit_price;
+    newItems[index].price = newItems[index].unit_price;
+    
     setItems(newItems);
   };
   
@@ -371,14 +408,19 @@ export default function CreateOrder() {
         endDate.setDate(endDate.getDate() + (data.credit_period || 30)); // Default to 30 days if missing
         
         // Add credit details
+        const creditAmount = data.payment_status === 'full_credit' ? totalAmount : 
+                            (totalAmount - (data.partial_payment_amount || 0));
+        const partialPaymentAmount = data.partial_payment_amount || 0;
+        
         orderData.credit_details = {
-          amount: data.payment_status === 'full_credit' ? totalAmount : 
-                 (totalAmount - (data.partial_payment_amount || 0)),
+          amount: creditAmount,
           period: data.credit_period || 30,
           start_date: startDate.toISOString().split('T')[0],
           end_date: endDate.toISOString().split('T')[0],
           type: 'credit',
-          description: `Credit for order - ${data.payment_status === 'full_credit' ? 'Full Credit' : 'Partial Payment'}`
+          description: data.payment_status === 'full_credit' 
+            ? `Credit for order - Full Credit` 
+            : `Credit for order - Partial Payment (Paid: AED ${partialPaymentAmount.toFixed(2)}, Credit: AED ${creditAmount.toFixed(2)})`
         };
       }
       
@@ -446,67 +488,55 @@ export default function CreateOrder() {
   };
   
   return (
-    <div className="container mx-auto py-6">
+    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
       <Button 
         variant="outline" 
-        className="mb-4"
+        className="mb-3 sm:mb-4 w-full sm:w-auto text-sm sm:text-base"
         onClick={() => customerId 
           ? navigate(`/sales/customers/${customerId}/orders`) 
           : navigate('/sales/customers')
         }
       >
-        <ArrowLeft className="mr-2 h-4 w-4" />
+        <ArrowLeft className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
         Back
       </Button>
-      
-      {showAddressForm && (
-        <Card className="mb-6 p-4">
-          <CardContent>
-            <CustomerAddressForm
-              customerId={customerId}
-              onClose={() => setShowAddressForm(false)}
-              onAddressAdded={handleAddressAdded}
-            />
-          </CardContent>
-        </Card>
-      )}
-      
-      <Card>
-        <CardHeader>
-          <CardTitle>Create New Order</CardTitle>
-          <CardDescription>
+
+      <Card className="w-full min-w-0 overflow-hidden">
+        <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
+          <CardTitle className="text-xl sm:text-2xl lg:text-3xl break-words">Create New Order</CardTitle>
+          <CardDescription className="text-xs sm:text-sm mt-1 break-words">
             {customer ? `Creating order for ${customer.name}` : 'Select a customer and add products'}
           </CardDescription>
         </CardHeader>
         
-        <CardContent>
+        <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <div className="space-y-4">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
+              <div className="space-y-3 sm:space-y-4">
                 <FormField
                   control={form.control}
                   name="customer_id"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Customer *</FormLabel>
+                      <FormLabel className="text-xs sm:text-sm">Customer *</FormLabel>
                       <FormControl>
                         <Select 
                           disabled={!!customerId}
                           onValueChange={field.onChange} 
                           defaultValue={field.value}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
                             <SelectValue placeholder="Select a customer" />
                           </SelectTrigger>
                           <SelectContent>
                             {customer && (
-                              <SelectItem value={customer.id}>{customer.name}</SelectItem>
+                              <SelectItem value={customer.id} className="text-sm">{customer.name}</SelectItem>
                             )}
                             {/* Additional customers would be listed here in a full implementation */}
                           </SelectContent>
                         </Select>
                       </FormControl>
-                      <FormMessage />
+                      <FormMessage className="text-xs" />
                     </FormItem>
                   )}
                 />
@@ -515,38 +545,38 @@ export default function CreateOrder() {
                   defaultValue="products" 
                   value={activeTab} 
                   onValueChange={setActiveTab}
-                  className="w-full"
+                  className="w-full min-w-0"
                 >
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="products">
+                  <TabsList className="grid w-full grid-cols-2 h-9 sm:h-10">
+                    <TabsTrigger value="products" className="text-xs sm:text-sm">
                       Products
                     </TabsTrigger>
-                    <TabsTrigger value="checkout" disabled={items.length === 0}>
-                      <ShoppingCart className="mr-2 h-4 w-4" />
+                    <TabsTrigger value="checkout" disabled={items.length === 0} className="text-xs sm:text-sm">
+                      <ShoppingCart className="mr-1.5 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                       Checkout ({items.length})
                     </TabsTrigger>
                   </TabsList>
                   
-                  <TabsContent value="products">
-                    <div className="space-y-4">
-                      <div className="mb-4">
-                        <h3 className="text-lg font-medium mb-2">Select Products</h3>
+                  <TabsContent value="products" className="w-full min-w-0">
+                    <div className="space-y-3 sm:space-y-4">
+                      <div className="mb-3 sm:mb-4">
+                        <h3 className="text-base sm:text-lg font-medium mb-2">Select Products</h3>
                         
                         {productsLoading ? (
-                          <div className="text-center py-4">Loading products...</div>
+                          <div className="text-center py-4 text-sm sm:text-base">Loading products...</div>
                         ) : !products || products.length === 0 ? (
-                          <div className="text-center py-4">No products available</div>
+                          <div className="text-center py-4 text-sm sm:text-base">No products available</div>
                         ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                             {products.map(product => (
                               <div 
                                 key={product?.id || 'unknown'} 
-                                className="border rounded-md p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                                className="border rounded-md p-2.5 sm:p-3 cursor-pointer hover:bg-gray-50 transition-colors min-w-0 overflow-hidden"
                                 onClick={() => addProduct(product.id)}
                               >
-                                <div className="flex items-start gap-3">
+                                <div className="flex items-start gap-2 sm:gap-3 min-w-0">
                                   {product.image_url && (
-                                    <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0">
+                                    <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-md overflow-hidden flex-shrink-0">
                                       <img
                                         src={product.image_url}
                                         alt={product.name}
@@ -554,21 +584,21 @@ export default function CreateOrder() {
                                       />
                                     </div>
                                   )}
-                                  <div className="flex-grow">
-                                    <div className="font-medium">{product?.name || 'Unknown'}</div>
-                                    <div className="text-sm text-muted-foreground">{product.origin || 'N/A'}</div>
-                                    <div className="flex items-baseline gap-2 mt-1">
+                                  <div className="flex-grow min-w-0">
+                                    <div className="font-medium text-sm sm:text-base truncate">{product?.name || 'Unknown'}</div>
+                                    <div className="text-xs sm:text-sm text-muted-foreground truncate">{product.origin || 'N/A'}</div>
+                                    <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1 flex-wrap">
                                       {product.sale_price ? (
                                         <>
-                                          <span className="font-medium text-green-600">
+                                          <span className="font-medium text-green-600 text-xs sm:text-sm">
                                             ${product.sale_price.toFixed(2)}
                                           </span>
-                                          <span className="text-sm line-through text-muted-foreground">
+                                          <span className="text-xs line-through text-muted-foreground">
                                             ${product.price.toFixed(2)}
                                           </span>
                                         </>
                                       ) : (
-                                        <span className="font-medium">
+                                        <span className="font-medium text-xs sm:text-sm">
                                           ${product.price.toFixed(2)}
                                         </span>
                                       )}
@@ -576,9 +606,9 @@ export default function CreateOrder() {
                                         per {product.unit || 1} {product.unit_type || 'piece'}
                                       </span>
                                     </div>
-                                    <div className="flex justify-between items-center mt-1">
+                                    <div className="flex justify-between items-center mt-1 gap-2">
                                       <span className="text-xs">Stock: {product.stock_count || 'N/A'}</span>
-                                      <span className="text-xs px-2 py-0.5 bg-primary/10 text-primary rounded-full">
+                                      <span className="text-xs px-1.5 sm:px-2 py-0.5 bg-primary/10 text-primary rounded-full whitespace-nowrap">
                                         Click to add
                                       </span>
                                     </div>
@@ -590,31 +620,132 @@ export default function CreateOrder() {
                         )}
                       </div>
                       
-                      <div className="rounded-md border">
-                        <Table>
+                      {/* Mobile Card View for Order Items */}
+                      <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
+                        {items.length === 0 ? (
+                          <div className="text-center py-6 text-sm text-muted-foreground">
+                            No items added to the order yet
+                          </div>
+                        ) : (
+                          items.map((item, index) => (
+                            <Card key={`${item.product_id}-${index}`} className="p-3 w-full min-w-0 overflow-hidden">
+                              <div className="space-y-2.5 min-w-0">
+                                <div className="flex items-start gap-2.5 min-w-0">
+                                  {item.image_url && (
+                                    <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0">
+                                      <img
+                                        src={item.image_url || '/placeholder.svg'}
+                                        alt={item.product_name}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    </div>
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-medium text-sm mb-1 break-words">{item.product_name}</div>
+                                    <div className="text-xs text-muted-foreground mb-2">
+                                      {item.origin || 'N/A'} • Stock: {item.stock_count || 'N/A'}
+                                    </div>
+                                    <div className="text-base font-bold text-green-600 mb-2">
+                                      ${item.subtotal.toFixed(2)}
+                                    </div>
+                                  </div>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="icon"
+                                    onClick={() => removeItem(index)}
+                                    className="h-8 w-8 flex-shrink-0"
+                                  >
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </div>
+                                
+                                <div className="space-y-2 text-xs min-w-0 border-t pt-2">
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="min-w-0">
+                                      <label className="text-muted-foreground">Qty:</label>
+                                      <Input
+                                        type="number"
+                                        min="1"
+                                        value={item.quantity}
+                                        onChange={(e) => updateQuantity(index, parseInt(e.target.value) || 1)}
+                                        className="h-8 text-xs mt-1"
+                                      />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <label className="text-muted-foreground">Discount %:</label>
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="0.1"
+                                        value={item.discount || 0}
+                                        onChange={(e) => updateDiscount(index, parseFloat(e.target.value) || 0)}
+                                        className="h-8 text-xs mt-1"
+                                        placeholder="0%"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="min-w-0">
+                                    <label className="text-muted-foreground">Unit Price:</label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={item.unit_price}
+                                      onChange={(e) => updateUnitPrice(index, parseFloat(e.target.value) || 0)}
+                                      className="h-8 text-xs mt-1"
+                                    />
+                                    {item.unit_price < item.original_price && (
+                                      <div className="text-xs text-green-600 mt-1">
+                                        Save: ${((item.original_price - item.unit_price) * item.quantity).toFixed(2)}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Original: ${item.original_price.toFixed(2)} per {item.unit || 1} {item.unit_type || 'piece'}
+                                  </div>
+                                </div>
+                              </div>
+                            </Card>
+                          ))
+                        )}
+                        {items.length > 0 && (
+                          <div className="flex justify-between items-center p-3 bg-muted/50 rounded-md">
+                            <span className="font-medium text-sm sm:text-base">Total:</span>
+                            <span className="font-bold text-base sm:text-lg">${totalAmount.toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <div className="hidden md:block w-full min-w-0 overflow-x-auto">
+                        <div className="rounded-md border w-full min-w-0">
+                          <Table className="min-w-[800px]">
                           <TableHeader>
                             <TableRow>
-                                  <TableHead className="w-12">Image</TableHead>
-                                <TableHead>Product</TableHead>
-                                    <TableHead>Origin</TableHead>
-                                    <TableHead>Stock</TableHead>
-                                <TableHead className="w-24">Quantity</TableHead>
-                                <TableHead className="w-32">Unit Price</TableHead>
-                                <TableHead className="w-32">Subtotal</TableHead>
-                                <TableHead className="w-16"></TableHead>
+                                <TableHead className="px-2 w-12">Image</TableHead>
+                                <TableHead className="px-2">Product</TableHead>
+                                <TableHead className="px-2">Origin</TableHead>
+                                <TableHead className="px-2">Stock</TableHead>
+                                <TableHead className="px-2 w-24">Quantity</TableHead>
+                                <TableHead className="px-2 w-32">Original Price</TableHead>
+                                <TableHead className="px-2 w-32">Discount %</TableHead>
+                                <TableHead className="px-2 w-32">Unit Price</TableHead>
+                                <TableHead className="px-2 w-32">Subtotal</TableHead>
+                                <TableHead className="px-2 w-16"></TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
                               {items.length === 0 ? (
                                 <TableRow>
-                                      <TableCell colSpan={8} className="text-center py-6">
+                                  <TableCell colSpan={10} className="text-center py-6 text-sm">
                                     No items added to the order yet
                                   </TableCell>
                                 </TableRow>
                               ) : (
                                 items.map((item, index) => (
                                   <TableRow key={`${item.product_id}-${index}`}>
-                                        <TableCell>
+                                    <TableCell className="px-2 py-2">
                                           <div className="w-10 h-10 rounded-md overflow-hidden">
                                             <img
                                               src={item.image_url || '/placeholder.svg'}
@@ -623,30 +754,62 @@ export default function CreateOrder() {
                                             />
                                           </div>
                                         </TableCell>
-                                        <TableCell className="font-medium">{item.product_name}</TableCell>
-                                        <TableCell>{item.origin || 'N/A'}</TableCell>
-                                        <TableCell>{item.stock_count || 'N/A'}</TableCell>
-                                    <TableCell>
+                                    <TableCell className="px-2 py-2 font-medium text-sm min-w-0">
+                                      <div className="truncate" title={item.product_name}>{item.product_name}</div>
+                                    </TableCell>
+                                    <TableCell className="px-2 py-2 text-sm">{item.origin || 'N/A'}</TableCell>
+                                    <TableCell className="px-2 py-2 text-sm">{item.stock_count || 'N/A'}</TableCell>
+                                    <TableCell className="px-2 py-2">
                                       <Input
                                         type="number"
                                         min="1"
                                         value={item.quantity}
-                                            onChange={(e) => updateQuantity(index, parseInt(e.target.value))}
-                                        className="w-16"
+                                        onChange={(e) => updateQuantity(index, parseInt(e.target.value) || 1)}
+                                        className="w-16 h-8 text-sm"
                                       />
                                     </TableCell>
-                                    <TableCell>
-                                      ${item.unit_price.toFixed(2)}
+                                    <TableCell className="px-2 py-2">
+                                      <div className="text-sm">
+                                        ${item.original_price.toFixed(2)}
                                       <div className="text-xs text-muted-foreground">
                                         per {item.unit || 1} {item.unit_type || 'piece'}
+                                        </div>
                                       </div>
                                     </TableCell>
-                                    <TableCell>${item.subtotal.toFixed(2)}</TableCell>
-                                    <TableCell>
+                                    <TableCell className="px-2 py-2">
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="0.1"
+                                        value={item.discount || 0}
+                                        onChange={(e) => updateDiscount(index, parseFloat(e.target.value) || 0)}
+                                        className="w-20 h-8 text-sm"
+                                        placeholder="0%"
+                                      />
+                                    </TableCell>
+                                    <TableCell className="px-2 py-2">
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={item.unit_price}
+                                        onChange={(e) => updateUnitPrice(index, parseFloat(e.target.value) || 0)}
+                                        className="w-24 h-8 text-sm"
+                                      />
+                                      {item.unit_price < item.original_price && (
+                                        <div className="text-xs text-green-600 mt-1">
+                                          Save: ${((item.original_price - item.unit_price) * item.quantity).toFixed(2)}
+                                        </div>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="px-2 py-2 font-medium text-sm">${item.subtotal.toFixed(2)}</TableCell>
+                                    <TableCell className="px-2 py-2">
                                       <Button 
                                         variant="ghost" 
                                             size="icon"
                                         onClick={() => removeItem(index)}
+                                        className="h-8 w-8"
                                       >
                                             <Trash2 className="h-4 w-4 text-destructive" />
                                       </Button>
@@ -657,17 +820,18 @@ export default function CreateOrder() {
                                   
                                   {items.length > 0 && (
                                     <TableRow>
-                                      <TableCell colSpan={6} className="text-right font-medium">
+                                  <TableCell colSpan={8} className="text-right font-medium px-2 py-2 text-sm">
                                         Total:
                                       </TableCell>
-                                      <TableCell className="font-bold">
+                                  <TableCell className="font-bold px-2 py-2 text-sm sm:text-base">
                                         ${totalAmount.toFixed(2)}
                                       </TableCell>
-                                      <TableCell></TableCell>
+                                  <TableCell className="px-2 py-2"></TableCell>
                                     </TableRow>
                                   )}
                             </TableBody>
                           </Table>
+                        </div>
                         </div>
                         
                             {items.length > 0 && (
@@ -675,6 +839,7 @@ export default function CreateOrder() {
                                 <Button
                                   type="button"
                                   onClick={() => setActiveTab('checkout')}
+                            className="text-sm sm:text-base"
                                 >
                                   Continue to Checkout
                                 </Button>
@@ -683,43 +848,55 @@ export default function CreateOrder() {
                           </div>
                         </TabsContent>
                         
-                        <TabsContent value="checkout">
+                  <TabsContent value="checkout" className="w-full min-w-0">
+                          {showAddressForm && (
+                            <Card className="mb-4 sm:mb-6 p-3 sm:p-4 w-full min-w-0 overflow-hidden">
+                              <CardContent className="p-0">
+                                <CustomerAddressForm
+                                  customerId={customerId}
+                                  onClose={() => setShowAddressForm(false)}
+                                  onAddressAdded={handleAddressAdded}
+                                />
+                              </CardContent>
+                            </Card>
+                          )}
+
                           {/* Shipping and billing address section */}
-                          <div className="space-y-6">
-                            <div>
-                              <h3 className="text-lg font-medium mb-4">Delivery Information</h3>
-                              
-                              <div className="grid gap-6 md:grid-cols-2">
+                    <div className="space-y-4 sm:space-y-6">
+                      <div className="min-w-0">
+                        <h3 className="text-base sm:text-lg font-medium mb-3 sm:mb-4">Delivery Information</h3>
+                        
+                        <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
                                 {/* Shipping Address */}
                                 <FormField
                                   control={form.control}
                                   name="shipping_address_id"
                                   render={({ field }) => (
-                                    <FormItem className="space-y-2">
-                                      <FormLabel>Shipping Address *</FormLabel>
-                                      <div className="space-y-4">
+                              <FormItem className="space-y-2 min-w-0">
+                                <FormLabel className="text-xs sm:text-sm">Shipping Address *</FormLabel>
+                                <div className="space-y-3 sm:space-y-4">
                                         {addressesLoading ? (
-                                          <div>Loading addresses...</div>
+                                    <div className="text-xs sm:text-sm">Loading addresses...</div>
                                         ) : addresses.length === 0 ? (
-                                          <div className="text-muted-foreground">No addresses found</div>
+                                    <div className="text-xs sm:text-sm text-muted-foreground">No addresses found</div>
                                         ) : (
                                           <RadioGroup
                                             onValueChange={field.onChange}
                                             defaultValue={field.value}
-                                            className="flex flex-col space-y-3"
+                                      className="flex flex-col space-y-2.5 sm:space-y-3"
                                           >
                                             {addresses.map(address => (
-                                              <div className="flex items-center space-x-3 border p-4 rounded-md" key={address.id}>
-                                                <RadioGroupItem value={address.id} id={`shipping-${address.id}`} />
+                                        <div className="flex items-start space-x-2.5 sm:space-x-3 border p-3 sm:p-4 rounded-md min-w-0" key={address.id}>
+                                          <RadioGroupItem value={address.id} id={`shipping-${address.id}`} className="mt-0.5 flex-shrink-0" />
                                                 <label 
                                                   htmlFor={`shipping-${address.id}`}
-                                                  className="flex-1 cursor-pointer text-sm"
-                                                >
-                                                  <div className="font-medium">{address.address_type} Address</div>
-                                                  <div>{address.address_line1}</div>
-                                                  {address.address_line2 && <div>{address.address_line2}</div>}
-                                                  <div>{address.city}, {address.state}, {address.postal_code}</div>
-                                                  <div>{address.country}</div>
+                                            className="flex-1 cursor-pointer text-xs sm:text-sm min-w-0 break-words"
+                                          >
+                                            <div className="font-medium mb-1">{address.address_type} Address</div>
+                                            <div className="break-words">{address.address_line1}</div>
+                                            {address.address_line2 && <div className="break-words">{address.address_line2}</div>}
+                                            <div className="break-words">{address.city}, {address.state}, {address.postal_code}</div>
+                                            <div className="break-words">{address.country}</div>
                                                 </label>
                                               </div>
                                             ))}
@@ -730,13 +907,13 @@ export default function CreateOrder() {
                                           type="button" 
                                           variant="outline"
                                           onClick={() => setShowAddressForm(true)}
-                                          className="w-full"
+                                    className="w-full text-xs sm:text-sm h-9 sm:h-10"
                                         >
-                                          <Plus className="h-4 w-4 mr-2" />
+                                    <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                                           Add New Address
                                         </Button>
                                       </div>
-                                      <FormMessage />
+                                <FormMessage className="text-xs" />
                                     </FormItem>
                                   )}
                                 />
@@ -744,18 +921,18 @@ export default function CreateOrder() {
                     </div>
                     
                           {/* Payment Information */}
-                          <div>
-                            <h3 className="text-lg font-medium mb-4">Payment Information</h3>
+                      <div className="min-w-0">
+                        <h3 className="text-base sm:text-lg font-medium mb-3 sm:mb-4">Payment Information</h3>
                             
-                            <div className="space-y-6">
+                        <div className="space-y-4 sm:space-y-6">
                               {/* Payment Status */}
                     <FormField
                       control={form.control}
                       name="payment_status"
                       render={({ field }) => (
-                        <FormItem className="space-y-2">
-                          <FormLabel>Payment Option *</FormLabel>
-                          <div className="space-y-4">
+                              <FormItem className="space-y-2 min-w-0">
+                                <FormLabel className="text-xs sm:text-sm">Payment Option *</FormLabel>
+                                <div className="space-y-3 sm:space-y-4">
                             <RadioGroup
                               onValueChange={(value) => {
                                 // Update both payment_status and payment_type for compatibility
@@ -763,43 +940,43 @@ export default function CreateOrder() {
                                 form.setValue('payment_type', value as 'full_payment' | 'partial_payment' | 'full_credit');
                               }} 
                               defaultValue={field.value}
-                              className="flex flex-col space-y-3"
+                                    className="flex flex-col space-y-2.5 sm:space-y-3"
                             >
-                              <div className="flex items-center space-x-3 border p-4 rounded-md">
-                                <RadioGroupItem value="full_payment" id="full_payment" />
+                                    <div className="flex items-start space-x-2.5 sm:space-x-3 border p-3 sm:p-4 rounded-md min-w-0">
+                                      <RadioGroupItem value="full_payment" id="full_payment" className="mt-0.5 flex-shrink-0" />
                                 <label 
                                   htmlFor="full_payment"
-                                  className="flex-1 cursor-pointer text-sm"
+                                        className="flex-1 cursor-pointer text-xs sm:text-sm min-w-0"
                                 >
-                                  <div className="font-medium">Full Payment</div>
-                                  <div className="text-muted-foreground">Customer pays full amount today</div>
+                                        <div className="font-medium mb-1">Full Payment</div>
+                                        <div className="text-muted-foreground break-words">Customer pays full amount today</div>
                                 </label>
                               </div>
                               
-                              <div className="flex items-center space-x-3 border p-4 rounded-md">
-                                <RadioGroupItem value="partial_payment" id="partial_payment" />
+                                    <div className="flex items-start space-x-2.5 sm:space-x-3 border p-3 sm:p-4 rounded-md min-w-0">
+                                      <RadioGroupItem value="partial_payment" id="partial_payment" className="mt-0.5 flex-shrink-0" />
                                 <label 
                                   htmlFor="partial_payment"
-                                  className="flex-1 cursor-pointer text-sm"
+                                        className="flex-1 cursor-pointer text-xs sm:text-sm min-w-0"
                                 >
-                                  <div className="font-medium">Partial Payment</div>
-                                  <div className="text-muted-foreground">Customer pays part of the amount today and the rest on credit</div>
+                                        <div className="font-medium mb-1">Partial Payment</div>
+                                        <div className="text-muted-foreground break-words">Customer pays part of the amount today and the rest on credit</div>
                                 </label>
                               </div>
                               
-                              <div className="flex items-center space-x-3 border p-4 rounded-md">
-                                <RadioGroupItem value="full_credit" id="full_credit" />
+                                    <div className="flex items-start space-x-2.5 sm:space-x-3 border p-3 sm:p-4 rounded-md min-w-0">
+                                      <RadioGroupItem value="full_credit" id="full_credit" className="mt-0.5 flex-shrink-0" />
                                 <label 
                                   htmlFor="full_credit"
-                                  className="flex-1 cursor-pointer text-sm"
+                                        className="flex-1 cursor-pointer text-xs sm:text-sm min-w-0"
                                 >
-                                  <div className="font-medium">Full Credit</div>
-                                  <div className="text-muted-foreground">Customer pays full amount later</div>
+                                        <div className="font-medium mb-1">Full Credit</div>
+                                        <div className="text-muted-foreground break-words">Customer pays full amount later</div>
                                 </label>
                               </div>
                             </RadioGroup>
                           </div>
-                          <FormMessage />
+                                <FormMessage className="text-xs" />
                         </FormItem>
                       )}
                     />
@@ -809,27 +986,27 @@ export default function CreateOrder() {
                                 control={form.control}
                                 name="payment_method"
                                 render={({ field }) => (
-                                  <FormItem>
-                                    <FormLabel>Payment Method *</FormLabel>
+                              <FormItem className="min-w-0">
+                                <FormLabel className="text-xs sm:text-sm">Payment Method *</FormLabel>
                                     <Select
                                       onValueChange={field.onChange}
                                       defaultValue={field.value}
                                     >
                                       <FormControl>
-                                        <SelectTrigger>
+                                    <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
                                           <SelectValue placeholder="Select payment method" />
                                         </SelectTrigger>
                                       </FormControl>
                                       <SelectContent>
-                                        <SelectItem value="cash">Cash</SelectItem>
-                                        <SelectItem value="card">Card</SelectItem>
-                                        <SelectItem value="cheque">Cheque</SelectItem>
+                                    <SelectItem value="cash" className="text-sm">Cash</SelectItem>
+                                    <SelectItem value="card" className="text-sm">Card</SelectItem>
+                                    <SelectItem value="cheque" className="text-sm">Cheque</SelectItem>
                                       </SelectContent>
                                     </Select>
-                                    <FormDescription>
+                                <FormDescription className="text-xs sm:text-sm">
                                       How will the customer make the payment?
                                     </FormDescription>
-                                    <FormMessage />
+                                <FormMessage className="text-xs" />
                                   </FormItem>
                                 )}
                               />
@@ -840,22 +1017,23 @@ export default function CreateOrder() {
                       control={form.control}
                                 name="partial_payment_amount"
                       render={({ field }) => (
-                        <FormItem>
-                                    <FormLabel>Partial Payment Amount *</FormLabel>
+                                <FormItem className="min-w-0">
+                                  <FormLabel className="text-xs sm:text-sm">Partial Payment Amount *</FormLabel>
                           <FormControl>
                                       <Input
                                         type="number"
                                         min="0"
                                         step="0.01"
                                         placeholder="0.00"
+                                      className="text-sm sm:text-base h-9 sm:h-10"
                                         onChange={(e) => field.onChange(parseFloat(e.target.value))}
                                         value={field.value === undefined ? '' : field.value}
                                       />
                           </FormControl>
-                                    <FormDescription>
+                                  <FormDescription className="text-xs sm:text-sm">
                                       Enter the amount to be paid now. Remaining ${(totalAmount - (field.value || 0)).toFixed(2)} will be on credit.
                                     </FormDescription>
-                          <FormMessage />
+                                  <FormMessage className="text-xs" />
                         </FormItem>
                       )}
                     />
@@ -867,14 +1045,15 @@ export default function CreateOrder() {
                       control={form.control}
                                 name="credit_period"
                       render={({ field }) => (
-                        <FormItem>
-                                      <FormLabel>Credit Period (Days) *</FormLabel>
+                                <FormItem className="min-w-0">
+                                  <FormLabel className="text-xs sm:text-sm">Credit Period (Days) *</FormLabel>
                         <FormControl>
                                       <Input
                                         type="number"
                                         min="1"
                                         max={customer?.credit_period_days || 30}
                                         placeholder={`Max: ${customer?.credit_period_days || 30} days`}
+                                      className="text-sm sm:text-base h-9 sm:h-10"
                                         onChange={(e) => {
                                           const value = parseInt(e.target.value);
                                           if (value <= (customer?.credit_period_days || 30)) {
@@ -884,10 +1063,10 @@ export default function CreateOrder() {
                                         value={field.value === undefined ? '' : field.value}
                                       />
                         </FormControl>
-                                      <FormDescription>
+                                  <FormDescription className="text-xs sm:text-sm">
                                         Number of days until payment is due (Maximum: {customer?.credit_period_days || 30} days)
                                       </FormDescription>
-                        <FormMessage />
+                                  <FormMessage className="text-xs" />
                       </FormItem>
                     )}
                   />
@@ -900,23 +1079,24 @@ export default function CreateOrder() {
                       control={form.control}
                       name="notes"
                       render={({ field }) => (
-                        <FormItem>
-                                <FormLabel>Order Notes (Optional)</FormLabel>
+                          <FormItem className="min-w-0">
+                            <FormLabel className="text-xs sm:text-sm">Order Notes (Optional)</FormLabel>
                           <FormControl>
                                   <Textarea
                                     placeholder="Add any special instructions or notes for this order"
+                                className="text-sm sm:text-base min-h-[80px] sm:min-h-[100px]"
                                     {...field}
                                   />
                           </FormControl>
-                          <FormMessage />
+                            <FormMessage className="text-xs" />
                         </FormItem>
                       )}
                     />
                           
                           {/* Order Summary */}
-                          <div className="border rounded-md p-4">
-                            <h3 className="font-medium mb-2">Order Summary</h3>
-                            <div className="space-y-2">
+                      <div className="border rounded-md p-3 sm:p-4 min-w-0">
+                        <h3 className="font-medium mb-2 text-sm sm:text-base">Order Summary</h3>
+                        <div className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm">
                               <div className="flex justify-between">
                                 <span>Total Items:</span>
                                 <span>{items.reduce((sum, item) => sum + item.quantity, 0)}</span>
@@ -941,7 +1121,7 @@ export default function CreateOrder() {
                               
                               <div className="flex justify-between">
                                 <span>Payment Method:</span>
-                                <span>{form.getValues('payment_method')?.charAt(0).toUpperCase() + form.getValues('payment_method')?.slice(1) || 'Cash'}</span>
+                            <span className="break-words">{form.getValues('payment_method')?.charAt(0).toUpperCase() + form.getValues('payment_method')?.slice(1) || 'Cash'}</span>
                               </div>
                               
                               {paymentStatus === 'full_credit' && (
@@ -960,7 +1140,7 @@ export default function CreateOrder() {
                               
                               <div className="flex justify-between">
                                 <span>Payment Status:</span>
-                                <span>{form.getValues('payment_status')?.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</span>
+                            <span className="break-words">{form.getValues('payment_status')?.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</span>
                               </div>
                             </div>
                           </div>
@@ -969,30 +1149,32 @@ export default function CreateOrder() {
                     </Tabs>
                   </div>
                   
-                  <div className="flex justify-between">
-                    {activeTab === 'checkout' && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setActiveTab('products')}
-                      >
-                        Back to Products
-                      </Button>
-                    )}
-                    
-                    {activeTab === 'checkout' && (
-                    <Button 
-                      type="submit" 
-                        disabled={createOrderMutation.isPending || items.length === 0}
-                    >
-                        {createOrderMutation.isPending ? 'Creating Order...' : 'Place Order'}
-                    </Button>
-                    )}
-                  </div>
-                </form>
-              </Form>
-            </CardContent>
-          </Card>
-        </div>
-      );
-    } 
+              <div className="flex flex-col sm:flex-row justify-between gap-2 sm:gap-0 pt-4 border-t">
+                {activeTab === 'checkout' && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setActiveTab('products')}
+                    className="w-full sm:w-auto text-sm sm:text-base order-2 sm:order-1"
+                  >
+                    Back to Products
+                  </Button>
+                )}
+                
+                {activeTab === 'checkout' && (
+                  <Button 
+                    type="submit" 
+                    disabled={createOrderMutation.isPending || items.length === 0}
+                    className="w-full sm:w-auto text-sm sm:text-base order-1 sm:order-2"
+                  >
+                    {createOrderMutation.isPending ? 'Creating Order...' : 'Place Order'}
+                  </Button>
+                )}
+              </div>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+} 

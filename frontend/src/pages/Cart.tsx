@@ -1,15 +1,24 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ShoppingCart, Trash, Plus, Minus, ChevronLeft, AlertCircle } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { useCart } from '@/contexts/CartContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 const Cart = () => {
-  const { state, removeFromCart, updateQuantity } = useCart();
+  const { state, removeFromCart, updateQuantity, loadBackendCart } = useCart();
+  const { user } = useAuth();
   const { items, subtotal } = state;
   
   const isEligibleForFreeShipping = subtotal >= 100;
+
+  // Load cart from backend when page mounts (for logged-in users)
+  useEffect(() => {
+    if (user) {
+      loadBackendCart();
+    }
+  }, [user, loadBackendCart]);
 
   return (
     <div className="min-h-screen flex flex-col">

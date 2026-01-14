@@ -14,6 +14,10 @@ const apiClient = axios.create({
 
 // Keep track of the current refresh promise to prevent multiple refreshes in parallel
 let refreshPromise: Promise<any> | null = null;
+// Track rate limiting for session refresh
+let lastRefreshAttempt = 0;
+let refreshBackoffMs = 0;
+let isRefreshing = false;
 
 // Add request interceptor for auth token
 apiClient.interceptors.request.use(
@@ -30,12 +34,22 @@ apiClient.interceptors.request.use(
         const expiryTime = tokenData.exp * 1000; // Convert to milliseconds
         const currentTime = Date.now();
         
-        // If token is about to expire (within 5 minutes), trigger a refresh
-        if (expiryTime - currentTime < 5 * 60 * 1000) {
+        // Only refresh if token is expired or expiring very soon (within 2 minutes)
+        // Check rate limit backoff before attempting refresh
+        const now = Date.now();
+        const canRefresh = !refreshBackoffMs || 
+          (lastRefreshAttempt && (now - lastRefreshAttempt) >= refreshBackoffMs);
+        
+        if (expiryTime - currentTime < 2 * 60 * 1000 && canRefresh && !isRefreshing) {
           console.log('Token expiring soon, refreshing session...');
           
           // Don't await here to prevent blocking the request
-          refreshSession();
+          // Add a small delay to avoid rapid refresh calls
+          setTimeout(() => {
+            refreshSession();
+          }, 100);
+        } else if (expiryTime - currentTime < 2 * 60 * 1000 && !canRefresh) {
+          console.log('Skipping refresh due to rate limit backoff');
         }
       } catch (e) {
         console.error('Error parsing token:', e);
@@ -57,12 +71,31 @@ apiClient.interceptors.request.use(
   }
 );
 
-// Helper function to refresh the session
+// Helper function to refresh the session with rate limit handling
 async function refreshSession() {
   // If already refreshing, return the existing promise
   if (refreshPromise) {
     return refreshPromise;
   }
+  
+  // Check if we're in a backoff period due to rate limiting
+  const now = Date.now();
+  if (isRefreshing) {
+    console.log('Session refresh already in progress, skipping...');
+    return null;
+  }
+  
+  if (lastRefreshAttempt && refreshBackoffMs) {
+    const timeSinceLastAttempt = now - lastRefreshAttempt;
+    if (timeSinceLastAttempt < refreshBackoffMs) {
+      const remainingMs = refreshBackoffMs - timeSinceLastAttempt;
+      console.log(`Skipping refresh - in backoff period. Retry in ${Math.ceil(remainingMs / 1000)}s`);
+      return null;
+    }
+  }
+  
+  isRefreshing = true;
+  lastRefreshAttempt = now;
   
   try {
     // Create a new refresh promise
@@ -70,23 +103,49 @@ async function refreshSession() {
     const { data, error } = await refreshPromise;
     
     if (error) {
-      console.error('Error refreshing session:', error);
-      return null;
+      // Handle rate limit errors gracefully
+      if (error.message?.includes('rate limit') || error.status === 429) {
+        console.warn('Rate limit hit during session refresh, implementing backoff');
+        // Exponential backoff: start with 1 minute, max 10 minutes
+        refreshBackoffMs = Math.min(
+          (refreshBackoffMs || 60000) * 2,
+          10 * 60 * 1000
+        );
+        // Don't throw error, just return null and let the request proceed with existing token
+        return null;
+      } else {
+        console.error('Error refreshing session:', error);
+        // Reset backoff for other errors
+        refreshBackoffMs = 0;
+        return null;
+      }
     }
     
     if (data?.session?.access_token) {
       localStorage.setItem('supabase_token', data.session.access_token);
       console.log('Session refreshed successfully');
+      // Reset backoff on successful refresh
+      refreshBackoffMs = 0;
       return data.session;
     }
     
     return null;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error during session refresh:', error);
+    // Handle rate limit in catch block as well
+    if (error?.status === 429 || error?.message?.includes('rate limit')) {
+      refreshBackoffMs = Math.min(
+        (refreshBackoffMs || 60000) * 2,
+        10 * 60 * 1000
+      );
+    } else {
+      refreshBackoffMs = 0;
+    }
     return null;
   } finally {
-    // Clear the promise when done
+    // Clear the promise and refresh flag when done
     refreshPromise = null;
+    isRefreshing = false;
   }
 }
 
