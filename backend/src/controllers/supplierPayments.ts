@@ -85,7 +85,12 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
       throw new ApiError(404, 'Purchase invoice not found');
     }
 
-    const finalSupplierId = supplier_id || invoice.purchase_orders?.supplier_id;
+    // Handle purchase_orders - Supabase returns relations, need to type cast
+    const invoiceWithRelations = invoice as any;
+    const purchaseOrder = Array.isArray(invoiceWithRelations.purchase_orders) 
+      ? invoiceWithRelations.purchase_orders[0] 
+      : invoiceWithRelations.purchase_orders;
+    const finalSupplierId = supplier_id || purchaseOrder?.supplier_id;
     if (!finalSupplierId) {
       throw new ValidationError('Supplier ID is required');
     }
