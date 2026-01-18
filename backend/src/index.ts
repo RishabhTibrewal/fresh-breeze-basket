@@ -72,7 +72,15 @@ const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
   : ['http://localhost:8080', 'http://localhost:3000'];
 
-app.use(cors({
+const isAllowedOrigin = (origin?: string | null): boolean => {
+  if (!origin) return true;
+  const normalizedOrigin = origin.replace(/\/$/, '');
+  if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin)) return true;
+  if (normalizedOrigin.startsWith('http://localhost:') || normalizedOrigin.startsWith('https://localhost:')) return true;
+  return normalizedOrigin.includes('gofreshco.com');
+};
+
+const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) {
@@ -82,21 +90,10 @@ app.use(cors({
     // Normalize origin (remove trailing slash)
     const normalizedOrigin = origin.replace(/\/$/, '');
     
-    // Check if origin is in allowed list
-    if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin)) {
-      callback(null, origin);
-      return;
-    }
-    
-    // Allow localhost origins for development
-    if (normalizedOrigin.startsWith('http://localhost:') || normalizedOrigin.startsWith('https://localhost:')) {
-      callback(null, origin);
-      return;
-    }
-    
-    // Allow gofreshco.com domains for production (www, non-www, and subdomains)
-    if (normalizedOrigin.includes('gofreshco.com')) {
-      console.log(`✅ CORS allowed for origin: ${origin}`);
+    if (isAllowedOrigin(origin)) {
+      if (normalizedOrigin.includes('gofreshco.com')) {
+        console.log(`✅ CORS allowed for origin: ${origin}`);
+      }
       callback(null, origin);
       return;
     }
@@ -112,7 +109,10 @@ app.use(cors({
   maxAge: 86400, // 24 hours
   preflightContinue: false, // Let cors handle preflight
   optionsSuccessStatus: 204, // Some legacy browsers (IE11) choke on 204
-}));
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 
 // JSON parsing middleware - exclude webhook route
@@ -206,6 +206,24 @@ app.use('/api/supplier-payments', supplierPaymentsRouter);
 app.use('/api/invoices', invoicesRouter);
 app.use('/api/pos', posRouter);
 
+// 404 handler for unmatched routes (ensures CORS headers are present)
+app.use((req: express.Request, res: express.Response) => {
+  const origin = req.headers.origin;
+  if (origin && isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  }
+
+  res.status(404).json({
+    success: false,
+    error: {
+      message: `Route not found: ${req.method} ${req.path}`
+    }
+  });
+});
+
 // Final error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Express error handler caught:', err);
@@ -215,6 +233,15 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   const message = env === 'production' && statusCode === 500 
     ? 'Something went wrong' 
     : err.message || 'Internal server error';
+  
+  // Ensure CORS headers are present on error responses
+  const origin = req.headers.origin;
+  if (origin && !res.getHeader('Access-Control-Allow-Origin') && isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  }
   
   res.status(statusCode).json({
     success: false,
