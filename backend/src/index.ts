@@ -86,7 +86,12 @@ app.use(cors({
       if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
         callback(null, origin);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        // Allow gofreshco.com domains for production
+        if (origin.includes('gofreshco.com')) {
+          callback(null, origin);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
       }
     }
   },
@@ -97,14 +102,18 @@ app.use(cors({
 
 
 // JSON parsing middleware - exclude webhook route
+// Increase body size limit for file uploads (20MB)
 app.use((req, res, next) => {
   if (req.path === '/api/payments/webhook') {
     // Skip JSON parsing for webhook route
     next();
   } else {
-    express.json()(req, res, next);
+    express.json({ limit: '20mb' })(req, res, next);
   }
 });
+
+// Increase URL-encoded body size limit
+app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
 // Request logging middleware
 app.use((req, res, next) => {
