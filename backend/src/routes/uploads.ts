@@ -21,11 +21,13 @@ interface MulterRequest extends express.Request {
 const router = express.Router();
 
 // Configure multer to store files in memory
+// Increased limits to 50MB to handle high-resolution images
 const upload = multer({ 
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 20 * 1024 * 1024, // 20MB limit (increased from 10MB)
-    fieldSize: 20 * 1024 * 1024, // 20MB for non-file fields
+    fileSize: 50 * 1024 * 1024, // 50MB limit (increased from 20MB)
+    fieldSize: 50 * 1024 * 1024, // 50MB for non-file fields
+    files: 10, // Maximum number of files
   },
 });
 
@@ -286,6 +288,24 @@ router.post('/category/:categoryId', protect, adminOnly, upload.single('image'),
  */
 router.post('/product/:productId', protect, adminOnly, upload.array('images', 10), async (req: MulterRequest, res: Response) => {
   try {
+    // Handle multer errors (file size, etc.)
+    if (req.file === undefined && !req.files) {
+      // Check if it's a multer error
+      const multerError = (req as any).multerError;
+      if (multerError) {
+        if (multerError.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({ 
+            success: false,
+            error: 'File too large. Maximum size is 50MB. Please compress the image or use a smaller file.' 
+          });
+        }
+        return res.status(400).json({ 
+          success: false,
+          error: multerError.message || 'File upload error' 
+        });
+      }
+    }
+
     const files = req.files as Express.Multer.File[];
     const { productId } = req.params;
     const isPrimary = req.body.isPrimary === 'true' || req.body.isPrimary === true;
@@ -387,9 +407,25 @@ router.post('/product/:productId', protect, adminOnly, upload.array('images', 10
 
   } catch (error: any) {
     console.error('Product Upload Error:', error);
+    
+    // Handle specific error types
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ 
+        success: false,
+        error: 'File too large. Maximum size is 50MB. Please compress the image or use a smaller file.' 
+      });
+    }
+    
+    if (error.message?.includes('CORS')) {
+      return res.status(403).json({ 
+        success: false,
+        error: 'CORS error. Please check server configuration.' 
+      });
+    }
+    
     res.status(500).json({ 
       success: false,
-      error: error.message || 'Upload failed' 
+      error: error.message || 'Upload failed. Please try again.' 
     });
   }
 });

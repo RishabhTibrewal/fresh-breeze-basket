@@ -1,5 +1,3 @@
-import { useQuery } from '@tanstack/react-query';
-import { warehousesService } from '@/api/warehouses';
 import { Badge } from '@/components/ui/badge';
 import {
   Popover,
@@ -26,34 +24,12 @@ export default function WarehouseStockDisplay({
 }: WarehouseStockDisplayProps) {
   const [isOpen, setIsOpen] = useState(false);
 
-  // Use bulk data if provided, otherwise fetch individually
-  // WARNING: Individual API calls should be avoided in list views to prevent rate limiting
-  const { data: stockData, isLoading } = useQuery({
-    queryKey: ['product-warehouse-stock', productId],
-    queryFn: () => {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(`⚠️ WarehouseStockDisplay: Using individual API call for product ${productId}. Consider using bulk API instead.`);
-      }
-      return warehousesService.getProductStockAcrossWarehouses(productId);
-    },
-    enabled: !!productId && !bulkStockData, // Only fetch if bulk data not provided
-    retry: 2, // Limit retries to prevent server overload
-    retryDelay: 1000, // Wait 1 second between retries
-  });
+  // Only use bulk data - individual API calls are disabled to prevent rate limiting
+  // If bulkStockData is not provided, show fallback using totalStock prop
+  const warehouses = bulkStockData?.warehouses || [];
+  const totalWarehouseStock = bulkStockData?.total_stock ?? totalStock ?? 0;
 
-  // Use bulk data if available, otherwise use fetched data
-  const warehouses = bulkStockData?.warehouses || stockData?.warehouses || [];
-  const totalWarehouseStock = bulkStockData?.total_stock ?? stockData?.total_stock ?? totalStock ?? 0;
-  const isLoadingStock = !bulkStockData && isLoading;
-
-  if (isLoadingStock) {
-    return (
-      <span className="text-xs text-muted-foreground">
-        {compact ? 'Loading...' : 'Loading stock...'}
-      </span>
-    );
-  }
-
+  // If no bulk data and no warehouses, show simple total stock fallback
   if (warehouses.length === 0) {
     return (
       <span className="text-xs text-muted-foreground">

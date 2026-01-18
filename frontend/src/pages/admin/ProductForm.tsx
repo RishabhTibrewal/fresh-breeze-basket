@@ -123,6 +123,21 @@ export default function ProductForm() {
     queryFn: productsService.getAll,
   });
 
+  // Cleanup blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      // Clean up blob URLs when component unmounts
+      if (imageUrl && imageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(imageUrl);
+      }
+      additionalImages.forEach(url => {
+        if (url.startsWith('blob:')) {
+          URL.revokeObjectURL(url);
+        }
+      });
+    };
+  }, [imageUrl, additionalImages]);
+
   const createProduct = useMutation({
     mutationFn: (data: CreateProductInput) => productsService.create(data),
     onSuccess: () => {
@@ -194,6 +209,12 @@ export default function ProductForm() {
         setIsLoading(false);
         return;
       }
+      // Don't include blob URLs in product data - only use real URLs or null
+      // If imageFile exists, we'll upload it separately and update the product
+      const imageUrlToSave = imageFile 
+        ? (isEditMode && product?.image_url ? product.image_url : null) // Keep existing URL if editing, null if creating
+        : (data.image_url && !data.image_url.startsWith('blob:') ? data.image_url : null); // Only use non-blob URLs
+
       const productData: CreateProductInput = {
         name: data.name,
         description: data.description || null,
@@ -205,7 +226,7 @@ export default function ProductForm() {
         unit: data.unit,
         unit_type: data.unit_type,
         badge: data.badge || null,
-        image_url: data.image_url,
+        image_url: imageUrlToSave, // Use existing URL or null, not blob URL
         nutritional_info: data.nutritional_info || null,
         best_before: data.best_before || null,
         is_featured: Boolean(data.is_featured),
@@ -232,7 +253,18 @@ export default function ProductForm() {
         try {
           setIsUploading(true);
           const uploadResult = await uploadsService.uploadProductImage(productId, imageFile, true);
-          // Update product with the uploaded image URL - only send image_url to avoid validation issues
+          
+          // Validate that we got a real URL (not a blob URL)
+          if (!uploadResult.url || uploadResult.url.startsWith('blob:')) {
+            throw new Error('Invalid upload URL received');
+          }
+          
+          // Clean up blob URL if it exists
+          if (imageUrl && imageUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(imageUrl);
+          }
+          
+          // Update product with the uploaded image URL
           await productsService.update(productId, {
             name: productData.name,
             description: productData.description,
@@ -244,16 +276,29 @@ export default function ProductForm() {
             unit: productData.unit,
             unit_type: productData.unit_type,
             badge: productData.badge,
-            image_url: uploadResult.url,
+            image_url: uploadResult.url, // Real uploaded URL
             nutritional_info: productData.nutritional_info,
             best_before: productData.best_before,
             is_featured: productData.is_featured,
             is_active: productData.is_active,
             slug: productData.slug
           });
-        } catch (imgErr) {
+          
+          // Update form and state with the real URL
+          form.setValue('image_url', uploadResult.url);
+          setImageUrl(uploadResult.url);
+          
+          toast.success('Product and image saved successfully!');
+        } catch (imgErr: any) {
           console.error('Main image upload failed:', imgErr);
-          toast.error('Product saved, but failed to upload main image.');
+          const errorMessage = imgErr?.response?.data?.error?.message || imgErr?.message || 'Unknown error';
+          toast.error(`Product saved, but image upload failed: ${errorMessage}. Please try uploading the image again.`);
+          // Clean up blob URL on error
+          if (imageUrl && imageUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(imageUrl);
+            setImageUrl('');
+            form.setValue('image_url', '');
+          }
         } finally {
           setIsUploading(false);
         }
@@ -636,20 +681,42 @@ export default function ProductForm() {
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
+                                // Clean up previous blob URL if it exists
+                                if (imageUrl && imageUrl.startsWith('blob:')) {
+                                  URL.revokeObjectURL(imageUrl);
+                                }
+                                
                                 setImageFile(file);
                                 const previewUrl = URL.createObjectURL(file);
                                 setImageUrl(previewUrl);
-                                field.onChange(previewUrl);
+                                // Don't set blob URL in form field - it will be updated after upload
+                                // field.onChange is not called here to prevent blob URLs in form data
                               }
                             }}
                           />
-                          {(field.value || imageUrl) && (
-                            <div className="w-48 h-48 rounded-lg overflow-hidden border">
+                          {/* Show real image URL (from product or uploaded) */}
+                          {field.value && !field.value.startsWith('blob:') && (
+                            <div className="w-48 h-48 rounded-lg overflow-hidden border relative">
                               <img
-                                src={field.value || imageUrl}
+                                src={field.value}
                                 alt="Preview"
                                 className="w-full h-full object-cover"
                               />
+                            </div>
+                          )}
+                          {/* Show blob preview only temporarily while file is selected but not uploaded */}
+                          {imageUrl && imageUrl.startsWith('blob:') && !field.value && (
+                            <div className="w-48 h-48 rounded-lg overflow-hidden border relative">
+                              <img
+                                src={imageUrl}
+                                alt="Preview"
+                                className="w-full h-full object-cover"
+                              />
+                              {isUploading && (
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-sm">
+                                  Uploading...
+                                </div>
+                              )}
                             </div>
                           )}
                           {!field.value && !imageUrl && product?.image_url && (

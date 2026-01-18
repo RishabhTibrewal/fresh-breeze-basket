@@ -75,45 +75,59 @@ const allowedOrigins = process.env.CORS_ORIGIN
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // Normalize origin (remove trailing slash)
+    const normalizedOrigin = origin.replace(/\/$/, '');
     
     // Check if origin is in allowed list
-    if (allowedOrigins.includes(origin)) {
-      // Return the specific origin (not true) to avoid multiple values in header
+    if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin)) {
       callback(null, origin);
-    } else {
-      // Allow localhost origins for development
-      if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')|| origin.includes('gofreshco.com')) {
-        callback(null, origin);
-      } else {
-        // Allow gofreshco.com domains for production
-        if (origin.includes('gofreshco.com')) {
-          callback(null, origin);
-        } else {
-          callback(new Error('Not allowed by CORS'));
-        }
-      }
+      return;
     }
+    
+    // Allow localhost origins for development
+    if (normalizedOrigin.startsWith('http://localhost:') || normalizedOrigin.startsWith('https://localhost:')) {
+      callback(null, origin);
+      return;
+    }
+    
+    // Allow gofreshco.com domains for production (www, non-www, and subdomains)
+    if (normalizedOrigin.includes('gofreshco.com')) {
+      console.log(`✅ CORS allowed for origin: ${origin}`);
+      callback(null, origin);
+      return;
+    }
+    
+    // Reject all other origins
+    console.warn(`❌ CORS blocked origin: ${origin} (allowed: ${allowedOrigins.join(', ')})`);
+    callback(new Error(`Not allowed by CORS: ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'Content-Type'],
+  maxAge: 86400, // 24 hours
+  preflightContinue: false, // Let cors handle preflight
+  optionsSuccessStatus: 204, // Some legacy browsers (IE11) choke on 204
 }));
 
 
 // JSON parsing middleware - exclude webhook route
-// Increase body size limit for file uploads (20MB)
+// Increase body size limit for file uploads (50MB to handle large images)
 app.use((req, res, next) => {
   if (req.path === '/api/payments/webhook') {
     // Skip JSON parsing for webhook route
     next();
   } else {
-    express.json({ limit: '20mb' })(req, res, next);
+    express.json({ limit: '50mb' })(req, res, next);
   }
 });
 
 // Increase URL-encoded body size limit
-app.use(express.urlencoded({ limit: '20mb', extended: true }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Request logging middleware
 app.use((req, res, next) => {
