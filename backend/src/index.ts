@@ -83,7 +83,7 @@ app.use(cors({
       callback(null, origin);
     } else {
       // Allow localhost origins for development
-      if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
+      if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')|| origin.includes('gofreshco.com')) {
         callback(null, origin);
       } else {
         // Allow gofreshco.com domains for production

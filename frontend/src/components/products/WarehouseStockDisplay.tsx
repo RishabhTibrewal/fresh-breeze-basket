@@ -27,10 +27,18 @@ export default function WarehouseStockDisplay({
   const [isOpen, setIsOpen] = useState(false);
 
   // Use bulk data if provided, otherwise fetch individually
+  // WARNING: Individual API calls should be avoided in list views to prevent rate limiting
   const { data: stockData, isLoading } = useQuery({
     queryKey: ['product-warehouse-stock', productId],
-    queryFn: () => warehousesService.getProductStockAcrossWarehouses(productId),
+    queryFn: () => {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`⚠️ WarehouseStockDisplay: Using individual API call for product ${productId}. Consider using bulk API instead.`);
+      }
+      return warehousesService.getProductStockAcrossWarehouses(productId);
+    },
     enabled: !!productId && !bulkStockData, // Only fetch if bulk data not provided
+    retry: 2, // Limit retries to prevent server overload
+    retryDelay: 1000, // Wait 1 second between retries
   });
 
   // Use bulk data if available, otherwise use fetched data

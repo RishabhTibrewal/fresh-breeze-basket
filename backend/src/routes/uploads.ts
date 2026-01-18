@@ -90,10 +90,21 @@ router.post('/bill', protect, upload.single('billImage'), async (req: MulterRequ
     await parallelUploads3.done();
 
     // Construct public URL
-    const publicDomain = process.env.R2_PUBLIC_DOMAIN || '';
-    const imageUrl = publicDomain 
-      ? `${publicDomain}/${fileName}`
-      : `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${fileName}`;
+    // Format: https://pub-{hash}.r2.dev/{fileName}
+    const publicDomain = (process.env.R2_PUBLIC_DOMAIN || '').trim();
+    let imageUrl: string;
+    
+    if (publicDomain && publicDomain.length > 0) {
+      // Remove trailing slash if present, then append fileName
+      const cleanDomain = publicDomain.replace(/\/$/, '');
+      imageUrl = `${cleanDomain}/${fileName}`;
+    } else {
+      // Fallback to R2 default URL format
+      console.warn('⚠️ R2_PUBLIC_DOMAIN not set! Using fallback URL format.');
+      const bucketName = process.env.R2_BUCKET_NAME || '';
+      const accountId = process.env.R2_ACCOUNT_ID || '';
+      imageUrl = `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/${fileName}`;
+    }
 
     res.json({ 
       success: true, 
@@ -148,10 +159,18 @@ router.post('/file', protect, upload.single('file'), async (req: MulterRequest, 
     await parallelUploads3.done();
 
     // Construct public URL
+    // Format: https://pub-{hash}.r2.dev/{fileName}
     const publicDomain = process.env.R2_PUBLIC_DOMAIN || '';
-    const fileUrl = publicDomain 
-      ? `${publicDomain}/${fileName}`
-      : `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${fileName}`;
+    let fileUrl: string;
+    
+    if (publicDomain) {
+      // Remove trailing slash if present, then append fileName
+      const cleanDomain = publicDomain.replace(/\/$/, '');
+      fileUrl = `${cleanDomain}/${fileName}`;
+    } else {
+      // Fallback to R2 default URL format
+      fileUrl = `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${fileName}`;
+    }
 
     res.json({ 
       success: true, 
@@ -214,10 +233,21 @@ router.post('/category/:categoryId', protect, adminOnly, upload.single('image'),
     await parallelUploads3.done();
 
     // Construct public URL
-    const publicDomain = process.env.R2_PUBLIC_DOMAIN || '';
-    const imageUrl = publicDomain 
-      ? `${publicDomain}/${fileName}`
-      : `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${fileName}`;
+    // Format: https://pub-{hash}.r2.dev/{fileName}
+    const publicDomain = (process.env.R2_PUBLIC_DOMAIN || '').trim();
+    let imageUrl: string;
+    
+    if (publicDomain && publicDomain.length > 0) {
+      // Remove trailing slash if present, then append fileName
+      const cleanDomain = publicDomain.replace(/\/$/, '');
+      imageUrl = `${cleanDomain}/${fileName}`;
+    } else {
+      // Fallback to R2 default URL format
+      console.warn('⚠️ R2_PUBLIC_DOMAIN not set! Using fallback URL format.');
+      const bucketName = process.env.R2_BUCKET_NAME || '';
+      const accountId = process.env.R2_ACCOUNT_ID || '';
+      imageUrl = `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/${fileName}`;
+    }
 
     // Update category image_url in database
     const { error: updateError } = await supabase
@@ -298,10 +328,25 @@ router.post('/product/:productId', protect, adminOnly, upload.array('images', 10
       await parallelUploads3.done();
 
       // Construct public URL
-      const publicDomain = process.env.R2_PUBLIC_DOMAIN || '';
-      const imageUrl = publicDomain 
-        ? `${publicDomain}/${fileName}`
-        : `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${fileName}`;
+      // Format: https://pub-{hash}.r2.dev/products/{productId}-{timestamp}-{index}.jpg
+      const publicDomain = (process.env.R2_PUBLIC_DOMAIN || '').trim();
+      let imageUrl: string;
+      
+      if (publicDomain && publicDomain.length > 0) {
+        // Remove trailing slash if present, then append fileName
+        const cleanDomain = publicDomain.replace(/\/$/, '');
+        imageUrl = `${cleanDomain}/${fileName}`;
+        console.log('Using R2_PUBLIC_DOMAIN:', cleanDomain);
+      } else {
+        // Fallback to R2 default URL format
+        // Note: This should not be used in production - set R2_PUBLIC_DOMAIN instead
+        console.warn('⚠️ R2_PUBLIC_DOMAIN not set! Using fallback URL format. Set R2_PUBLIC_DOMAIN=https://pub-ec6380c86f4e4f7289e3c6da1d4aebe6.r2.dev');
+        const bucketName = process.env.R2_BUCKET_NAME || '';
+        const accountId = process.env.R2_ACCOUNT_ID || '';
+        imageUrl = `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/${fileName}`;
+      }
+      
+      console.log('Generated image URL:', imageUrl);
 
       // Save to product_images table
       const { data: imageData, error: insertError } = await supabase
@@ -411,10 +456,18 @@ router.post('/purchase-invoice', protect, upload.single('invoiceFile'), async (r
     await parallelUploads3.done();
 
     // Construct public URL
+    // Format: https://pub-{hash}.r2.dev/{fileName}
     const publicDomain = process.env.R2_PUBLIC_DOMAIN || '';
-    const fileUrl = publicDomain 
-      ? `${publicDomain}/${fileName}`
-      : `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${fileName}`;
+    let fileUrl: string;
+    
+    if (publicDomain) {
+      // Remove trailing slash if present, then append fileName
+      const cleanDomain = publicDomain.replace(/\/$/, '');
+      fileUrl = `${cleanDomain}/${fileName}`;
+    } else {
+      // Fallback to R2 default URL format
+      fileUrl = `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${fileName}`;
+    }
 
     // Update purchase invoice invoice_file_url in database
     const { error: updateError } = await supabase

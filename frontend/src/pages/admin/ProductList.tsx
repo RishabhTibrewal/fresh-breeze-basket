@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Search } from 'lucide-react';
 import { productsService } from '@/api/products';
 import { categoriesService } from '@/api/categories';
+import { warehousesService } from '@/api/warehouses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -43,6 +44,17 @@ export default function ProductList() {
   const { data: categories } = useQuery({
     queryKey: ['categories'],
     queryFn: categoriesService.getAll,
+  });
+
+  // Fetch bulk stock data for all products to avoid individual API calls
+  const { data: bulkStockData = {} } = useQuery({
+    queryKey: ['bulk-product-stock', products?.map(p => p.id).join(',')],
+    queryFn: () => {
+      if (!products || products.length === 0) return {};
+      return warehousesService.getBulkProductStock(products.map(p => p.id));
+    },
+    enabled: !!products && products.length > 0,
+    staleTime: 30000, // Cache for 30 seconds
   });
 
   const getCategoryName = (categoryId: string) => {
@@ -148,6 +160,7 @@ export default function ProductList() {
                       productId={product.id}
                       totalStock={product.stock_count}
                       compact={true}
+                      bulkStockData={bulkStockData[product.id] as { warehouses: any[], total_stock: number } | undefined}
                     />
                   </TableCell>
                   <TableCell>

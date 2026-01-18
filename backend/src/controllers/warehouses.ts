@@ -239,10 +239,20 @@ export const getWarehouseInventory = async (req: Request, res: Response) => {
   }
 };
 
-// Get product stock across all warehouses
+/**
+ * Get product stock across all warehouses (DEPRECATED - Use bulk endpoint instead)
+ * @deprecated Use POST /api/warehouses/products/bulk-stock for multiple products
+ * This endpoint is kept for backward compatibility but should not be used in list views
+ * as it can cause rate limiting issues when called multiple times.
+ */
 export const getProductStockAcrossWarehouses = async (req: Request, res: Response) => {
   try {
     const { productId } = req.params;
+    
+    // Log warning in production to identify usage
+    if (process.env.NODE_ENV === 'production') {
+      console.warn(`⚠️ Individual stock API called for product ${productId}. Consider using bulk endpoint instead.`);
+    }
     
     const { data, error } = await supabase
       .from('warehouse_inventory')
@@ -269,7 +279,10 @@ export const getProductStockAcrossWarehouses = async (req: Request, res: Respons
       data: {
         warehouses: data || [],
         total_stock: totalStock
-      }
+      },
+      // Include deprecation notice in response
+      deprecated: true,
+      message: 'This endpoint is deprecated. Use POST /api/warehouses/products/bulk-stock for better performance.'
     });
   } catch (error) {
     if (error instanceof ApiError) {
