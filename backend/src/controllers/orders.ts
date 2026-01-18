@@ -782,7 +782,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     // Fetch the current order data to check previous status and inventory_updated flag
     const { data: currentOrder, error: currentOrderError } = await supabase
       .from('orders')
-      .select('*, order_items(product_id, quantity), status, inventory_updated, user_id, payment_status')
+      .select('*, order_items(product_id, quantity, warehouse_id), status, inventory_updated, user_id, payment_status')
       .eq('id', id)
       .single();
 
@@ -885,60 +885,37 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       const orderItems = currentOrder.order_items;
       
       if (orderItems && orderItems.length > 0) {
-        // Process each item and update stock
+        // Import warehouse inventory utilities
+        const { updateWarehouseStock, getDefaultWarehouseId } = await import('../utils/warehouseInventory');
+        
+        // Get default warehouse if needed
+        const defaultWarehouseId = await getDefaultWarehouseId();
+        
+        // Process each item and release reserved stock (deduct from reserved_stock)
+        const { releaseReservedStock } = await import('../utils/warehouseInventory');
+        
         for (const item of orderItems) {
           try {
-            // First get the current stock
-            const { data: product, error: productError } = await supabase
-              .from('products')
-              .select('stock_count')
-              .eq('id', item.product_id)
-              .single();
+            // Use warehouse_id from order item, or default warehouse
+            const warehouseId = item.warehouse_id || defaultWarehouseId;
             
-            if (productError) {
-              console.error(`Error fetching product ${item.product_id}:`, productError);
+            if (!warehouseId) {
+              console.error(`No warehouse_id found for order item ${item.id} and no default warehouse available`);
               continue;
             }
             
-            // Calculate new stock count
-            // For sales dashboard orders, allow negative stock
-            // For regular orders, prevent negative stock
-            let newStockCount: number;
-            if (isSalesDashboardOrder) {
-              // Allow negative stock for sales dashboard orders
-              newStockCount = product.stock_count - item.quantity;
-              console.log(`Sales order: Allowing negative stock. ${product.stock_count} - ${item.quantity} = ${newStockCount}`);
-            } else {
-              // Regular orders: prevent negative stock
-              newStockCount = Math.max(0, product.stock_count - item.quantity);
-              if (product.stock_count - item.quantity < 0) {
-                console.warn(`Regular order: Insufficient stock for product ${item.product_id}. Stock would go negative, setting to 0.`);
-              }
-            }
+            // Release reserved stock (deduct from reserved_stock when order is processed)
+            // For sales dashboard orders, allow negative reserved stock
+            // For regular orders, prevent negative reserved stock
+            const result = await releaseReservedStock(
+              item.product_id,
+              warehouseId,
+              item.quantity,
+              isSalesDashboardOrder, // Allow negative for sales orders
+              true // Use admin client to bypass RLS for system operations
+            );
             
-            // Update the product stock
-            // RLS policy now allows sales executives to update products
-            const { data: updatedProducts, error: updateError } = await supabase
-              .from('products')
-              .update({ stock_count: newStockCount })
-              .eq('id', item.product_id)
-              .select('stock_count');
-            
-            if (updateError) {
-              console.error(`Error updating stock for product ${item.product_id}:`, updateError);
-              console.error(`Update error details:`, JSON.stringify(updateError, null, 2));
-            } else if (!updatedProducts || updatedProducts.length === 0) {
-              console.error(`No rows updated for product ${item.product_id}. Product may not exist.`);
-            } else {
-              const updatedProduct = updatedProducts[0];
-              console.log(`Stock reduced for product ${item.product_id}: ${product.stock_count} -> ${newStockCount} (Sales order: ${isSalesDashboardOrder})`);
-              // Verify the update actually persisted
-              if (updatedProduct && updatedProduct.stock_count !== newStockCount) {
-                console.warn(`WARNING: Stock update may have been blocked! Expected: ${newStockCount}, Actual: ${updatedProduct.stock_count}`);
-              } else {
-                console.log(`Stock update verified: ${updatedProduct?.stock_count}`);
-              }
-            }
+            console.log(`Reserved stock released for product ${item.product_id} in warehouse ${warehouseId}: -${item.quantity} (Sales order: ${isSalesDashboardOrder}, New reserved_stock: ${result.reserved_stock})`);
           } catch (err) {
             console.error(`Error processing item ${item.product_id}:`, err);
           }
@@ -1163,7 +1140,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
     // Fetch the order
     let orderQuery = supabase
       .from('orders')
-      .select('*, order_items(product_id, quantity), user_id') // Ensure user_id is selected
+      .select('*, order_items(product_id, quantity, warehouse_id), user_id') // Ensure user_id is selected
       .eq('id', id)
       .single();
 
@@ -1266,51 +1243,54 @@ export const cancelOrder = async (req: Request, res: Response) => {
       throw new ApiError(400, updateError.message);
     }
     
-    // If inventory was already updated for this order (regardless of current status),
-    // we need to restore the inventory
-    if (order.inventory_updated) {
-      console.log(`Order ${id} had inventory updated. Restoring inventory...`);
+    // Get the order items
+    const orderItems = order.order_items;
+    
+    if (orderItems && orderItems.length > 0) {
+      // Import warehouse inventory utilities
+      const { restoreReservedStock, updateWarehouseStock, getDefaultWarehouseId } = await import('../utils/warehouseInventory');
       
-      // Get the order items
-      const orderItems = order.order_items;
+      // Get default warehouse if needed
+      const defaultWarehouseId = await getDefaultWarehouseId();
       
-      if (orderItems && orderItems.length > 0) {
-        // Process each item and restore stock
-        for (const item of orderItems) {
-          try {
-            // First get the current stock
-            const { data: product, error: productError } = await supabase
-              .from('products')
-              .select('stock_count')
-              .eq('id', item.product_id)
-              .single();
-            
-            if (productError) {
-              console.error(`Error fetching product ${item.product_id}:`, productError);
-              continue;
-            }
-            
-            // Calculate restored stock count
-            const restoredStockCount = product.stock_count + item.quantity;
-            
-            // Update the product stock
-            const { error: updateError } = await supabase
-              .from('products')
-              .update({ stock_count: restoredStockCount })
-              .eq('id', item.product_id);
-            
-            if (updateError) {
-              console.error(`Error restoring stock for product ${item.product_id}:`, updateError);
-            } else {
-              console.log(`Stock restored for product ${item.product_id}: ${product.stock_count} -> ${restoredStockCount}`);
-            }
-          } catch (err) {
-            console.error(`Error processing item ${item.product_id}:`, err);
+      for (const item of orderItems) {
+        try {
+          // Use warehouse_id from order item, or default warehouse
+          const warehouseId = item.warehouse_id || defaultWarehouseId;
+          
+          if (!warehouseId) {
+            console.error(`No warehouse_id found for order item ${item.id} and no default warehouse available`);
+            continue;
           }
+          
+          if (order.inventory_updated) {
+            // Order was already processed (stock deducted from reserved_stock)
+            // Add stock back to stock_count
+            const restoredStockCount = await updateWarehouseStock(
+              item.product_id,
+              warehouseId,
+              item.quantity, // Positive to restore stock
+              false, // Don't allow negative
+              true // Use admin client to bypass RLS for system operations
+            );
+            
+            console.log(`Stock restored for product ${item.product_id} in warehouse ${warehouseId}: +${item.quantity} (Order was processed, New stock: ${restoredStockCount})`);
+          } else {
+            // Order was still pending (stock is in reserved_stock)
+            // Restore reserved stock back to available stock (move from reserved_stock to stock_count)
+            const result = await restoreReservedStock(
+              item.product_id,
+              warehouseId,
+              item.quantity,
+              true // Use admin client to bypass RLS for system operations
+            );
+            
+            console.log(`Reserved stock restored for product ${item.product_id} in warehouse ${warehouseId}: +${item.quantity} (Order was pending, New stock: ${result.stock_count}, New reserved_stock: ${result.reserved_stock})`);
+          }
+        } catch (err) {
+          console.error(`Error restoring stock for item ${item.product_id}:`, err);
         }
       }
-    } else {
-      console.log(`Order ${id} cancelled with inventory_updated=${order.inventory_updated}`);
     }
     
     // After updating the order status to cancelled, update the associated credit period if it exists

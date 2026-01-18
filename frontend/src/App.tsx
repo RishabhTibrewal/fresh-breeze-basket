@@ -45,6 +45,22 @@ import AdminCheck from "./pages/admin/AdminCheck";
 import AdminSettings from "./pages/admin/AdminSettings";
 import SalesTargets from "./pages/admin/SalesTargets";
 import AdminLeads from "./pages/admin/Leads";
+import Warehouses from "./pages/admin/Warehouses";
+import WarehouseInventory from "./pages/admin/WarehouseInventory";
+import PurchaseOrders from "./pages/admin/PurchaseOrders";
+import CreatePurchaseOrder from "./pages/admin/CreatePurchaseOrder";
+import PurchaseOrderDetail from "./pages/admin/PurchaseOrderDetail";
+import GoodsReceipts from "./pages/admin/GoodsReceipts";
+import CreateGoodsReceipt from "./pages/admin/CreateGoodsReceipt";
+import GoodsReceiptDetail from "./pages/admin/GoodsReceiptDetail";
+import Suppliers from "./pages/admin/Suppliers";
+import SupplierForm from "./pages/admin/SupplierForm";
+import PurchaseInvoices from "./pages/admin/PurchaseInvoices";
+import CreatePurchaseInvoice from "./pages/admin/CreatePurchaseInvoice";
+import PurchaseInvoiceDetail from "./pages/admin/PurchaseInvoiceDetail";
+import SupplierPayments from "./pages/admin/SupplierPayments";
+import CreateSupplierPayment from "./pages/admin/CreateSupplierPayment";
+import SupplierPaymentDetail from "./pages/admin/SupplierPaymentDetail";
 
 // Sales Executive Routes
 import SalesLayout from "./layouts/SalesLayout";
@@ -60,6 +76,7 @@ import SalesAnalytics from "./pages/sales/SalesAnalytics";
 import Leads from "./pages/sales/Leads";
 import SalesProtectedRoute from "./components/auth/SalesProtectedRoute";
 import { TestPayment } from './components/TestPayment';
+import CreatePOSOrder from "./pages/pos/CreatePOSOrder";
 
 // Create a new QueryClient instance inside the component
 const App: React.FC = () => {
@@ -117,6 +134,25 @@ const App: React.FC = () => {
                     <Route path="settings" element={<AdminSettings />} />
                     <Route path="sales-targets" element={<SalesTargets />} />
                     <Route path="leads" element={<AdminLeads />} />
+                    <Route path="warehouses" element={<Warehouses />} />
+                    <Route path="warehouses/:warehouseId/inventory" element={<WarehouseInventory />} />
+                    <Route path="purchase-orders" element={<PurchaseOrders />} />
+                    <Route path="purchase-orders/new" element={<CreatePurchaseOrder />} />
+                    <Route path="purchase-orders/:id/edit" element={<CreatePurchaseOrder />} />
+                    <Route path="purchase-orders/:id" element={<PurchaseOrderDetail />} />
+                    <Route path="goods-receipts" element={<GoodsReceipts />} />
+                    <Route path="goods-receipts/new" element={<CreateGoodsReceipt />} />
+                    <Route path="goods-receipts/:id" element={<GoodsReceiptDetail />} />
+                    <Route path="suppliers" element={<Suppliers />} />
+                    <Route path="suppliers/new" element={<SupplierForm />} />
+                    <Route path="suppliers/:id" element={<SupplierForm />} />
+                    <Route path="suppliers/:id/edit" element={<SupplierForm />} />
+                    <Route path="purchase-invoices" element={<PurchaseInvoices />} />
+                    <Route path="purchase-invoices/new" element={<CreatePurchaseInvoice />} />
+                    <Route path="purchase-invoices/:id" element={<PurchaseInvoiceDetail />} />
+                    <Route path="supplier-payments" element={<SupplierPayments />} />
+                    <Route path="supplier-payments/new" element={<CreateSupplierPayment />} />
+                    <Route path="supplier-payments/:id" element={<SupplierPaymentDetail />} />
                     <Route path="check" element={<AdminCheck />} />
                   </Route>
                   
@@ -138,7 +174,11 @@ const App: React.FC = () => {
                     <Route path="credit-management" element={<CreditManagement />} />
                     <Route path="analytics" element={<SalesAnalytics />} />
                     <Route path="leads" element={<Leads />} />
+                    <Route path="pos" element={<CreatePOSOrder />} />
                   </Route>
+                  
+                  {/* POS Routes */}
+                  <Route path="/pos" element={<ProtectedRoute><CreatePOSOrder /></ProtectedRoute>} />
                   
                   {/* Catch-all route */}
                   <Route path="*" element={<NotFound />} />

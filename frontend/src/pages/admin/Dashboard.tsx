@@ -9,7 +9,12 @@ import {
   LogOut,
   Grid,
   Target,
-  UserCheck
+  UserCheck,
+  Warehouse,
+  FileText,
+  Building2,
+  Receipt,
+  ReceiptText
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { 
@@ -39,6 +44,11 @@ const AdminDashboard = () => {
     { path: '/admin/products', icon: Package, label: 'Products' },
     { path: '/admin/orders', icon: ShoppingCart, label: 'Orders' },
     { path: '/admin/customers', icon: Users, label: 'Customers' },
+    { path: '/admin/warehouses', icon: Warehouse, label: 'Warehouses' },
+    { path: '/admin/purchase-orders', icon: FileText, label: 'Purchase Orders' },
+    { path: '/admin/goods-receipts', icon: Receipt, label: 'Goods Receipts' },
+    { path: '/admin/purchase-invoices', icon: ReceiptText, label: 'Purchase Invoices' },
+    { path: '/admin/suppliers', icon: Building2, label: 'Suppliers' },
     { path: '/admin/leads', icon: UserCheck, label: 'Leads' },
   ];
 
@@ -167,6 +177,14 @@ const AdminDashboard = () => {
                         <Target className="h-4 w-4" />
                         <span>Sales Targets</span>
                       </Link>
+                      </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip="Leads">
+                      <Link to="/admin/warehouses">
+                        <UserCheck className="h-4 w-4" />
+                        <span>Warehouses</span>
+                      </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                   <SidebarMenuItem>
@@ -174,6 +192,45 @@ const AdminDashboard = () => {
                       <Link to="/admin/leads">
                         <UserCheck className="h-4 w-4" />
                         <span>Leads</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+            <SidebarGroup>
+              <SidebarGroupLabel>Procurement</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip="Purchase Orders">
+                      <Link to="/admin/purchase-orders">
+                        <FileText className="h-4 w-4" />
+                        <span>Purchase Orders</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip="Goods Receipts">
+                      <Link to="/admin/goods-receipts">
+                        <Receipt className="h-4 w-4" />
+                        <span>Goods Receipts</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip="Purchase Invoices">
+                      <Link to="/admin/purchase-invoices">
+                        <ReceiptText className="h-4 w-4" />
+                        <span>Purchase Invoices</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip="Suppliers">
+                      <Link to="/admin/suppliers">
+                        <Building2 className="h-4 w-4" />
+                        <span>Suppliers</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

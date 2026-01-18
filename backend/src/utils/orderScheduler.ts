@@ -1,5 +1,6 @@
 import { supabase } from '../config/supabase';
 import { supabaseAdmin } from '../lib/supabase';
+import { updateWarehouseStock, getDefaultWarehouseId } from './warehouseInventory';
 
 /**
  * Updates an order status to 'processing' after a specified delay
@@ -15,7 +16,7 @@ export const scheduleOrderProcessing = (orderId: string, delayMinutes: number = 
       // 1. Fetch the order to get the items and check current status
       const { data: order, error: orderError } = await supabase
         .from('orders')
-        .select('*, order_items(product_id, quantity)')
+        .select('*, order_items(product_id, quantity, warehouse_id)')
         .eq('id', orderId)
         .single();
       
@@ -97,70 +98,49 @@ export const scheduleOrderProcessing = (orderId: string, delayMinutes: number = 
       
       const isSalesDashboardOrder = !!customer;
       
-      // 4. Update product stock counts
+      // 4. Update warehouse inventory stock counts
       const orderItems = order.order_items;
       if (orderItems && orderItems.length > 0) {
         console.log(`Reducing stock for ${orderItems.length} products from order ${orderId}`);
         console.log(`Is sales dashboard order: ${isSalesDashboardOrder}`);
         
+        // Get default warehouse if needed
+        const defaultWarehouseId = await getDefaultWarehouseId();
+        
         // Process each item and update stock
         for (const item of orderItems) {
-          // First get the current stock
-          const { data: product, error: productError } = await supabase
-            .from('products')
-            .select('stock_count')
-            .eq('id', item.product_id)
-            .single();
-          
-          if (productError) {
-            console.error(`Error fetching product ${item.product_id}:`, productError);
-            continue;
-          }
-          
-          // Calculate new stock count
-          // For sales dashboard orders, allow negative stock
-          // For regular orders, prevent negative stock
-          let newStockCount: number;
-          if (isSalesDashboardOrder) {
-            // Allow negative stock for sales dashboard orders
-            newStockCount = product.stock_count - item.quantity;
-            console.log(`Sales order: Allowing negative stock. ${product.stock_count} - ${item.quantity} = ${newStockCount}`);
-          } else {
-            // Regular orders: prevent negative stock
-            newStockCount = Math.max(0, product.stock_count - item.quantity);
-            if (product.stock_count - item.quantity < 0) {
-              console.warn(`Regular order: Insufficient stock for product ${item.product_id}. Stock would go negative, setting to 0.`);
+          try {
+            // Use warehouse_id from order item, or default warehouse
+            const warehouseId = item.warehouse_id || defaultWarehouseId;
+            
+            if (!warehouseId) {
+              console.error(`No warehouse_id found for order item ${item.id} and no default warehouse available`);
+              continue;
             }
-          }
-          
-          // Update the product stock
-          // This runs in a scheduled context without a user session, so we need admin client
-          // to bypass RLS (no auth.uid() available in background jobs)
-          if (!supabaseAdmin) {
-            console.error(`Cannot update stock: supabaseAdmin is not available. Service role key may be missing.`);
-            continue;
-          }
-          
-          const { data: updatedProducts, error: updateError } = await supabaseAdmin
-            .from('products')
-            .update({ stock_count: newStockCount })
-            .eq('id', item.product_id)
-            .select('stock_count');
-          
-          if (updateError) {
-            console.error(`Error updating stock for product ${item.product_id}:`, updateError);
-            console.error(`Update error details:`, JSON.stringify(updateError, null, 2));
-          } else if (!updatedProducts || updatedProducts.length === 0) {
-            console.error(`No rows updated for product ${item.product_id}. Product may not exist.`);
-          } else {
-            const updatedProduct = updatedProducts[0];
-            console.log(`Stock reduced for product ${item.product_id}: ${product.stock_count} -> ${newStockCount} (Sales order: ${isSalesDashboardOrder})`);
-            // Verify the update actually persisted
-            if (updatedProduct && updatedProduct.stock_count !== newStockCount) {
-              console.warn(`WARNING: Stock update may have been blocked! Expected: ${newStockCount}, Actual: ${updatedProduct.stock_count}`);
-            } else {
-              console.log(`Stock update verified: ${updatedProduct?.stock_count}`);
+            
+            // Release reserved stock (deduct from reserved_stock)
+            // This runs in a scheduled context without a user session, so we need admin client
+            // to bypass RLS (no auth.uid() available in background jobs)
+            if (!supabaseAdmin) {
+              console.error(`Cannot update stock: supabaseAdmin is not available. Service role key may be missing.`);
+              continue;
             }
+            
+            const { releaseReservedStock } = await import('./warehouseInventory');
+            
+            // For sales dashboard orders, allow negative reserved stock
+            // For regular orders, prevent negative reserved stock
+            const result = await releaseReservedStock(
+              item.product_id,
+              warehouseId,
+              item.quantity,
+              isSalesDashboardOrder, // Allow negative for sales orders
+              true // Use admin client for scheduled jobs
+            );
+            
+            console.log(`Reserved stock released for product ${item.product_id} in warehouse ${warehouseId}: -${item.quantity} (Sales order: ${isSalesDashboardOrder}, New reserved_stock: ${result.reserved_stock})`);
+          } catch (err) {
+            console.error(`Error processing item ${item.product_id}:`, err);
           }
         }
       }

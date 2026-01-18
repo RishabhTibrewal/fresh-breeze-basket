@@ -1,11 +1,14 @@
 import { Request, Response } from 'express';
-import { supabase } from '../db/supabase';
-import { ApiError } from '../utils/ApiError';
+import { supabase } from '../config/supabase';
+import { ApiError } from '../middleware/error';
 
+// Get inventory across all warehouses or filter by warehouse
 export const getInventory = async (req: Request, res: Response) => {
     try {
-        const { data, error } = await supabase
-            .from('inventory')
+        const { warehouse_id } = req.query;
+        
+        let query = supabase
+            .from('warehouse_inventory')
             .select(`
                 *,
                 products (
@@ -13,10 +16,22 @@ export const getInventory = async (req: Request, res: Response) => {
                     name,
                     description,
                     price,
-                    image_url
+                    image_url,
+                    unit_type
+                ),
+                warehouses (
+                    id,
+                    name,
+                    code
                 )
             `)
             .order('created_at', { ascending: false });
+        
+        if (warehouse_id) {
+            query = query.eq('warehouse_id', warehouse_id);
+        }
+        
+        const { data, error } = await query;
 
         if (error) {
             console.error('Supabase error fetching inventory:', error);
@@ -39,12 +54,13 @@ export const getInventory = async (req: Request, res: Response) => {
     }
 };
 
+// Get inventory for a specific product across all warehouses
 export const getInventoryByProductId = async (req: Request, res: Response) => {
     try {
         const { product_id } = req.params;
 
         const { data, error } = await supabase
-            .from('inventory')
+            .from('warehouse_inventory')
             .select(`
                 *,
                 products (
@@ -52,11 +68,17 @@ export const getInventoryByProductId = async (req: Request, res: Response) => {
                     name,
                     description,
                     price,
-                    image_url
+                    image_url,
+                    unit_type
+                ),
+                warehouses (
+                    id,
+                    name,
+                    code,
+                    is_active
                 )
             `)
-            .eq('product_id', product_id)
-            .single();
+            .eq('product_id', product_id);
 
         if (error) {
             console.error('Supabase error fetching inventory by product ID:', error);
@@ -66,16 +88,14 @@ export const getInventoryByProductId = async (req: Request, res: Response) => {
             });
         }
 
-        if (!data) {
-            return res.status(404).json({
-                success: false,
-                error: 'Inventory not found'
-            });
-        }
+        const totalStock = data?.reduce((sum, item) => sum + (item.stock_count || 0), 0) || 0;
 
         return res.json({
             success: true,
-            data
+            data: {
+                warehouses: data || [],
+                total_stock: totalStock
+            }
         });
     } catch (error) {
         console.error('Error fetching inventory by product ID:', error);
@@ -86,21 +106,67 @@ export const getInventoryByProductId = async (req: Request, res: Response) => {
     }
 };
 
+// Update inventory for a specific product in a specific warehouse
 export const updateInventory = async (req: Request, res: Response) => {
     try {
         const { product_id } = req.params;
-        const { quantity, low_stock_threshold, batch_number, expiry_date } = req.body;
+        const { warehouse_id, stock_count, location } = req.body;
 
-        const { data, error } = await supabase
-            .from('inventory')
-            .update({
-                quantity,
-                low_stock_threshold,
-                batch_number,
-                expiry_date
-            })
+        if (!warehouse_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'warehouse_id is required'
+            });
+        }
+
+        // Check if inventory already exists
+        const { data: existingInventory, error: fetchError } = await supabase
+            .from('warehouse_inventory')
+            .select('stock_count')
+            .eq('warehouse_id', warehouse_id)
             .eq('product_id', product_id)
-            .select()
+            .maybeSingle();
+
+        if (fetchError) {
+            console.error('Supabase error fetching inventory:', fetchError);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to fetch inventory'
+            });
+        }
+
+        // Calculate new stock_count: add to existing if exists, otherwise set to provided value
+        const currentStock = existingInventory?.stock_count || 0;
+        const stockToAdd = stock_count !== undefined ? stock_count : 0;
+        const newStockCount = currentStock + stockToAdd;
+
+        // Upsert warehouse inventory (insert or update)
+        const { data, error } = await supabase
+            .from('warehouse_inventory')
+            .upsert({
+                warehouse_id,
+                product_id,
+                stock_count: newStockCount,
+                location,
+                updated_at: new Date().toISOString()
+            }, {
+                onConflict: 'warehouse_id,product_id'
+            })
+            .select(`
+                *,
+                products (
+                    id,
+                    name,
+                    description,
+                    price,
+                    image_url
+                ),
+                warehouses (
+                    id,
+                    name,
+                    code
+                )
+            `)
             .single();
 
         if (error) {

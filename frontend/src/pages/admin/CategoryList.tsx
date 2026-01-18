@@ -31,6 +31,7 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import { fetchCategories, categoriesService } from '@/api/categories';
 import type { Category, CreateCategoryData } from '@/api/categories';
+import { uploadsService } from '@/api/uploads';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -39,7 +40,7 @@ const categorySchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   slug: z.string().min(2, 'Slug must be at least 2 characters'),
   description: z.string().optional(),
-  image_url: z.string().url('Must be a valid URL').optional(),
+  image_url: z.string().optional(),
 });
 
 type CategoryFormData = z.infer<typeof categorySchema>;
@@ -47,6 +48,8 @@ type CategoryFormData = z.infer<typeof categorySchema>;
 const CategoryList = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -66,7 +69,30 @@ const CategoryList = () => {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: CreateCategoryData) => categoriesService.create(data),
+    mutationFn: async (data: CreateCategoryData) => {
+      const category = await categoriesService.create(data);
+      
+      // Upload image if provided
+      if (imageFile && category.id) {
+        setIsUploading(true);
+        try {
+          const uploadResult = await uploadsService.uploadCategoryImage(category.id, imageFile);
+          // Update category with uploaded image URL
+          await categoriesService.update(category.id, { image_url: uploadResult.url });
+        } catch (uploadError) {
+          console.error('Image upload failed:', uploadError);
+          toast({
+            title: 'Warning',
+            description: 'Category created but image upload failed',
+            variant: 'destructive',
+          });
+        } finally {
+          setIsUploading(false);
+        }
+      }
+      
+      return category;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories'] });
       toast({
@@ -75,6 +101,7 @@ const CategoryList = () => {
       });
       setIsOpen(false);
       form.reset();
+      setImageFile(null);
     },
     onError: (error) => {
       toast({
@@ -86,8 +113,30 @@ const CategoryList = () => {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: CreateCategoryData }) =>
-      categoriesService.update(id, data),
+    mutationFn: async ({ id, data }: { id: string; data: CreateCategoryData }) => {
+      const category = await categoriesService.update(id, data);
+      
+      // Upload image if provided
+      if (imageFile) {
+        setIsUploading(true);
+        try {
+          const uploadResult = await uploadsService.uploadCategoryImage(id, imageFile);
+          // Update category with uploaded image URL
+          await categoriesService.update(id, { image_url: uploadResult.url });
+        } catch (uploadError) {
+          console.error('Image upload failed:', uploadError);
+          toast({
+            title: 'Warning',
+            description: 'Category updated but image upload failed',
+            variant: 'destructive',
+          });
+        } finally {
+          setIsUploading(false);
+        }
+      }
+      
+      return category;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories'] });
       toast({
@@ -97,6 +146,7 @@ const CategoryList = () => {
       setIsOpen(false);
       setEditingCategory(null);
       form.reset();
+      setImageFile(null);
     },
     onError: (error) => {
       toast({
@@ -125,7 +175,7 @@ const CategoryList = () => {
     },
   });
 
-  const onSubmit = (data: CategoryFormData) => {
+  const onSubmit = async (data: CategoryFormData) => {
     if (editingCategory) {
       updateMutation.mutate({ 
         id: editingCategory.id, 
@@ -133,7 +183,7 @@ const CategoryList = () => {
           name: data.name,
           slug: data.slug,
           description: data.description,
-          image_url: data.image_url
+          image_url: editingCategory.image_url // Keep existing URL, will be updated after upload
         } 
       });
     } else {
@@ -141,7 +191,7 @@ const CategoryList = () => {
         name: data.name,
         slug: data.slug,
         description: data.description,
-        image_url: data.image_url
+        image_url: '' // Will be set after upload
       });
     }
   };
@@ -232,9 +282,41 @@ const CategoryList = () => {
                   name="image_url"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Image URL (Optional)</FormLabel>
+                      <FormLabel>Category Image</FormLabel>
                       <FormControl>
-                        <Input placeholder="Enter image URL" {...field} />
+                        <div className="space-y-2">
+                          <Input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                setImageFile(file);
+                                // Preview URL for display
+                                const previewUrl = URL.createObjectURL(file);
+                                field.onChange(previewUrl);
+                              }
+                            }}
+                          />
+                          {field.value && (
+                            <div className="w-24 h-24 rounded-lg overflow-hidden border">
+                              <img
+                                src={field.value}
+                                alt="Preview"
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                          )}
+                          {!field.value && editingCategory?.image_url && (
+                            <div className="w-24 h-24 rounded-lg overflow-hidden border">
+                              <img
+                                src={editingCategory.image_url}
+                                alt={editingCategory.name}
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                          )}
+                        </div>
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -243,12 +325,12 @@ const CategoryList = () => {
                 <DialogFooter>
                   <Button
                     type="submit"
-                    disabled={createMutation.isPending || updateMutation.isPending}
+                    disabled={createMutation.isPending || updateMutation.isPending || isUploading}
                   >
-                    {(createMutation.isPending || updateMutation.isPending) && (
+                    {(createMutation.isPending || updateMutation.isPending || isUploading) && (
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     )}
-                    {editingCategory ? 'Update Category' : 'Create Category'}
+                    {isUploading ? 'Uploading...' : editingCategory ? 'Update Category' : 'Create Category'}
                   </Button>
                 </DialogFooter>
               </form>

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
-import { supabase } from '../db/supabase';
+import { supabase } from '../config/supabase';
 import { Database } from '../types/database';
+import { getDefaultWarehouseId, findWarehouseWithStock } from '../utils/warehouseInventory';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -12,6 +13,7 @@ interface OrderItemInput {
   price: number;
   unit_price?: number; // Add unit_price as an optional field
   product_name?: string; // Optional field for frontend
+  warehouse_id?: string; // Warehouse ID for this item
 }
 
 export const orderController = {
@@ -229,6 +231,16 @@ export const orderController = {
         }
       }
 
+      // Get default warehouse if warehouse_id not provided for items
+      const { data: defaultWarehouse } = await supabase
+        .from('warehouses')
+        .select('id')
+        .eq('code', 'WH-001')
+        .eq('is_active', true)
+        .single();
+
+      const defaultWarehouseId = defaultWarehouse?.id;
+
       // Create order items with prices from products
       const orderItems = (items as OrderItemInput[]).map(item => {
         // Use the price sent from frontend if available, otherwise fallback to product prices
@@ -248,11 +260,49 @@ export const orderController = {
           order_id: order.id,
           product_id: item.product_id,
           quantity: item.quantity,
-          unit_price: unitPrice
+          unit_price: unitPrice,
+          warehouse_id: item.warehouse_id || defaultWarehouseId || null
         };
       });
 
       console.log('Final order items to insert:', JSON.stringify(orderItems, null, 2));
+
+      // Reserve stock for all order items (move from stock_count to reserved_stock)
+      const { reserveWarehouseStock, getDefaultWarehouseId: getDefaultWarehouseIdUtil } = await import('../utils/warehouseInventory');
+      const defaultWarehouseIdForReservation = await getDefaultWarehouseIdUtil();
+      
+      const reservationErrors: string[] = [];
+      for (const item of orderItems) {
+        try {
+          const warehouseId = item.warehouse_id || defaultWarehouseIdForReservation;
+          if (!warehouseId) {
+            reservationErrors.push(`No warehouse_id for product ${item.product_id}`);
+            continue;
+          }
+          
+          await reserveWarehouseStock(
+            item.product_id,
+            warehouseId,
+            item.quantity,
+            true // Use admin client to bypass RLS for system operations
+          );
+          
+          console.log(`Stock reserved for product ${item.product_id} in warehouse ${warehouseId}: ${item.quantity}`);
+        } catch (err: any) {
+          console.error(`Error reserving stock for product ${item.product_id}:`, err);
+          reservationErrors.push(`Failed to reserve stock for product ${item.product_id}: ${err.message}`);
+        }
+      }
+
+      // If there were reservation errors, rollback the order
+      if (reservationErrors.length > 0) {
+        console.error('Stock reservation errors:', reservationErrors);
+        await supabase.from('orders').delete().eq('id', order.id);
+        return res.status(400).json({ 
+          error: 'Failed to reserve stock for some products',
+          details: reservationErrors
+        });
+      }
 
       const { error: itemsError } = await supabase
         .from('order_items')
@@ -260,6 +310,20 @@ export const orderController = {
 
       if (itemsError) {
         console.error('Error creating order items:', itemsError);
+        
+        // Rollback stock reservations if order items creation fails
+        const { restoreReservedStock: restoreReservedStockUtil } = await import('../utils/warehouseInventory');
+        for (const item of orderItems) {
+          try {
+            const warehouseId = item.warehouse_id || defaultWarehouseIdForReservation;
+            if (warehouseId) {
+              await restoreReservedStockUtil(item.product_id, warehouseId, item.quantity, true); // Use admin client to bypass RLS
+            }
+          } catch (err) {
+            console.error(`Error rolling back reservation for product ${item.product_id}:`, err);
+          }
+        }
+        
         // Rollback by deleting the order if items creation fails
         await supabase.from('orders').delete().eq('id', order.id);
         return res.status(500).json({ error: `Failed to create order items: ${itemsError.message}` });

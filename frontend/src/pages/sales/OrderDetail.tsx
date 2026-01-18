@@ -40,9 +40,12 @@ import {
 } from "@/components/ui/select";
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { invoicesService } from '@/api/invoices';
+import { Printer, Download } from 'lucide-react';
 import { ArrowLeft, Truck, AlertTriangle, Clipboard, Package, Package2, CreditCard, ChevronRight, Edit } from "lucide-react";
 import { customerService } from '@/api/customer';
 import { creditPeriodService } from '@/api/creditPeriod';
+import { warehousesService } from '@/api/warehouses';
 import apiClient from '@/lib/apiClient';
 
 // Order detail component
@@ -60,6 +63,12 @@ export default function OrderDetail() {
   const [newStatus, setNewStatus] = useState<string>('');
   const [cancelReason, setCancelReason] = useState('');
   
+  // Get warehouses for displaying warehouse info
+  const { data: warehouses = [] } = useQuery({
+    queryKey: ['warehouses'],
+    queryFn: () => warehousesService.getAll(true),
+  });
+
   // Get order details
   const { 
     data: order, 
@@ -374,25 +383,44 @@ export default function OrderDetail() {
                       <TableRow>
                         <TableHead className="px-2 py-2 min-w-[120px] sm:min-w-[150px]">Product</TableHead>
                         <TableHead className="text-right px-2 py-2 w-16 sm:w-20">Qty</TableHead>
+                        <TableHead className="px-2 py-2 w-24 sm:w-32 hidden sm:table-cell">Warehouse</TableHead>
                         <TableHead className="text-right px-2 py-2 w-20 sm:w-24">Price</TableHead>
                         <TableHead className="text-right px-2 py-2 w-24 sm:w-28">Subtotal</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {order.order_items?.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell className="px-2 py-2 font-medium text-xs sm:text-sm min-w-0 max-w-[150px] sm:max-w-[200px]">
-                            <div className="truncate" title={item.product?.name || `Product ID: ${item.product_id}`}>
-                            {item.product?.name || `Product ID: ${item.product_id}`}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right px-2 py-2 text-xs sm:text-sm">{item.quantity}</TableCell>
-                          <TableCell className="text-right px-2 py-2 text-xs sm:text-sm">${parseFloat(item.unit_price).toFixed(2)}</TableCell>
-                          <TableCell className="text-right px-2 py-2 text-xs sm:text-sm font-medium">${(item.quantity * parseFloat(item.unit_price)).toFixed(2)}</TableCell>
-                        </TableRow>
-                      ))}
+                      {order.order_items?.map((item: any) => {
+                        const warehouse = warehouses.find(w => w.id === item.warehouse_id);
+                        return (
+                          <TableRow key={item.id}>
+                            <TableCell className="px-2 py-2 font-medium text-xs sm:text-sm min-w-0 max-w-[150px] sm:max-w-[200px]">
+                              <div className="truncate" title={item.product?.name || `Product ID: ${item.product_id}`}>
+                              {item.product?.name || `Product ID: ${item.product_id}`}
+                              </div>
+                              {item.warehouse_id && (
+                                <div className="text-xs text-muted-foreground mt-1 sm:hidden">
+                                  {warehouse ? `${warehouse.code} - ${warehouse.name}` : 'Warehouse N/A'}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm">{item.quantity}</TableCell>
+                            <TableCell className="px-2 py-2 text-xs sm:text-sm hidden sm:table-cell">
+                              {warehouse ? (
+                                <div className="text-xs">
+                                  <div className="font-medium">{warehouse.code}</div>
+                                  <div className="text-muted-foreground">{warehouse.name}</div>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm">${parseFloat(item.unit_price).toFixed(2)}</TableCell>
+                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm font-medium">${(item.quantity * parseFloat(item.unit_price)).toFixed(2)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
                       <TableRow>
-                        <TableCell colSpan={3} className="text-right font-medium px-2 py-2 text-xs sm:text-sm">Total</TableCell>
+                        <TableCell colSpan={4} className="text-right font-medium px-2 py-2 text-xs sm:text-sm">Total</TableCell>
                         <TableCell className="text-right font-bold px-2 py-2 text-xs sm:text-sm md:text-base">
                           ${parseFloat(order.total_amount).toFixed(2)}
                         </TableCell>
@@ -407,13 +435,46 @@ export default function OrderDetail() {
                 <h3 className="text-base sm:text-lg font-medium mb-2 sm:mb-3">Order Actions</h3>
                 <div className="flex flex-wrap gap-2">
                   {/* Update Order Button */}
-                  <Button 
+                  <Button
                     variant="outline" 
                     className="gap-2 text-xs sm:text-sm h-9 sm:h-10"
                     onClick={() => navigate(`/sales/orders/${orderId}/edit`)}
                   >
                     <Edit className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                     Update Order
+                  </Button>
+                  
+                  {/* Print Invoice Button */}
+                  <Button
+                    variant="outline"
+                    className="gap-2 text-xs sm:text-sm h-9 sm:h-10"
+                    onClick={async () => {
+                      try {
+                        const invoiceUrl = `${import.meta.env.VITE_API_URL || ''}/api/invoices/pos/${orderId}`;
+                        window.open(invoiceUrl, '_blank');
+                      } catch (error) {
+                        toast.error('Failed to open invoice');
+                      }
+                    }}
+                  >
+                    <Printer className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    Print Invoice
+                  </Button>
+                  
+                  {/* Download Bill Button */}
+                  <Button
+                    variant="outline"
+                    className="gap-2 text-xs sm:text-sm h-9 sm:h-10"
+                    onClick={async () => {
+                      try {
+                        await invoicesService.downloadCustomerBill(orderId!);
+                      } catch (error) {
+                        toast.error('Failed to download bill');
+                      }
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    Download Bill
                   </Button>
                   
                   {/* Update Status Dialog

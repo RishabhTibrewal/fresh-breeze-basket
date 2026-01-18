@@ -29,6 +29,7 @@ import { ordersService, type OrdersResponse } from '@/api/orders';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
+import WarehouseStockDisplay from '@/components/products/WarehouseStockDisplay';
 
 export default function ProductList() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -142,18 +143,24 @@ export default function ProductList() {
                       <span>AED {product.price.toFixed(2)}</span>
                     )}
                   </TableCell>
-                  <TableCell>{product.stock_count || 'N/A'}</TableCell>
+                  <TableCell>
+                    <WarehouseStockDisplay
+                      productId={product.id}
+                      totalStock={product.stock_count}
+                      compact={true}
+                    />
+                  </TableCell>
                   <TableCell>
                     <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      product.stock_count > 10 
+                      (product.stock_count || 0) > 10 
                         ? 'bg-green-100 text-green-800' 
-                        : product.stock_count > 0 
+                        : (product.stock_count || 0) > 0 
                           ? 'bg-yellow-100 text-yellow-800' 
                           : 'bg-red-100 text-red-800'
                     }`}>
-                      {product.stock_count > 10 
+                      {(product.stock_count || 0) > 10 
                         ? 'In Stock' 
-                        : product.stock_count > 0 
+                        : (product.stock_count || 0) > 0 
                           ? 'Low Stock' 
                           : 'Out of Stock'}
                     </div>

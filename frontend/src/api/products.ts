@@ -161,24 +161,79 @@ export const productsService = {
   },
 
   async update(id: string, productData: CreateProductInput): Promise<Product> {
-    const formattedData = {
-      name: productData.name,
-      description: productData.description,
-      price: parseFloat(productData.price),
-      sale_price: productData.sale_price ? parseFloat(productData.sale_price) : null,
-      stock_count: parseInt(productData.stock_count),
-      category_id: productData.category_id,
-      unit_type: productData.unit_type,
-      unit: productData.unit ? parseFloat(productData.unit) : null,
-      image_url: productData.image_url,
-      nutritional_info: productData.nutritional_info || null,
-      best_before: productData.best_before || null,
-      is_featured: productData.is_featured || false,
-      is_active: productData.is_active ?? true,
-      badge: productData.badge || null,
-      origin: productData.origin || '',
-      slug: productData.name?.toLowerCase().replace(/\s+/g, '-'),
-    };
+    // Only include fields that are defined and valid
+    const formattedData: Record<string, any> = {};
+    
+    if (productData.name !== undefined && productData.name !== null) {
+      formattedData.name = productData.name;
+    }
+    if (productData.description !== undefined) {
+      formattedData.description = productData.description;
+    }
+    if (productData.price !== undefined && productData.price !== null && productData.price !== '') {
+      const priceValue = parseFloat(productData.price);
+      if (!isNaN(priceValue)) {
+        formattedData.price = priceValue;
+      }
+    }
+    if (productData.sale_price !== undefined) {
+      if (productData.sale_price === null || productData.sale_price === '') {
+        formattedData.sale_price = null;
+      } else {
+        const salePriceValue = parseFloat(productData.sale_price);
+        if (!isNaN(salePriceValue)) {
+          formattedData.sale_price = salePriceValue;
+        }
+      }
+    }
+    if (productData.stock_count !== undefined && productData.stock_count !== null && productData.stock_count !== '') {
+      const stockValue = parseInt(productData.stock_count);
+      if (!isNaN(stockValue)) {
+        formattedData.stock_count = stockValue;
+      }
+    }
+    if (productData.category_id !== undefined) {
+      formattedData.category_id = productData.category_id;
+    }
+    if (productData.unit_type !== undefined && productData.unit_type !== null) {
+      formattedData.unit_type = productData.unit_type;
+    }
+    if (productData.unit !== undefined) {
+      if (productData.unit === null || productData.unit === '') {
+        formattedData.unit = null;
+      } else {
+        const unitValue = parseFloat(productData.unit);
+        if (!isNaN(unitValue)) {
+          formattedData.unit = unitValue;
+        }
+      }
+    }
+    if (productData.image_url !== undefined) {
+      formattedData.image_url = productData.image_url;
+    }
+    if (productData.nutritional_info !== undefined) {
+      formattedData.nutritional_info = productData.nutritional_info;
+    }
+    if (productData.best_before !== undefined) {
+      formattedData.best_before = productData.best_before;
+    }
+    if (productData.is_featured !== undefined) {
+      formattedData.is_featured = productData.is_featured;
+    }
+    if (productData.is_active !== undefined) {
+      formattedData.is_active = productData.is_active;
+    }
+    if (productData.badge !== undefined) {
+      formattedData.badge = productData.badge;
+    }
+    if (productData.origin !== undefined) {
+      formattedData.origin = productData.origin;
+    }
+    if (productData.slug !== undefined && productData.slug !== null) {
+      formattedData.slug = productData.slug;
+    } else if (productData.name) {
+      formattedData.slug = productData.name.toLowerCase().replace(/\s+/g, '-');
+    }
 
     const { data: response } = await apiClient.put<ApiResponse<Product>>(`/products/${id}`, formattedData);
     return response.data;

@@ -4,8 +4,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { ordersService, Order } from '@/api/orders';
+import { invoicesService } from '@/api/invoices';
 import { productsService, Product } from '@/api/products';
 import { addressApi } from '@/api/addresses';
+import { warehousesService } from '@/api/warehouses';
 import { supabase } from '@/lib/supabase';
 import { 
   Card,
@@ -63,7 +65,9 @@ import {
   Banknote,
   MapPin,
   FileText,
-  ShoppingCart
+  ShoppingCart,
+  Printer,
+  Download
 } from 'lucide-react';
 
 export default function AdminOrderDetails() {
@@ -143,6 +147,12 @@ export default function AdminOrderDetails() {
     retry: 1
   });
   
+  // Get warehouses for displaying warehouse info
+  const { data: warehouses = [] } = useQuery({
+    queryKey: ['warehouses'],
+    queryFn: () => warehousesService.getAll(true),
+  });
+
   // Fetch user profile
   const {
     data: userProfile,
@@ -639,19 +649,21 @@ export default function AdminOrderDetails() {
                     <TableHead>Product</TableHead>
                     <TableHead>Price</TableHead>
                     <TableHead>Quantity</TableHead>
+                    <TableHead className="hidden md:table-cell">Warehouse</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoadingProducts ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-4">
+                      <TableCell colSpan={5} className="text-center py-4">
                         <Spinner className="h-6 w-6 mx-auto" />
                       </TableCell>
                     </TableRow>
                   ) : order.items && order.items.length > 0 ? (
                     order.items.map((item: any, idx) => {
                       const product = item.product;
+                      const warehouse = warehouses.find(w => w.id === item.warehouse_id);
                       const primaryImage = product?.images?.find((img: any) => img.is_primary)?.image_url || 
                                         product?.images?.[0]?.image_url || 
                                         product?.image_url;
@@ -680,11 +692,26 @@ export default function AdminOrderDetails() {
                                   </p>
                                 )}
                                 <p className="text-xs text-muted-foreground">SKU: {item.product_id}</p>
+                                {item.warehouse_id && (
+                                  <p className="text-xs text-muted-foreground md:hidden">
+                                    Warehouse: {warehouse ? `${warehouse.code} - ${warehouse.name}` : 'N/A'}
+                                  </p>
+                                )}
                               </div>
                             </div>
                           </TableCell>
                           <TableCell>AED {item.unit_price?.toFixed(2) || '0.00'}</TableCell>
                           <TableCell>{item.quantity}</TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            {warehouse ? (
+                              <div className="text-sm">
+                                <div className="font-medium">{warehouse.code}</div>
+                                <div className="text-muted-foreground">{warehouse.name}</div>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right">
                             AED {((item.quantity || 0) * (item.unit_price || 0)).toFixed(2)}
                           </TableCell>
@@ -693,7 +720,7 @@ export default function AdminOrderDetails() {
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-4">
+                      <TableCell colSpan={5} className="text-center py-4">
                         No items found in this order
                       </TableCell>
                     </TableRow>
@@ -840,6 +867,35 @@ export default function AdminOrderDetails() {
               </div>
             </CardContent>
             <CardFooter className="flex justify-between border-t p-4">
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      const invoiceUrl = `${import.meta.env.VITE_API_URL || ''}/api/invoices/pos/${order.id}`;
+                      window.open(invoiceUrl, '_blank');
+                    } catch (error) {
+                      toast.error('Failed to open invoice');
+                    }
+                  }}
+                >
+                  <Printer className="h-4 w-4 mr-2" />
+                  Print Invoice
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      await invoicesService.downloadCustomerBill(order.id);
+                    } catch (error) {
+                      toast.error('Failed to download bill');
+                    }
+                  }}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download Bill
+                </Button>
+              </div>
               <Button variant="outline" onClick={() => navigate('/admin/orders')}>
                 Cancel
               </Button>

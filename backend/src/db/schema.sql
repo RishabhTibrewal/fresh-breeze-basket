@@ -65,7 +65,40 @@ CREATE TABLE IF NOT EXISTS public.product_images (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Inventory Table
+-- Warehouses Table
+CREATE TABLE IF NOT EXISTS public.warehouses (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    code VARCHAR(50) UNIQUE NOT NULL,
+    address TEXT,
+    city VARCHAR(100),
+    state VARCHAR(100),
+    country VARCHAR(100),
+    postal_code VARCHAR(20),
+    contact_name VARCHAR(255),
+    contact_phone VARCHAR(50),
+    contact_email VARCHAR(255),
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Warehouse Inventory Table (replaces single stock_count in products)
+CREATE TABLE IF NOT EXISTS public.warehouse_inventory (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    warehouse_id UUID NOT NULL REFERENCES public.warehouses(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
+    stock_count INTEGER DEFAULT 0,
+    reserved_stock INTEGER DEFAULT 0,
+    max_stock INTEGER,
+    location TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(warehouse_id, product_id),
+    CONSTRAINT check_reserved_stock_non_negative CHECK (reserved_stock >= 0)
+);
+
+-- Inventory Table (kept for backward compatibility, renamed to inventory_old in migration)
 CREATE TABLE IF NOT EXISTS public.inventory (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     product_id UUID REFERENCES public.products(id) ON DELETE CASCADE,
@@ -160,6 +193,7 @@ CREATE TABLE IF NOT EXISTS public.order_items (
     product_id UUID REFERENCES public.products(id) ON DELETE SET NULL,
     quantity INTEGER NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
+    warehouse_id UUID REFERENCES public.warehouses(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT positive_quantity CHECK (quantity > 0)
 );
@@ -231,10 +265,7 @@ CREATE TRIGGER update_categories_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column();
 
-CREATE TRIGGER update_inventory_updated_at
-    BEFORE UPDATE ON public.inventory
-    FOR EACH ROW
-    EXECUTE FUNCTION public.update_updated_at_column();
+-- NOTE: update_inventory_updated_at trigger removed - inventory table replaced with warehouse_inventory
 
 CREATE TRIGGER update_addresses_updated_at
     BEFORE UPDATE ON public.addresses
@@ -251,23 +282,9 @@ CREATE TRIGGER update_payments_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column();
 
--- Function to automatically update inventory when orders are placed
-CREATE OR REPLACE FUNCTION public.update_inventory_on_order()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Decrease inventory quantity when an order item is created
-    UPDATE public.inventory
-    SET quantity = quantity - NEW.quantity
-    WHERE product_id = NEW.product_id;
-    
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_inventory_on_order_item
-    AFTER INSERT ON public.order_items
-    FOR EACH ROW
-    EXECUTE FUNCTION public.update_inventory_on_order();
+-- NOTE: update_inventory_on_order trigger removed
+-- Stock management is now handled through warehouse_inventory table
+-- See utils/warehouseInventory.ts for stock reservation logic
 
 -- Function to automatically create order status history entry
 CREATE OR REPLACE FUNCTION public.create_order_status_history()
@@ -558,30 +575,10 @@ CREATE POLICY "Users can create their own payments"
         )
     );
 
--- Function to automatically create or update inventory when products are created or updated
-CREATE OR REPLACE FUNCTION public.sync_inventory_with_product()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Check if inventory record exists for this product
-    IF NOT EXISTS (SELECT 1 FROM public.inventory WHERE product_id = NEW.id) THEN
-        -- Create new inventory record if it doesn't exist
-        INSERT INTO public.inventory (product_id, quantity, low_stock_threshold)
-        VALUES (NEW.id, NEW.stock_count, 10);
-    ELSE
-        -- Update existing inventory record
-        UPDATE public.inventory
-        SET quantity = NEW.stock_count
-        WHERE product_id = NEW.id;
-    END IF;
-    
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER sync_inventory_with_product_trigger
-    AFTER INSERT OR UPDATE ON public.products
-    FOR EACH ROW
-    EXECUTE FUNCTION public.sync_inventory_with_product();
+-- NOTE: The sync_inventory_with_product trigger has been removed
+-- The inventory table was replaced with warehouse_inventory table
+-- Stock management is now handled through warehouse_inventory table
+-- See migrations/create_warehouse_inventory_table.sql for details
 
 -- Cart policies
 CREATE POLICY "Users can view their own cart"

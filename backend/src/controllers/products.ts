@@ -24,6 +24,8 @@ export const getProducts = async (req: Request, res: Response) => {
       query = query.lte('price', maxPrice);
     }
     
+    // Note: stock_count filtering is deprecated - use warehouse_inventory for accurate stock
+    // Keeping this for backward compatibility but it may not reflect accurate multi-warehouse stock
     if (inStock === 'true') {
       query = query.gt('stock_count', 0);
     }
@@ -37,12 +39,13 @@ export const getProducts = async (req: Request, res: Response) => {
       query = query.order('created_at', { ascending: false });
     }
     
-    // Apply pagination
-    const pageSize = parseInt(limit as string) || 10;
-    const pageNumber = parseInt(page as string) || 1;
-    const start = (pageNumber - 1) * pageSize;
-    
-    query = query.range(start, start + pageSize - 1);
+    // Apply pagination only if limit is provided
+    if (limit) {
+      const pageSize = parseInt(limit as string);
+      const pageNumber = parseInt(page as string) || 1;
+      const start = (pageNumber - 1) * pageSize;
+      query = query.range(start, start + pageSize - 1);
+    }
     
     const { data, error, count } = await query;
     
@@ -239,53 +242,73 @@ export const updateProduct = async (req: Request, res: Response) => {
       updated_at: new Date().toISOString()
     };
 
-    // Handle each field only if it's provided in the request
-    if ('name' in req.body) {
+    // Handle each field only if it's provided in the request and has a valid value
+    if ('name' in req.body && req.body.name !== undefined && req.body.name !== null) {
       updateData.name = req.body.name;
     }
-    if ('description' in req.body) {
+    if ('description' in req.body && req.body.description !== undefined) {
       updateData.description = req.body.description;
     }
-    if ('price' in req.body) {
-      updateData.price = parseFloat(req.body.price);
+    if ('price' in req.body && req.body.price !== undefined && req.body.price !== null) {
+      const priceValue = typeof req.body.price === 'number' ? req.body.price : parseFloat(req.body.price);
+      if (!isNaN(priceValue)) {
+        updateData.price = priceValue;
+      }
     }
-    if ('sale_price' in req.body) {
-      updateData.sale_price = req.body.sale_price ? parseFloat(req.body.sale_price) : null;
+    if ('sale_price' in req.body && req.body.sale_price !== undefined) {
+      if (req.body.sale_price === null || req.body.sale_price === '') {
+        updateData.sale_price = null;
+      } else {
+        const salePriceValue = typeof req.body.sale_price === 'number' ? req.body.sale_price : parseFloat(req.body.sale_price);
+        if (!isNaN(salePriceValue)) {
+          updateData.sale_price = salePriceValue;
+        }
+      }
     }
-    if ('stock_count' in req.body) {
-      updateData.stock_count = parseInt(req.body.stock_count);
+    if ('stock_count' in req.body && req.body.stock_count !== undefined && req.body.stock_count !== null) {
+      const stockValue = typeof req.body.stock_count === 'number' ? req.body.stock_count : parseInt(req.body.stock_count);
+      if (!isNaN(stockValue)) {
+        updateData.stock_count = stockValue;
+      }
     }
-    if ('category_id' in req.body) {
-      updateData.category_id = req.body.category_id;
+    if ('category_id' in req.body && req.body.category_id !== undefined) {
+      updateData.category_id = req.body.category_id || null;
     }
-    if ('unit_type' in req.body) {
+    if ('unit_type' in req.body && req.body.unit_type !== undefined && req.body.unit_type !== null) {
       updateData.unit_type = req.body.unit_type;
     }
-    if ('unit' in req.body) {
-      updateData.unit = req.body.unit ? parseFloat(req.body.unit) : null;
+    if ('unit' in req.body && req.body.unit !== undefined) {
+      if (req.body.unit === null || req.body.unit === '') {
+        updateData.unit = null;
+      } else {
+        const unitValue = typeof req.body.unit === 'number' ? req.body.unit : parseFloat(req.body.unit);
+        if (!isNaN(unitValue)) {
+          updateData.unit = unitValue;
+        }
+      }
     }
-    if ('badge' in req.body) {
-      updateData.badge = req.body.badge;
+    if ('badge' in req.body && req.body.badge !== undefined) {
+      updateData.badge = req.body.badge || null;
     }
-    if ('is_featured' in req.body) {
+    if ('is_featured' in req.body && req.body.is_featured !== undefined) {
       updateData.is_featured = Boolean(req.body.is_featured);
     }
-    if ('is_active' in req.body) {
+    if ('is_active' in req.body && req.body.is_active !== undefined) {
       updateData.is_active = Boolean(req.body.is_active);
     }
-    if ('image_url' in req.body) {
-      updateData.image_url = req.body.image_url;
+    if ('image_url' in req.body && req.body.image_url !== undefined) {
+      updateData.image_url = req.body.image_url || null;
     }
-    if ('nutritional_info' in req.body) {
-      updateData.nutritional_info = req.body.nutritional_info;
+    if ('nutritional_info' in req.body && req.body.nutritional_info !== undefined) {
+      updateData.nutritional_info = req.body.nutritional_info || null;
     }
-    if ('origin' in req.body) {
-      updateData.origin = req.body.origin;
+    if ('origin' in req.body && req.body.origin !== undefined) {
+      updateData.origin = req.body.origin || null;
     }
-    if ('best_before' in req.body) {
-      updateData.best_before = req.body.best_before;
+    if ('best_before' in req.body && req.body.best_before !== undefined) {
+      updateData.best_before = req.body.best_before || null;
     }
-    if ('slug' in req.body) {
+    if ('slug' in req.body && req.body.slug !== undefined && req.body.slug !== null) {
       updateData.slug = req.body.slug;
     }
     

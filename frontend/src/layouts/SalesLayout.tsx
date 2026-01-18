@@ -10,6 +10,7 @@ import {
   LogOut,
   BarChart3,
   Target,
+  Store,
 } from 'lucide-react';
 
 const SalesLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -60,6 +61,11 @@ const SalesLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       label: 'Leads',
       path: '/sales/leads',
       icon: <Target className="h-4 w-4 sm:h-5 sm:w-5" />,
+    },
+    {
+      label: 'POS',
+      path: '/sales/pos',
+      icon: <Store className="h-4 w-4 sm:h-5 sm:w-5" />,
     },
   ];
 

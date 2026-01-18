@@ -52,6 +52,15 @@ import inventoryRouter from './routes/inventory';
 import cartRouter from './routes/cart';
 import salesOrderRouter from './routes/orderRoutes';
 import leadsRouter from './routes/leadsRoutes';
+import warehousesRouter from './routes/warehouses';
+import uploadsRouter from './routes/uploads';
+import suppliersRouter from './routes/suppliers';
+import purchaseOrdersRouter from './routes/purchaseOrders';
+import goodsReceiptsRouter from './routes/goodsReceipts';
+import purchaseInvoicesRouter from './routes/purchaseInvoices';
+import supplierPaymentsRouter from './routes/supplierPayments';
+import invoicesRouter from './routes/invoices';
+import posRouter from './routes/pos';
 
 // Initialize Express app
 export const app = express();
@@ -59,10 +68,33 @@ const port = process.env.PORT || 5000;
 const env = process.env.NODE_ENV || 'development';
 
 // Middleware
+const allowedOrigins = process.env.CORS_ORIGIN 
+  ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+  : ['http://localhost:8080', 'http://localhost:3000'];
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      // Return the specific origin (not true) to avoid multiple values in header
+      callback(null, origin);
+    } else {
+      // Allow localhost origins for development
+      if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
+        callback(null, origin);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    }
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
 
 // JSON parsing middleware - exclude webhook route
 app.use((req, res, next) => {
@@ -141,6 +173,15 @@ app.use('/api/customer', customerRoutes);
 app.use('/api/credit-period', creditPeriodRoutes);
 app.use('/api/sales/orders', salesOrderRouter);
 app.use('/api/leads', leadsRouter);
+app.use('/api/warehouses', warehousesRouter);
+app.use('/api/uploads', uploadsRouter);
+app.use('/api/suppliers', suppliersRouter);
+app.use('/api/purchase-orders', purchaseOrdersRouter);
+app.use('/api/goods-receipts', goodsReceiptsRouter);
+app.use('/api/purchase-invoices', purchaseInvoicesRouter);
+app.use('/api/supplier-payments', supplierPaymentsRouter);
+app.use('/api/invoices', invoicesRouter);
+app.use('/api/pos', posRouter);
 
 // Final error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

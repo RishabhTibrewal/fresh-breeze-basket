@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
+import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +32,7 @@ import { ImageUpload } from "@/components/ui/image-upload";
 import { MultiImageUpload } from "@/components/ui/multi-image-upload";
 import { productsService, type Product, type CreateProductInput } from "@/api/products";
 import { categoriesService, type Category } from "@/api/categories";
+import { uploadsService } from "@/api/uploads";
 import { Checkbox } from "@/components/ui/checkbox";
 
 const formSchema = z.object({
@@ -75,8 +77,11 @@ export default function ProductForm() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [imageUrl, setImageUrl] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [additionalImages, setAdditionalImages] = useState<string[]>([]);
+  const [additionalImageFiles, setAdditionalImageFiles] = useState<File[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   const isEditMode = Boolean(id);
 
@@ -222,12 +227,48 @@ export default function ProductForm() {
         productId = created.id;
       }
 
-      // After product is created/updated, add additional images if any
-      if (productId && additionalImages.length > 0) {
+      // Upload main image if file provided
+      if (productId && imageFile) {
         try {
-          await productsService.addAdditionalImages(productId, additionalImages);
+          setIsUploading(true);
+          const uploadResult = await uploadsService.uploadProductImage(productId, imageFile, true);
+          // Update product with the uploaded image URL - only send image_url to avoid validation issues
+          await productsService.update(productId, {
+            name: productData.name,
+            description: productData.description,
+            price: productData.price,
+            sale_price: productData.sale_price,
+            stock_count: productData.stock_count,
+            category_id: productData.category_id,
+            origin: productData.origin,
+            unit: productData.unit,
+            unit_type: productData.unit_type,
+            badge: productData.badge,
+            image_url: uploadResult.url,
+            nutritional_info: productData.nutritional_info,
+            best_before: productData.best_before,
+            is_featured: productData.is_featured,
+            is_active: productData.is_active,
+            slug: productData.slug
+          });
         } catch (imgErr) {
-          toast.error('Product saved, but failed to save additional images.');
+          console.error('Main image upload failed:', imgErr);
+          toast.error('Product saved, but failed to upload main image.');
+        } finally {
+          setIsUploading(false);
+        }
+      }
+
+      // Upload additional images if files provided
+      if (productId && additionalImageFiles.length > 0) {
+        try {
+          setIsUploading(true);
+          await uploadsService.uploadProductImages(productId, additionalImageFiles);
+        } catch (imgErr) {
+          console.error('Additional images upload failed:', imgErr);
+          toast.error('Product saved, but failed to upload additional images.');
+        } finally {
+          setIsUploading(false);
         }
       }
 
@@ -586,16 +627,44 @@ export default function ProductForm() {
                   name="image_url"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Main Image URL</FormLabel>
+                      <FormLabel>Main Image</FormLabel>
                       <FormControl>
-                        <Input 
-                          {...field} 
-                          placeholder="Enter the main image URL"
-                          type="url"
-                        />
+                        <div className="space-y-2">
+                          <Input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                setImageFile(file);
+                                const previewUrl = URL.createObjectURL(file);
+                                setImageUrl(previewUrl);
+                                field.onChange(previewUrl);
+                              }
+                            }}
+                          />
+                          {(field.value || imageUrl) && (
+                            <div className="w-48 h-48 rounded-lg overflow-hidden border">
+                              <img
+                                src={field.value || imageUrl}
+                                alt="Preview"
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                          )}
+                          {!field.value && !imageUrl && product?.image_url && (
+                            <div className="w-48 h-48 rounded-lg overflow-hidden border">
+                              <img
+                                src={product.image_url}
+                                alt={product.name}
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                          )}
+                        </div>
                       </FormControl>
                       <FormDescription>
-                        Enter the URL of the main product image
+                        Upload the main product image (will be compressed automatically)
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -607,52 +676,54 @@ export default function ProductForm() {
                   name="additional_images"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Additional Image URLs</FormLabel>
+                      <FormLabel>Additional Images</FormLabel>
                       <div className="space-y-2">
-                        {field.value.map((url, index) => (
-                          <div key={index} className="flex items-center gap-2">
-                            <Input
-                              type="url"
-                              value={url}
-                              onChange={(e) => {
-                                const newUrls = [...field.value];
-                                newUrls[index] = e.target.value;
-                                field.onChange(newUrls);
-                                setAdditionalImages(newUrls);
-                              }}
-                              placeholder={`Image URL #${index + 1}`}
-                              className="flex-1"
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              onClick={() => {
-                                const newUrls = field.value.filter((_, i) => i !== index);
-                                field.onChange(newUrls);
-                                setAdditionalImages(newUrls);
-                              }}
-                            >
-                              <span>×</span>
-                            </Button>
-                          </div>
-                        ))}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="mt-2"
-                          onClick={() => {
-                            const newUrls = [...field.value, ''];
-                            field.onChange(newUrls);
-                            setAdditionalImages(newUrls);
+                        <Input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={(e) => {
+                            const files = Array.from(e.target.files || []);
+                            if (files.length > 0) {
+                              setAdditionalImageFiles([...additionalImageFiles, ...files]);
+                              const previewUrls = files.map(file => URL.createObjectURL(file));
+                              const newUrls = [...field.value, ...previewUrls];
+                              field.onChange(newUrls);
+                              setAdditionalImages(newUrls);
+                            }
                           }}
-                        >
-                          Add Image URL
-                        </Button>
+                        />
+                        {field.value.length > 0 && (
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                            {field.value.map((url, index) => (
+                              <div key={index} className="relative group">
+                                <img
+                                  src={url}
+                                  alt={`Additional ${index + 1}`}
+                                  className="w-full h-32 object-cover rounded-md border"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="destructive"
+                                  size="icon"
+                                  className="absolute top-1 right-1 opacity-0 group-hover:opacity-100"
+                                  onClick={() => {
+                                    const newUrls = field.value.filter((_, i) => i !== index);
+                                    field.onChange(newUrls);
+                                    setAdditionalImages(newUrls);
+                                    setAdditionalImageFiles(additionalImageFiles.filter((_, i) => i !== index));
+                                  }}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {/* Existing images would be shown here if product has images property */}
                       </div>
                       <FormDescription>
-                        Add additional product images to be displayed in the product gallery.
-                        These will be stored separately in the product_images table.
+                        Upload additional product images (will be compressed automatically)
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -674,13 +745,15 @@ export default function ProductForm() {
                 disabled={
                   createProduct.isPending ||
                   updateProduct.isPending ||
-                  isCategoriesLoading
+                  isCategoriesLoading ||
+                  isUploading ||
+                  isLoading
                 }
               >
-                {createProduct.isPending || updateProduct.isPending ? (
+                {(createProduct.isPending || updateProduct.isPending || isUploading || isLoading) && (
                   <Spinner className="mr-2" />
-                ) : null}
-                {isEditMode ? "Update" : "Create"} Product
+                )}
+                {isUploading ? 'Uploading images...' : isEditMode ? "Update" : "Create"} Product
               </Button>
             </div>
           </form>

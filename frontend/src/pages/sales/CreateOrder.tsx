@@ -43,6 +43,7 @@ import { toast } from "sonner";
 import { customerService } from '@/api/customer';
 import apiClient from '@/lib/apiClient';
 import { addressApi } from '@/api/addresses';
+import { warehousesService } from '@/api/warehouses';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
@@ -55,6 +56,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import CustomerAddressForm from "./CustomerAddressForm";
+import WarehouseStockDisplay from "@/components/products/WarehouseStockDisplay";
 
 // Enhanced schema for the order form with payment method options
 const orderFormSchema = z.object({
@@ -111,6 +113,7 @@ export default function CreateOrder() {
     stock_count?: number;
     unit?: number;
     unit_type?: string;
+    warehouse_id?: string; // Warehouse ID for this item
   }>>([]);
   
   const [totalAmount, setTotalAmount] = useState(0);
@@ -129,7 +132,13 @@ export default function CreateOrder() {
     queryKey: ['products'],
     queryFn: async () => {
       try {
-        const response = await apiClient.get('/products');
+        // Request all products by setting a high limit (or fetch all pages)
+        const response = await apiClient.get('/products', {
+          params: {
+            limit: 1000, // Set high limit to get all products
+            page: 1
+          }
+        });
         console.log('Product API response:', response.data);
         
         // Based on the API response structure, extract the data array
@@ -146,6 +155,23 @@ export default function CreateOrder() {
         return [];
       }
     },
+  });
+
+  // Fetch all product stocks at once to avoid multiple API calls
+  const { data: bulkStockData = {} } = useQuery({
+    queryKey: ['bulk-product-stock', products.map(p => p.id).join(',')],
+    queryFn: () => {
+      if (products.length === 0) return {};
+      return warehousesService.getBulkProductStock(products.map(p => p.id));
+    },
+    enabled: products.length > 0,
+    staleTime: 30000, // Cache for 30 seconds
+  });
+
+  // Get warehouses for order items
+  const { data: warehouses = [], isLoading: warehousesLoading } = useQuery({
+    queryKey: ['warehouses'],
+    queryFn: () => warehousesService.getAll(true), // Only get active warehouses
   });
   
   // Get customer addresses
@@ -305,6 +331,9 @@ export default function CreateOrder() {
       console.log('Updated existing item quantity', newItems[existingIndex]);
     } else {
       // Add new product to the order
+      // Set default warehouse (first active warehouse or null)
+      const defaultWarehouseId = warehouses.length > 0 ? warehouses[0].id : undefined;
+      
       const newItem = {
         product_id: product.id,
         product_name: product.name,
@@ -318,12 +347,20 @@ export default function CreateOrder() {
         origin: product.origin,
         stock_count: product.stock_count,
         unit: product.unit || 1,
-        unit_type: product.unit_type || 'piece'
+        unit_type: product.unit_type || 'piece',
+        warehouse_id: defaultWarehouseId
       };
       
       setItems([...items, newItem]);
       console.log('Added new item to order:', newItem);
     }
+  };
+
+  // Update warehouse for an item
+  const updateWarehouse = (index: number, warehouseId: string) => {
+    const newItems = [...items];
+    newItems[index].warehouse_id = warehouseId;
+    setItems(newItems);
   };
   
   // Update item quantity
@@ -471,10 +508,11 @@ export default function CreateOrder() {
       return;
     }
     
-    // Ensure all items have the price field set correctly
+    // Ensure all items have the price field set correctly and include warehouse_id
     const processedItems = items.map(item => ({
       ...item,
-      price: item.unit_price
+      price: item.unit_price,
+      warehouse_id: item.warehouse_id // Include warehouse_id for each item
     }));
     
     createOrderMutation.mutate({
@@ -607,7 +645,15 @@ export default function CreateOrder() {
                                       </span>
                                     </div>
                                     <div className="flex justify-between items-center mt-1 gap-2">
-                                      <span className="text-xs">Stock: {product.stock_count || 'N/A'}</span>
+                                      <div className="text-xs">
+                                        Stock:{' '}
+                                        <WarehouseStockDisplay
+                                          productId={product.id}
+                                          totalStock={product.stock_count}
+                                          compact={true}
+                                          bulkStockData={bulkStockData[product.id]}
+                                        />
+                                      </div>
                                       <span className="text-xs px-1.5 sm:px-2 py-0.5 bg-primary/10 text-primary rounded-full whitespace-nowrap">
                                         Click to add
                                       </span>
@@ -686,6 +732,28 @@ export default function CreateOrder() {
                                     </div>
                                   </div>
                                   <div className="min-w-0">
+                                    <label className="text-muted-foreground">Warehouse:</label>
+                                    {warehousesLoading ? (
+                                      <div className="text-xs text-muted-foreground mt-1">Loading...</div>
+                                    ) : (
+                                      <Select
+                                        value={item.warehouse_id || ''}
+                                        onValueChange={(value) => updateWarehouse(index, value)}
+                                      >
+                                        <SelectTrigger className="h-8 text-xs mt-1">
+                                          <SelectValue placeholder="Select warehouse" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {warehouses.map((warehouse) => (
+                                            <SelectItem key={warehouse.id} value={warehouse.id} className="text-xs">
+                                              {warehouse.code} - {warehouse.name}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
                                     <label className="text-muted-foreground">Unit Price:</label>
                                     <Input
                                       type="number"
@@ -726,8 +794,9 @@ export default function CreateOrder() {
                                 <TableHead className="px-2 w-12">Image</TableHead>
                                 <TableHead className="px-2">Product</TableHead>
                                 <TableHead className="px-2">Origin</TableHead>
-                                <TableHead className="px-2">Stock</TableHead>
+                                <TableHead className="px-2 min-w-[100px]">Stock</TableHead>
                                 <TableHead className="px-2 w-24">Quantity</TableHead>
+                                <TableHead className="px-2 w-32">Warehouse</TableHead>
                                 <TableHead className="px-2 w-32">Original Price</TableHead>
                                 <TableHead className="px-2 w-32">Discount %</TableHead>
                                 <TableHead className="px-2 w-32">Unit Price</TableHead>
@@ -758,7 +827,18 @@ export default function CreateOrder() {
                                       <div className="truncate" title={item.product_name}>{item.product_name}</div>
                                     </TableCell>
                                     <TableCell className="px-2 py-2 text-sm">{item.origin || 'N/A'}</TableCell>
-                                    <TableCell className="px-2 py-2 text-sm">{item.stock_count || 'N/A'}</TableCell>
+                                    <TableCell className="px-2 py-2 text-sm">
+                                      {item.warehouse_id ? (
+                                        <WarehouseStockDisplay
+                                          productId={item.product_id}
+                                          totalStock={item.stock_count}
+                                          compact={true}
+                                          bulkStockData={bulkStockData[item.product_id]}
+                                        />
+                                      ) : (
+                                        item.stock_count || 'N/A'
+                                      )}
+                                    </TableCell>
                                     <TableCell className="px-2 py-2">
                                       <Input
                                         type="number"
@@ -767,6 +847,27 @@ export default function CreateOrder() {
                                         onChange={(e) => updateQuantity(index, parseInt(e.target.value) || 1)}
                                         className="w-16 h-8 text-sm"
                                       />
+                                    </TableCell>
+                                    <TableCell className="px-2 py-2">
+                                      {warehousesLoading ? (
+                                        <div className="text-xs text-muted-foreground">Loading...</div>
+                                      ) : (
+                                        <Select
+                                          value={item.warehouse_id || ''}
+                                          onValueChange={(value) => updateWarehouse(index, value)}
+                                        >
+                                          <SelectTrigger className="w-32 h-8 text-xs">
+                                            <SelectValue placeholder="Select warehouse" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {warehouses.map((warehouse) => (
+                                              <SelectItem key={warehouse.id} value={warehouse.id} className="text-xs">
+                                                {warehouse.code} - {warehouse.name}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      )}
                                     </TableCell>
                                     <TableCell className="px-2 py-2">
                                       <div className="text-sm">
@@ -820,7 +921,7 @@ export default function CreateOrder() {
                                   
                                   {items.length > 0 && (
                                     <TableRow>
-                                  <TableCell colSpan={8} className="text-right font-medium px-2 py-2 text-sm">
+                                  <TableCell colSpan={9} className="text-right font-medium px-2 py-2 text-sm">
                                         Total:
                                       </TableCell>
                                   <TableCell className="font-bold px-2 py-2 text-sm sm:text-base">
