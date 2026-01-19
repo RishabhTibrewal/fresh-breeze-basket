@@ -239,7 +239,7 @@ export default function AdminOrderList() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    AED {typeof order.total_amount === 'number' 
+                  ₹ {typeof order.total_amount === 'number' 
                       ? order.total_amount.toFixed(2) 
                       : '0.00'
                     }

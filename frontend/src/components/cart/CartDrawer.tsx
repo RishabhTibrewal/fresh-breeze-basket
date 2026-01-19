@@ -75,15 +75,15 @@ const CartDrawer = () => {
                         {item.sale_price ? (
                           <>
                             <span className="font-semibold text-red-500">
-                              AED {item.sale_price.toFixed(2)}
+                            ₹ {item.sale_price.toFixed(2)}
                             </span>
                             <span className="text-gray-500 line-through ml-1 text-xs">
-                              AED {item.price.toFixed(2)}
+                            ₹ {item.price.toFixed(2)}
                             </span>
                           </>
                         ) : (
                           <span className="font-semibold">
-                            AED {item.price.toFixed(2)}
+                            ₹ {item.price.toFixed(2)}
                           </span>
                         )}
                         <span className="text-gray-500 ml-1">/{item.unit} {item.unit_type}</span>
@@ -127,7 +127,7 @@ const CartDrawer = () => {
               <div className="space-y-2 mb-4">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Subtotal</span>
-                  <span className="font-semibold">AED {state.subtotal.toFixed(2)}</span>
+                  <span className="font-semibold">₹ {state.subtotal.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-sm text-gray-500">
                   <span>Shipping</span>

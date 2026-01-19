@@ -166,7 +166,7 @@ const OrderCard = React.memo(({
           </div>
           <div>
             <div className="text-sm font-medium mb-1">Total:</div>
-            <div className="text-sm">AED {order.total_amount.toFixed(2)}</div>
+            <div className="text-sm">₹ {order.total_amount.toFixed(2)}</div>
           </div>
           
           {canBeCancelled && (

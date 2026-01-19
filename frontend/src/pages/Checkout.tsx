@@ -343,17 +343,17 @@ export default function CheckoutPage() {
                             <div className="text-sm text-gray-500">
                               {item.quantity} x {item.sale_price ? (
                                 <>
-                                  <span className="text-red-500">AED {item.sale_price.toFixed(2)}</span>
-                                  <span className="line-through ml-1 text-gray-400">AED {item.price.toFixed(2)}</span>
+                                  <span className="text-red-500">₹ {item.sale_price.toFixed(2)}</span>
+                                  <span className="line-through ml-1 text-gray-400">₹ {item.price.toFixed(2)}</span>
                                 </>
                               ) : (
-                                <span>AED {item.price.toFixed(2)}</span>
+                                <span>₹ {item.price.toFixed(2)}</span>
                               )}
                               <span className="ml-1">/{item.unit} {item.unit_type}</span>
                             </div>
                           </div>
                           <div className="text-right font-medium">
-                            AED {((item.sale_price || item.price) * item.quantity).toFixed(2)}
+                            ₹ {((item.sale_price || item.price) * item.quantity).toFixed(2)}
                           </div>
                         </div>
                       ))}
@@ -365,22 +365,22 @@ export default function CheckoutPage() {
                     <div className="space-y-2">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Subtotal</span>
-                        <span className="font-medium">AED {subtotal.toFixed(2)}</span>
+                        <span className="font-medium">₹ {subtotal.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Shipping</span>
                         <span className="font-medium">
-                          {shippingCost === 0 ? "Free" : `AED ${shippingCost.toFixed(2)}`}
+                          {shippingCost === 0 ? "Free" : `₹ ${shippingCost.toFixed(2)}`}
                         </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Tax (5%)</span>
-                        <span className="font-medium">AED {taxAmount.toFixed(2)}</span>
+                        <span className="font-medium">₹ {taxAmount.toFixed(2)}</span>
                       </div>
                       <Separator />
                       <div className="flex justify-between text-lg font-bold">
                         <span>Total</span>
-                        <span>AED {totalAmount.toFixed(2)}</span>
+                        <span>₹ {totalAmount.toFixed(2)}</span>
                       </div>
                     </div>
 
@@ -525,17 +525,17 @@ export default function CheckoutPage() {
                           <div className="text-sm text-gray-500">
                             {item.quantity} x {item.sale_price ? (
                               <>
-                                <span className="text-red-500">AED {item.sale_price.toFixed(2)}</span>
-                                <span className="line-through ml-1 text-gray-400">AED {item.price.toFixed(2)}</span>
+                                <span className="text-red-500">₹ {item.sale_price.toFixed(2)}</span>
+                                <span className="line-through ml-1 text-gray-400">₹ {item.price.toFixed(2)}</span>
                               </>
                             ) : (
-                              <span>AED {item.price.toFixed(2)}</span>
+                              <span>₹ {item.price.toFixed(2)}</span>
                             )}
                             <span className="ml-1">/{item.unit} {item.unit_type}</span>
                           </div>
                         </div>
                         <div className="text-right font-medium">
-                          AED {((item.sale_price || item.price) * item.quantity).toFixed(2)}
+                          ₹ {((item.sale_price || item.price) * item.quantity).toFixed(2)}
                         </div>
                       </div>
                     ))}
@@ -547,22 +547,22 @@ export default function CheckoutPage() {
                   <div className="space-y-2">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Subtotal</span>
-                      <span className="font-medium">AED {subtotal.toFixed(2)}</span>
+                      <span className="font-medium">₹ {subtotal.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Shipping</span>
                       <span className="font-medium">
-                        {shippingCost === 0 ? "Free" : `AED ${shippingCost.toFixed(2)}`}
+                        {shippingCost === 0 ? "Free" : `₹ ${shippingCost.toFixed(2)}`}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Tax (5%)</span>
-                      <span className="font-medium">AED {taxAmount.toFixed(2)}</span>
+                      <span className="font-medium">₹ {taxAmount.toFixed(2)}</span>
                     </div>
                     <Separator />
                     <div className="flex justify-between text-lg font-bold">
                       <span>Total</span>
-                      <span>AED {totalAmount.toFixed(2)}</span>
+                      <span>₹ {totalAmount.toFixed(2)}</span>
                     </div>
                   </div>
 

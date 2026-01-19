@@ -32,8 +32,20 @@ export const updateWarehouseStock = async (
 ): Promise<number> => {
   const client = useAdminClient && supabaseAdmin ? supabaseAdmin : supabase;
 
-  // Get current stock
-  const currentStock = await getWarehouseStock(productId, warehouseId);
+  // Get current stock using the same client to avoid RLS issues
+  const { data: currentData, error: currentError } = await client
+    .from('warehouse_inventory')
+    .select('stock_count')
+    .eq('product_id', productId)
+    .eq('warehouse_id', warehouseId)
+    .maybeSingle();
+
+  if (currentError) {
+    console.error(`Error fetching warehouse stock for product ${productId} in warehouse ${warehouseId}:`, currentError);
+    throw currentError;
+  }
+
+  const currentStock = currentData?.stock_count || 0;
   const newStockCount = allowNegative 
     ? currentStock + quantityChange 
     : Math.max(0, currentStock + quantityChange);

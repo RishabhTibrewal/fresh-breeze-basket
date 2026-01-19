@@ -452,12 +452,12 @@ export default function Customers() {
                               <div className="min-w-0">
                                 <h3 className="font-semibold mb-2 text-sm sm:text-base">Credit Information</h3>
                                 <p>Credit Period: {selectedCustomer.credit_period_days || 0} days</p>
-                                <p>Credit Limit: ${(selectedCustomer.credit_limit || 0).toFixed(2)}</p>
-                                <p>Current Credit: ${(selectedCustomer.current_credit || 0).toFixed(2)}</p>
+                                <p>Credit Limit: ₹{(selectedCustomer.credit_limit || 0).toFixed(2)}</p>
+                                <p>Current Credit: ₹{(selectedCustomer.current_credit || 0).toFixed(2)}</p>
                                 {selectedCustomer.active_credit && (
                                   <div className="mt-2">
                                     <h4 className="font-medium text-primary text-sm">Active Credit</h4>
-                                    <p>Amount: ${selectedCustomer.active_credit.amount.toFixed(2)}</p>
+                                    <p>Amount: ₹{selectedCustomer.active_credit.amount.toFixed(2)}</p>
                                     <p>Period: {selectedCustomer.active_credit.period} days</p>
                                     <p>Start Date: {new Date(selectedCustomer.active_credit.start_date).toLocaleDateString()}</p>
                                     <p>Due Date: {new Date(selectedCustomer.active_credit.end_date).toLocaleDateString()}</p>
@@ -481,7 +481,7 @@ export default function Customers() {
                               <div className="min-w-0">
                                 <h3 className="font-semibold mb-2 text-sm sm:text-base">Order Statistics</h3>
                                 <p>Total Orders: {selectedCustomer.totalOrders || 0}</p>
-                                <p>Total Spent: ${(selectedCustomer.totalSpent || 0).toFixed(2)}</p>
+                                <p>Total Spent: ₹{(selectedCustomer.totalSpent || 0).toFixed(2)}</p>
                                 <p>Last Order: {selectedCustomer.lastOrder || 'Never'}</p>
                               </div>
                             </div>
@@ -703,7 +703,7 @@ export default function Customers() {
                         <div className="truncate" title={customer.phone}>{customer.phone}</div>
                       </TableCell>
                       <TableCell className="px-2 py-2 text-sm">{customer.totalOrders || 0}</TableCell>
-                      <TableCell className="px-2 py-2 text-sm font-medium">${(customer.totalSpent || 0).toFixed(2)}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm font-medium">₹{(customer.totalSpent || 0).toFixed(2)}</TableCell>
                       <TableCell className="px-2 py-2 text-sm min-w-0">
                         <div className="truncate" title={customer.lastOrder || 'Never'}>{customer.lastOrder || 'Never'}</div>
                       </TableCell>
@@ -738,12 +738,12 @@ export default function Customers() {
                                   <div className="min-w-0">
                                     <h3 className="font-semibold mb-2 text-sm sm:text-base">Credit Information</h3>
                                     <p>Credit Period: {selectedCustomer.credit_period_days || 0} days</p>
-                                    <p>Credit Limit: ${(selectedCustomer.credit_limit || 0).toFixed(2)}</p>
-                                    <p>Current Credit: ${(selectedCustomer.current_credit || 0).toFixed(2)}</p>
+                                    <p>Credit Limit: ₹{(selectedCustomer.credit_limit || 0).toFixed(2)}</p>
+                                    <p>Current Credit: ₹{(selectedCustomer.current_credit || 0).toFixed(2)}</p>
                                     {selectedCustomer.active_credit && (
                                       <div className="mt-2">
                                         <h4 className="font-medium text-primary text-sm">Active Credit</h4>
-                                        <p>Amount: ${selectedCustomer.active_credit.amount.toFixed(2)}</p>
+                                        <p>Amount: ₹{selectedCustomer.active_credit.amount.toFixed(2)}</p>
                                         <p>Period: {selectedCustomer.active_credit.period} days</p>
                                         <p>Start Date: {new Date(selectedCustomer.active_credit.start_date).toLocaleDateString()}</p>
                                         <p>Due Date: {new Date(selectedCustomer.active_credit.end_date).toLocaleDateString()}</p>
@@ -755,7 +755,7 @@ export default function Customers() {
                                         <div className="space-y-1">
                                           {selectedCustomer.credit_periods.slice(0, 3).map((period) => (
                                             <div key={period.id} className="text-xs">
-                                              <p>Amount: ${period.amount.toFixed(2)} ({period.type})</p>
+                                              <p>Amount: ₹{period.amount.toFixed(2)} ({period.type})</p>
                                               <p>Period: {period.period} days</p>
                                               <p>Date: {new Date(period.created_at).toLocaleDateString()}</p>
                                             </div>
@@ -767,7 +767,7 @@ export default function Customers() {
                                   <div className="min-w-0">
                                     <h3 className="font-semibold mb-2 text-sm sm:text-base">Order Statistics</h3>
                                     <p>Total Orders: {selectedCustomer.totalOrders || 0}</p>
-                                    <p>Total Spent: ${(selectedCustomer.totalSpent || 0).toFixed(2)}</p>
+                                    <p>Total Spent: ₹{(selectedCustomer.totalSpent || 0).toFixed(2)}</p>
                                     <p>Last Order: {selectedCustomer.lastOrder || 'Never'}</p>
                                   </div>
                                 </div>

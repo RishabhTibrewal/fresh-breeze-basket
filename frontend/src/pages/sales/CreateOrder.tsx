@@ -457,7 +457,7 @@ export default function CreateOrder() {
           type: 'credit',
           description: data.payment_status === 'full_credit' 
             ? `Credit for order - Full Credit` 
-            : `Credit for order - Partial Payment (Paid: AED ${partialPaymentAmount.toFixed(2)}, Credit: AED ${creditAmount.toFixed(2)})`
+            : `Credit for order - Partial Payment (Paid: ₹ ${partialPaymentAmount.toFixed(2)}, Credit: ₹ ${creditAmount.toFixed(2)})`
         };
       }
       
@@ -629,15 +629,15 @@ export default function CreateOrder() {
                                       {product.sale_price ? (
                                         <>
                                           <span className="font-medium text-green-600 text-xs sm:text-sm">
-                                            ${product.sale_price.toFixed(2)}
+                                            ₹ {product.sale_price.toFixed(2)}
                                           </span>
                                           <span className="text-xs line-through text-muted-foreground">
-                                            ${product.price.toFixed(2)}
+                                            ₹ {product.price.toFixed(2)}
                                           </span>
                                         </>
                                       ) : (
                                         <span className="font-medium text-xs sm:text-sm">
-                                          ${product.price.toFixed(2)}
+                                          ₹ {product.price.toFixed(2)}
                                         </span>
                                       )}
                                       <span className="text-xs text-muted-foreground">
@@ -692,7 +692,7 @@ export default function CreateOrder() {
                                       {item.origin || 'N/A'} • Stock: {item.stock_count || 'N/A'}
                                     </div>
                                     <div className="text-base font-bold text-green-600 mb-2">
-                                      ${item.subtotal.toFixed(2)}
+                                      ₹ {item.subtotal.toFixed(2)}
                                     </div>
                                   </div>
                                   <Button 
@@ -765,12 +765,12 @@ export default function CreateOrder() {
                                     />
                                     {item.unit_price < item.original_price && (
                                       <div className="text-xs text-green-600 mt-1">
-                                        Save: ${((item.original_price - item.unit_price) * item.quantity).toFixed(2)}
+                                        Save: ₹ {((item.original_price - item.unit_price) * item.quantity).toFixed(2)}
                                       </div>
                                     )}
                                   </div>
                                   <div className="text-xs text-muted-foreground">
-                                    Original: ${item.original_price.toFixed(2)} per {item.unit || 1} {item.unit_type || 'piece'}
+                                    Original: ₹ {item.original_price.toFixed(2)} per {item.unit || 1} {item.unit_type || 'piece'}
                                   </div>
                                 </div>
                               </div>
@@ -780,7 +780,7 @@ export default function CreateOrder() {
                         {items.length > 0 && (
                           <div className="flex justify-between items-center p-3 bg-muted/50 rounded-md">
                             <span className="font-medium text-sm sm:text-base">Total:</span>
-                            <span className="font-bold text-base sm:text-lg">${totalAmount.toFixed(2)}</span>
+                            <span className="font-bold text-base sm:text-lg">₹ {totalAmount.toFixed(2)}</span>
                           </div>
                         )}
                       </div>
@@ -871,7 +871,7 @@ export default function CreateOrder() {
                                     </TableCell>
                                     <TableCell className="px-2 py-2">
                                       <div className="text-sm">
-                                        ${item.original_price.toFixed(2)}
+                                        ₹ {item.original_price.toFixed(2)}
                                       <div className="text-xs text-muted-foreground">
                                         per {item.unit || 1} {item.unit_type || 'piece'}
                                         </div>
@@ -900,11 +900,11 @@ export default function CreateOrder() {
                                       />
                                       {item.unit_price < item.original_price && (
                                         <div className="text-xs text-green-600 mt-1">
-                                          Save: ${((item.original_price - item.unit_price) * item.quantity).toFixed(2)}
+                                          Save: ₹ {((item.original_price - item.unit_price) * item.quantity).toFixed(2)}
                                         </div>
                                       )}
                                     </TableCell>
-                                    <TableCell className="px-2 py-2 font-medium text-sm">${item.subtotal.toFixed(2)}</TableCell>
+                                    <TableCell className="px-2 py-2 font-medium text-sm">₹ {item.subtotal.toFixed(2)}</TableCell>
                                     <TableCell className="px-2 py-2">
                                       <Button 
                                         variant="ghost" 
@@ -925,7 +925,7 @@ export default function CreateOrder() {
                                         Total:
                                       </TableCell>
                                   <TableCell className="font-bold px-2 py-2 text-sm sm:text-base">
-                                        ${totalAmount.toFixed(2)}
+                                        ₹ {totalAmount.toFixed(2)}
                                       </TableCell>
                                   <TableCell className="px-2 py-2"></TableCell>
                                     </TableRow>
@@ -1132,7 +1132,7 @@ export default function CreateOrder() {
                                       />
                           </FormControl>
                                   <FormDescription className="text-xs sm:text-sm">
-                                      Enter the amount to be paid now. Remaining ${(totalAmount - (field.value || 0)).toFixed(2)} will be on credit.
+                                      Enter the amount to be paid now. Remaining ₹ {(totalAmount - (field.value || 0)).toFixed(2)} will be on credit.
                                     </FormDescription>
                                   <FormMessage className="text-xs" />
                         </FormItem>
@@ -1204,18 +1204,18 @@ export default function CreateOrder() {
                               </div>
                               <div className="flex justify-between font-medium">
                                 <span>Total Amount:</span>
-                                <span>${totalAmount.toFixed(2)}</span>
+                                <span>₹ {totalAmount.toFixed(2)}</span>
                               </div>
                               
                               {paymentStatus === 'partial_payment' && (
                                 <>
                                   <div className="flex justify-between">
                                     <span>Paying Now:</span>
-                                    <span>${form.getValues('partial_payment_amount')?.toFixed(2) || '0.00'}</span>
+                                    <span>₹ {form.getValues('partial_payment_amount')?.toFixed(2) || '0.00'}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span>On Credit:</span>
-                                    <span>${(totalAmount - (form.getValues('partial_payment_amount') || 0)).toFixed(2)}</span>
+                                    <span>₹ {(totalAmount - (form.getValues('partial_payment_amount') || 0)).toFixed(2)}</span>
                                   </div>
                                 </>
                               )}
@@ -1228,7 +1228,7 @@ export default function CreateOrder() {
                               {paymentStatus === 'full_credit' && (
                                 <div className="flex justify-between">
                                   <span>On Credit:</span>
-                                  <span>${totalAmount.toFixed(2)}</span>
+                                  <span>₹ {totalAmount.toFixed(2)}</span>
                                 </div>
                               )}
                               

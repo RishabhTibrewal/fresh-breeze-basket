@@ -84,13 +84,13 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           <div className="flex items-baseline mb-2">
             {product.sale_price ? (
               <>
-                <span className="text-accent-sale font-bold text-sm sm:text-base">AED {product.sale_price.toFixed(2)}</span>
-                <span className="ml-1.5 text-gray-500 line-through text-xs">AED {product.price.toFixed(2)}</span>
+                <span className="text-accent-sale font-bold text-sm sm:text-base">₹ {product.sale_price.toFixed(2)}</span>
+                <span className="ml-1.5 text-gray-500 line-through text-xs">₹ {product.price.toFixed(2)}</span>
                 <span className="ml-1 text-xs text-gray-600">/{product.unit_type}</span>
               </>
             ) : (
               <>
-                <span className="font-bold text-sm sm:text-base">AED {product.price.toFixed(2)}</span>
+                <span className="font-bold text-sm sm:text-base">₹ {product.price.toFixed(2)}</span>
                 <span className="ml-1 text-xs text-gray-600">/{product.unit_type}</span>
               </>
             )}

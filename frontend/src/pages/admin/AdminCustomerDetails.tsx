@@ -306,14 +306,14 @@ export default function AdminCustomerDetails() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <div className="min-w-0">
                       <p className="text-xs sm:text-sm text-muted-foreground">Credit Limit</p>
-                      <p className="font-medium text-sm sm:text-base">AED {customer.credit_limit?.toFixed(2) || '0.00'}</p>
+                      <p className="font-medium text-sm sm:text-base">₹ {customer.credit_limit?.toFixed(2) || '0.00'}</p>
                     </div>
                     <div className="min-w-0">
                       <p className="text-xs sm:text-sm text-muted-foreground">Current Credit</p>
                       <p className={`font-medium text-sm sm:text-base ${
                         customer.current_credit > 0 ? 'text-orange-600' : 'text-green-600'
                       }`}>
-                        AED {customer.current_credit?.toFixed(2) || '0.00'}
+                        ₹ {customer.current_credit?.toFixed(2) || '0.00'}
                       </p>
                     </div>
                   </div>
@@ -329,7 +329,7 @@ export default function AdminCustomerDetails() {
                       <p className={`font-medium text-sm sm:text-base ${
                         (customer.credit_limit - customer.current_credit) < 0 ? 'text-red-600' : 'text-green-600'
                       }`}>
-                        AED {Math.max(0, customer.credit_limit - customer.current_credit).toFixed(2)}
+                        ₹ {Math.max(0, customer.credit_limit - customer.current_credit).toFixed(2)}
                       </p>
                     </div>
                   )}
@@ -353,7 +353,7 @@ export default function AdminCustomerDetails() {
                   
                   <div className="min-w-0">
                     <p className="text-xs sm:text-sm text-muted-foreground">Total Spent</p>
-                    <p className="font-medium text-base sm:text-lg">AED {customer.totalSpent?.toFixed(2) || '0.00'}</p>
+                    <p className="font-medium text-base sm:text-lg">₹ {customer.totalSpent?.toFixed(2) || '0.00'}</p>
                   </div>
                   
                   {customer.lastOrder && (
@@ -440,7 +440,7 @@ export default function AdminCustomerDetails() {
                                 <div className={`text-base font-semibold mb-1 ${
                                   period.amount > 0 ? 'text-orange-600' : 'text-green-600'
                                 }`}>
-                                  AED {period.amount?.toFixed(2) || '0.00'}
+                                  ₹ {period.amount?.toFixed(2) || '0.00'}
                                 </div>
                               </div>
                             </div>
@@ -517,7 +517,7 @@ export default function AdminCustomerDetails() {
                                 <span className={`font-medium text-xs sm:text-sm ${
                                   period.amount > 0 ? 'text-orange-600' : 'text-green-600'
                                 }`}>
-                                  AED {period.amount?.toFixed(2) || '0.00'}
+                                  ₹ {period.amount?.toFixed(2) || '0.00'}
                                 </span>
                               </TableCell>
                               <TableCell className={`px-2 py-2 text-xs sm:text-sm ${isExpired ? 'text-red-700' : ''}`}>
@@ -591,7 +591,7 @@ export default function AdminCustomerDetails() {
                                   Order #{order.id.split('-')[0]}
                                 </div>
                                 <div className="text-base font-bold text-green-600 mb-2">
-                                  AED {order.total_amount?.toFixed(2) || '0.00'}
+                                  ₹ {order.total_amount?.toFixed(2) || '0.00'}
                                 </div>
                               </div>
                               <div className="flex flex-col gap-1.5 flex-shrink-0">
@@ -644,7 +644,7 @@ export default function AdminCustomerDetails() {
                               </TableCell>
                               <TableCell className="px-2 py-2">
                                 <span className="font-medium text-xs sm:text-sm">
-                                  AED {order.total_amount?.toFixed(2) || '0.00'}
+                                  ₹ {order.total_amount?.toFixed(2) || '0.00'}
                                 </span>
                               </TableCell>
                               <TableCell className="px-2 py-2">

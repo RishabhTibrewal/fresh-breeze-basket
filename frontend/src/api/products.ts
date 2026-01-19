@@ -61,6 +61,7 @@ export interface CreateProductInput {
   sale_price: string | null;
   stock_count: string;
   category_id: string | null;
+  warehouse_id?: string | null;
   origin: string | null;
   unit: string;
   unit_type: string;
@@ -149,6 +150,7 @@ export const productsService = {
       sale_price: productData.sale_price,
       stock_count: productData.stock_count,
       category_id: productData.category_id,
+      warehouse_id: productData.warehouse_id,
       unit_type: productData.unit_type,
       unit: productData.unit,
       image_url: productData.image_url,

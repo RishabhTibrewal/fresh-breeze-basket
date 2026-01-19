@@ -36,7 +36,7 @@ const FAQ = () => {
     },
     {
       question: "What payment methods do you accept?",
-      answer: "We accept all major credit cards, Apple Pay, Google Pay, and cash on delivery for orders under AED 500."
+      answer: "We accept all major credit cards, Apple Pay, Google Pay, and cash on delivery for orders under ₹ 500."
     },
     {
       question: "Are your products organic?",

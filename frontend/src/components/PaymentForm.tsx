@@ -189,7 +189,7 @@ export const PaymentForm = ({ amount, clientSecret, onSuccess, onFailure }: Paym
             Processing...
           </>
         ) : (
-          `Pay AED ${amount.toFixed(2)}`
+          `Pay ₹ ${amount.toFixed(2)}`
         )}
       </Button>
       

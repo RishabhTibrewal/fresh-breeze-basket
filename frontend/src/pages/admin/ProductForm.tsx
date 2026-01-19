@@ -32,6 +32,7 @@ import { ImageUpload } from "@/components/ui/image-upload";
 import { MultiImageUpload } from "@/components/ui/multi-image-upload";
 import { productsService, type Product, type CreateProductInput } from "@/api/products";
 import { categoriesService, type Category } from "@/api/categories";
+import { warehousesService, type Warehouse } from "@/api/warehouses";
 import { uploadsService } from "@/api/uploads";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -48,6 +49,7 @@ const formSchema = z.object({
     message: "Stock must be a valid number greater than or equal to 0",
   }),
   category_id: z.string(),
+  warehouse_id: z.string().optional(),
   origin: z.string(),
   unit: z.string().refine((val) => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, {
     message: "Unit must be a valid number greater than or equal to 0",
@@ -94,6 +96,7 @@ export default function ProductForm() {
       sale_price: undefined,
       stock_count: "",
       category_id: "",
+      warehouse_id: "",
       origin: "",
       unit: "",
       unit_type: "",
@@ -110,6 +113,11 @@ export default function ProductForm() {
   const { data: categories, isLoading: isCategoriesLoading } = useQuery<Category[]>({
     queryKey: ["categories"],
     queryFn: categoriesService.getAll,
+  });
+
+  const { data: warehouses = [], isLoading: warehousesLoading } = useQuery<Warehouse[]>({
+    queryKey: ["warehouses"],
+    queryFn: () => warehousesService.getAll(true),
   });
 
   const { data: product, isLoading: isProductLoading } = useQuery<Product>({
@@ -172,6 +180,7 @@ export default function ProductForm() {
         sale_price: product.sale_price?.toString(),
         stock_count: product.stock_count.toString(),
         category_id: product.category_id || "",
+        warehouse_id: "",
         origin: product.origin,
         unit: product.unit.toString(),
         unit_type: product.unit_type,
@@ -215,6 +224,12 @@ export default function ProductForm() {
         ? (isEditMode && product?.image_url ? product.image_url : null) // Keep existing URL if editing, null if creating
         : (data.image_url && !data.image_url.startsWith('blob:') ? data.image_url : null); // Only use non-blob URLs
 
+      if (!isEditMode && !data.warehouse_id) {
+        toast.error("Please select a warehouse for initial stock");
+        setIsLoading(false);
+        return;
+      }
+
       const productData: CreateProductInput = {
         name: data.name,
         description: data.description || null,
@@ -222,6 +237,7 @@ export default function ProductForm() {
         sale_price: data.sale_price || null,
         stock_count: data.stock_count,
         category_id: data.category_id || null,
+        warehouse_id: data.warehouse_id || null,
         origin: data.origin || null,
         unit: data.unit,
         unit_type: data.unit_type,
@@ -398,7 +414,7 @@ export default function ProductForm() {
                     name="price"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Price (AED)</FormLabel>
+                        <FormLabel>Price (₹)</FormLabel>
                         <FormControl>
                           <Input 
                             {...field} 
@@ -469,6 +485,46 @@ export default function ProductForm() {
                         </Select>
                         <FormDescription>
                           Choose a category for your product
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="warehouse_id"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Default Warehouse</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                          value={field.value}
+                          disabled={warehousesLoading}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              {warehousesLoading ? (
+                                <div className="flex items-center gap-2">
+                                  <Spinner className="h-4 w-4" />
+                                  <span>Loading warehouses...</span>
+                                </div>
+                              ) : (
+                                <SelectValue placeholder="Select warehouse" />
+                              )}
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {warehouses.map((warehouse) => (
+                              <SelectItem key={warehouse.id} value={warehouse.id}>
+                                {warehouse.code} - {warehouse.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>
+                          Initial stock will be added to this warehouse
                         </FormDescription>
                         <FormMessage />
                       </FormItem>

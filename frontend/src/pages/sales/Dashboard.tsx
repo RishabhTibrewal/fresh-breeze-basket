@@ -102,7 +102,7 @@ const SalesDashboard = () => {
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${data?.totalCredit?.toLocaleString()}</div>
+            <div className="text-2xl font-bold">₹{data?.totalCredit?.toLocaleString()}</div>
           </CardContent>
         </Card>
 

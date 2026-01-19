@@ -3,6 +3,7 @@ import { supabase } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import { getDefaultWarehouseId, updateWarehouseStock } from '../utils/warehouseInventory';
 
 // Get all products with optional filtering
 export const getProducts = async (req: Request, res: Response) => {
@@ -144,6 +145,7 @@ export const createProduct = async (req: Request, res: Response) => {
       is_featured,
       is_active,
       stock_count,
+      warehouse_id,
       unit_type,
       nutritional_info,
       origin,
@@ -184,7 +186,8 @@ export const createProduct = async (req: Request, res: Response) => {
         slug: productSlug,
         is_featured: is_featured || false,
         is_active: is_active !== undefined ? is_active : true,
-        stock_count: stock_count || 0,
+        // Stock is managed in warehouse_inventory; keep product.stock_count at 0
+        stock_count: 0,
         unit_type: unit_type || 'piece',
         nutritional_info: nutritional_info || null,
         origin: origin || null,
@@ -198,9 +201,44 @@ export const createProduct = async (req: Request, res: Response) => {
       throw new ApiError(400, error.message);
     }
     
+    const createdProduct = data[0];
+
+    // Resolve warehouse for initial inventory
+    const initialStock = parseInt(stock_count, 10) || 0;
+    let selectedWarehouseId = warehouse_id;
+    if (selectedWarehouseId) {
+      const { data: warehouse, error: warehouseError } = await supabaseWithAuth
+        .from('warehouses')
+        .select('id, is_active')
+        .eq('id', selectedWarehouseId)
+        .single();
+
+      if (warehouseError || !warehouse || !warehouse.is_active) {
+        await supabaseWithAuth.from('products').delete().eq('id', createdProduct.id);
+        throw new ApiError(400, 'Selected warehouse is invalid or inactive');
+      }
+    } else {
+      const defaultWarehouseId = await getDefaultWarehouseId();
+      if (!defaultWarehouseId) {
+        // Rollback product creation to avoid inconsistent state
+        await supabaseWithAuth.from('products').delete().eq('id', createdProduct.id);
+        throw new ApiError(500, 'Default warehouse not found for stock initialization');
+      }
+      selectedWarehouseId = defaultWarehouseId;
+    }
+
+    try {
+      // Upsert inventory even when initialStock is 0
+      await updateWarehouseStock(createdProduct.id, selectedWarehouseId, initialStock, false, true);
+    } catch (inventoryError) {
+      // Rollback product creation to avoid inconsistent state
+      await supabaseWithAuth.from('products').delete().eq('id', createdProduct.id);
+      throw new ApiError(500, 'Failed to initialize warehouse inventory for product');
+    }
+
     res.status(201).json({
       success: true,
-      data: data[0]
+      data: createdProduct
     });
   } catch (error) {
     if (error instanceof ApiError) {

@@ -522,19 +522,19 @@ export default function AdminOrderDetails() {
                 <div className="space-y-4">
                   <div>
                     <p className="text-sm text-muted-foreground">Subtotal</p>
-                    <p className="font-medium">AED {order.total_amount?.toFixed(2) || '0.00'}</p>
+                    <p className="font-medium">₹ {order.total_amount?.toFixed(2) || '0.00'}</p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Shipping</p>
-                    <p className="font-medium">AED 0.00</p>
+                    <p className="font-medium">₹ 0.00</p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Tax</p>
-                    <p className="font-medium">AED 0.00</p>
+                    <p className="font-medium">₹ 0.00</p>
                   </div>
                   <div className="border-t pt-2">
                     <p className="text-sm text-muted-foreground">Total</p>
-                    <p className="font-medium text-lg">AED {order.total_amount?.toFixed(2) || '0.00'}</p>
+                    <p className="font-medium text-lg">₹ {order.total_amount?.toFixed(2) || '0.00'}</p>
                   </div>
                 </div>
               </CardContent>
@@ -579,7 +579,7 @@ export default function AdminOrderDetails() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <p className="text-sm text-muted-foreground">Credit Amount</p>
-                        <p className="font-medium">AED {((order as any).credit_details.amount || 0).toFixed(2)}</p>
+                        <p className="font-medium">₹ {((order as any).credit_details.amount || 0).toFixed(2)}</p>
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Period</p>
@@ -700,7 +700,7 @@ export default function AdminOrderDetails() {
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell>AED {item.unit_price?.toFixed(2) || '0.00'}</TableCell>
+                          <TableCell>₹ {item.unit_price?.toFixed(2) || '0.00'}</TableCell>
                           <TableCell>{item.quantity}</TableCell>
                           <TableCell className="hidden md:table-cell">
                             {warehouse ? (
@@ -713,7 +713,7 @@ export default function AdminOrderDetails() {
                             )}
                           </TableCell>
                           <TableCell className="text-right">
-                            AED {((item.quantity || 0) * (item.unit_price || 0)).toFixed(2)}
+                            ₹ {((item.quantity || 0) * (item.unit_price || 0)).toFixed(2)}
                           </TableCell>
                         </TableRow>
                       );
@@ -732,7 +732,7 @@ export default function AdminOrderDetails() {
               <div className="text-right">
                 <p className="text-sm text-muted-foreground">Total amount</p>
                 <p className="text-xl font-bold">
-                  AED {order.total_amount?.toFixed(2) || '0.00'}
+                  ₹ {order.total_amount?.toFixed(2) || '0.00'}
                 </p>
               </div>
             </CardFooter>

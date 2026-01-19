@@ -135,13 +135,13 @@ const OrderItem = React.memo(({
             )}
           </h4>
           <div className="text-sm text-muted-foreground mt-1">
-            Quantity: {item.quantity} × AED {item.unit_price.toFixed(2)}
+            Quantity: {item.quantity} × ₹ {item.unit_price.toFixed(2)}
           </div>
         </div>
         
         <div className="text-right">
           <div className="font-medium">
-            AED {(item.quantity * item.unit_price).toFixed(2)}
+            ₹ {(item.quantity * item.unit_price).toFixed(2)}
           </div>
         </div>
       </div>
@@ -532,24 +532,24 @@ export default function OrderDetailsPage() {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span>AED {orderSummary.subtotal.toFixed(2)}</span>
+                  <span>₹ {orderSummary.subtotal.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Tax (5%)</span>
-                  <span>AED {orderSummary.tax.toFixed(2)}</span>
+                  <span>₹ {orderSummary.tax.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Shipping</span>
                   <span>
                     {orderSummary.subtotal >= 100 ? 
                       'Free' : 
-                      `AED ${(orderSummary.total - orderSummary.subtotal - orderSummary.tax).toFixed(2)}`
+                      `₹ ${(orderSummary.total - orderSummary.subtotal - orderSummary.tax).toFixed(2)}`
                     }
                   </span>
                 </div>
                 <div className="border-t pt-2 mt-2 flex justify-between font-medium">
                   <span>Total</span>
-                  <span>AED {orderSummary.total.toFixed(2)}</span>
+                  <span>₹ {orderSummary.total.toFixed(2)}</span>
                 </div>
               </div>
             </CardContent>

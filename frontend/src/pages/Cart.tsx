@@ -71,15 +71,15 @@ const Cart = () => {
                               {item.sale_price ? (
                                 <>
                                   <span className="font-medium text-red-500">
-                                    AED {item.sale_price.toFixed(2)}
+                                    ₹ {item.sale_price.toFixed(2)}
                                   </span>
                                   <span className="text-gray-500 text-sm line-through ml-1">
-                                    AED {item.price.toFixed(2)}
+                                    ₹ {item.price.toFixed(2)}
                                   </span>
                                 </>
                               ) : (
                                 <span className="font-medium">
-                                  AED {item.price.toFixed(2)}
+                                  ₹ {item.price.toFixed(2)}
                                 </span>
                               )}
                               <span className="text-gray-500 ml-1">
@@ -107,7 +107,7 @@ const Cart = () => {
                               
                               <div className="flex items-end flex-col">
                                 <div className="font-bold">
-                                  AED {((item.sale_price || item.price) * item.quantity).toFixed(2)}
+                                  ₹ {((item.sale_price || item.price) * item.quantity).toFixed(2)}
                                 </div>
                                 <button 
                                   onClick={() => removeFromCart(item.id)}
@@ -144,7 +144,7 @@ const Cart = () => {
                   <div className="space-y-3 mb-6">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Subtotal</span>
-                      <span className="font-semibold">AED {subtotal.toFixed(2)}</span>
+                      <span className="font-semibold">₹ {subtotal.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Shipping</span>
@@ -153,7 +153,7 @@ const Cart = () => {
                     <div className="pt-3 border-t border-gray-200">
                       <div className="flex justify-between text-lg font-bold">
                         <span>Total</span>
-                        <span>AED {subtotal.toFixed(2)}</span>
+                        <span>₹ {subtotal.toFixed(2)}</span>
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
                         (excluding shipping & taxes)
@@ -166,7 +166,7 @@ const Cart = () => {
                     <div className="flex items-start p-3 mb-6 bg-accent bg-opacity-10 text-sm rounded-md">
                       <AlertCircle className="h-5 w-5 text-accent mr-2 flex-shrink-0 mt-0.5" />
                       <div>
-                        <strong>Add AED {(100 - subtotal).toFixed(2)} more</strong> to qualify for free shipping!
+                        <strong>Add ₹ {(100 - subtotal).toFixed(2)} more</strong> to qualify for free shipping!
                       </div>
                     </div>
                   )}

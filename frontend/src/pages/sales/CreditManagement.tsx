@@ -229,12 +229,12 @@ export default function CreditManagement() {
                     </TableCell>
                     <TableCell className="px-2 py-2">
                       <div className="font-medium text-xs sm:text-sm">
-                        ${customer.current_credit?.toFixed(2) || '0.00'}
+                      ₹{customer.current_credit?.toFixed(2) || '0.00'}
                       </div>
                     </TableCell>
                     <TableCell className="px-2 py-2">
                       <div className="font-medium text-xs sm:text-sm">
-                        ${customer.credit_limit?.toFixed(2) || '0.00'}
+                      ₹{customer.credit_limit?.toFixed(2) || '0.00'}
                       </div>
                     </TableCell>
                     <TableCell className="px-2 py-2 text-xs sm:text-sm">

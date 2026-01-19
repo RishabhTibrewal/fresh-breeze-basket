@@ -146,13 +146,13 @@ export default function ProductList() {
                   <TableCell>
                     {product.sale_price ? (
                       <div>
-                        <span className="text-accent-sale font-medium">AED {product.sale_price.toFixed(2)}</span>
+                        <span className="text-accent-sale font-medium">₹ {product.sale_price.toFixed(2)}</span>
                         <span className="text-sm line-through text-muted-foreground ml-2">
-                          AED {product.price.toFixed(2)}
+                          ₹ {product.price.toFixed(2)}
                         </span>
                       </div>
                     ) : (
-                      <span>AED {product.price.toFixed(2)}</span>
+                      <span>₹ {product.price.toFixed(2)}</span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -289,7 +289,7 @@ export function AdminOrderList() {
                       {order.status}
                     </Badge>
                   </TableCell>
-                  <TableCell>AED {order.total_amount?.toFixed(2) ?? '0.00'}</TableCell>
+                  <TableCell>₹ {order.total_amount?.toFixed(2) ?? '0.00'}</TableCell>
                   <TableCell>{order.created_at ? format(new Date(order.created_at), 'MMM dd, yyyy, HH:mm') : 'Unknown'}</TableCell>
                   <TableCell className="text-right">
                     <Link to={`/admin/orders/${order.id}`}>

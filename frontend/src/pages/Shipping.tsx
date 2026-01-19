@@ -60,15 +60,15 @@ const Shipping = () => {
                   <div className="p-3 font-medium text-gray-700">Delivery Fee</div>
                 </div>
                 <div className="grid grid-cols-2 border-b border-gray-200">
-                  <div className="p-3 text-sm">Under AED 100</div>
-                  <div className="p-3 text-sm">AED 15</div>
+                  <div className="p-3 text-sm">Under ₹ 100</div>
+                  <div className="p-3 text-sm">₹ 15</div>
                 </div>
                 <div className="grid grid-cols-2 border-b border-gray-200">
-                  <div className="p-3 text-sm">AED 100 - 200</div>
-                  <div className="p-3 text-sm">AED 10</div>
+                  <div className="p-3 text-sm">₹ 100 - 200</div>
+                  <div className="p-3 text-sm">₹ 10</div>
                 </div>
                 <div className="grid grid-cols-2">
-                  <div className="p-3 text-sm">Above AED 200</div>
+                  <div className="p-3 text-sm">Above ₹ 200</div>
                   <div className="p-3 text-sm font-medium text-green-600">FREE</div>
                 </div>
               </div>

@@ -99,7 +99,15 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6 w-full min-w-0">
+    <div
+      className="space-y-4 sm:space-y-6 w-full min-w-0"
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+    >
       <div className="flex justify-between items-center">
         <h3 className="text-base sm:text-lg font-medium break-words">Add New Address</h3>
         <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0">
@@ -108,7 +116,7 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
       </div>
       
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           <FormField
             control={form.control}
             name="address_type"
@@ -264,14 +272,15 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
               Cancel
             </Button>
             <Button
-              type="submit"
+              type="button"
               disabled={isSubmitting}
               className="w-full sm:w-auto text-sm sm:text-base"
+              onClick={() => form.handleSubmit(onSubmit)()}
             >
               {isSubmitting ? 'Saving...' : 'Save Address'}
             </Button>
           </div>
-        </form>
+        </div>
       </Form>
     </div>
   );

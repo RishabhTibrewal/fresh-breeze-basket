@@ -193,7 +193,7 @@ export default function Leads() {
       description: '',
       source: 'other',
       estimated_value: 0,
-      currency: 'USD',
+      currency: 'rupees',
       stage: 'new',
       priority: 'medium',
       address: '',
@@ -557,7 +557,7 @@ export default function Leads() {
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">${stats.totalValue.toLocaleString()}</div>
+              <div className="text-2xl font-bold">₹{stats.totalValue.toLocaleString()}</div>
             </CardContent>
           </Card>
           <Card>
@@ -566,7 +566,7 @@ export default function Leads() {
               <CheckCircle2 className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">${stats.wonValue.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-green-600">₹{stats.wonValue.toLocaleString()}</div>
             </CardContent>
           </Card>
           <Card>

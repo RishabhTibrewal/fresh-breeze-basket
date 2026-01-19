@@ -160,7 +160,7 @@ const ProductDetails = () => {
                   <img 
                     src={mainImage} 
                     alt={product.name} 
-                    className="absolute inset-0 w-full h-full object-cover"
+                    className="absolute inset-0 w-full h-full object-contain"
                   />
                 </div>
                 {product.additional_images && product.additional_images.length > 1 && (
@@ -176,7 +176,7 @@ const ProductDetails = () => {
                         <img
                           src={imageUrl}
                           alt={`${product.name} - view ${index + 1}`}
-                          className="absolute inset-0 w-full h-full object-cover hover:scale-110 transition-transform duration-200"
+                          className="absolute inset-0 w-full h-full object-contain hover:scale-110 transition-transform duration-200"
                         />
                       </button>
                     ))}
@@ -201,13 +201,13 @@ const ProductDetails = () => {
                 <div className="flex flex-wrap items-baseline mb-6">
                   {product.sale_price ? (
                     <>
-                      <span className="text-2xl sm:text-3xl font-bold text-red-500">AED {product.sale_price.toFixed(2)}</span>
-                      <span className="ml-3 text-gray-500 line-through">AED {product.price.toFixed(2)}</span>
+                      <span className="text-2xl sm:text-3xl font-bold text-red-500">₹ {product.sale_price.toFixed(2)}</span>
+                      <span className="ml-3 text-gray-500 line-through">₹ {product.price.toFixed(2)}</span>
                       <span className="ml-2 text-gray-600">/{product.unit} {product.unit_type}</span>
                     </>
                   ) : (
                     <>
-                      <span className="text-2xl sm:text-3xl font-bold">AED {product.price.toFixed(2)}</span>
+                      <span className="text-2xl sm:text-3xl font-bold">₹ {product.price.toFixed(2)}</span>
                       <span className="ml-2 text-gray-600">/{product.unit} {product.unit_type}</span>
                     </>
                   )}
@@ -293,7 +293,7 @@ const ProductDetails = () => {
                                 
                 <div className="mt-6 flex items-center text-gray-600">
                   <ShoppingCart className="h-5 w-5 mr-2" />
-                  Free delivery for orders over AED 100
+                  Free delivery for orders over ₹ 100
                 </div>
               </div>
             </div>

@@ -155,12 +155,12 @@ const ProductFilters: React.FC<ProductFiltersProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <span className="text-sm text-muted-foreground">Min</span>
-                <div className="bg-muted rounded px-2 py-1 text-sm">AED {priceRange[0]}</div>
+                <div className="bg-muted rounded px-2 py-1 text-sm">₹ {priceRange[0]}</div>
               </div>
               <div className="mx-2 text-muted-foreground">-</div>
               <div className="flex-1">
                 <span className="text-sm text-muted-foreground">Max</span>
-                <div className="bg-muted rounded px-2 py-1 text-sm">AED {priceRange[1]}</div>
+                <div className="bg-muted rounded px-2 py-1 text-sm">₹ {priceRange[1]}</div>
               </div>
             </div>
           </div>
