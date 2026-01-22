@@ -109,6 +109,19 @@ BEGIN
     now()
   );
 
+  -- Create company membership for admin user
+  INSERT INTO public.company_memberships (
+    user_id,
+    company_id,
+    role,
+    is_active
+  ) VALUES (
+    new_user_id,
+    new_company_id,
+    'admin',
+    true
+  );
+
   RETURN jsonb_build_object(
     'company_id', new_company_id,
     'user_id', new_user_id

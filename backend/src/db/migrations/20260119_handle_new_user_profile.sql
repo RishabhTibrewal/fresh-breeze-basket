@@ -5,7 +5,13 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+  v_company_id UUID;
+  v_role user_role;
 BEGIN
+  v_company_id := (NEW.raw_user_meta_data->>'company_id')::uuid;
+  v_role := COALESCE(NULLIF(NEW.raw_user_meta_data->>'role', ''), 'user')::user_role;
+
   INSERT INTO public.profiles (
     id,
     email,
@@ -21,9 +27,26 @@ BEGIN
     NULLIF(NEW.raw_user_meta_data->>'first_name', ''),
     NULLIF(NEW.raw_user_meta_data->>'last_name', ''),
     NULLIF(NEW.raw_user_meta_data->>'phone', ''),
-    (NEW.raw_user_meta_data->>'company_id')::uuid,
-    COALESCE(NULLIF(NEW.raw_user_meta_data->>'role', ''), 'user')::user_role
+    v_company_id,
+    v_role
   );
+
+  -- Create company membership if company_id is provided
+  IF v_company_id IS NOT NULL THEN
+    INSERT INTO public.company_memberships (
+      user_id,
+      company_id,
+      role,
+      is_active
+    )
+    VALUES (
+      NEW.id,
+      v_company_id,
+      v_role,
+      true
+    )
+    ON CONFLICT (user_id, company_id) DO NOTHING;
+  END IF;
 
   RETURN NEW;
 END;

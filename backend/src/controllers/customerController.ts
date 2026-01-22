@@ -405,7 +405,9 @@ export const createCustomer = async (req: Request, res: Response) => {
         email_confirm: true, // Auto-confirm email so user can login immediately
         user_metadata: {
           name,
-          phone
+          phone,
+          company_id: req.companyId,
+          role: 'user'
         }
       });
 
@@ -444,7 +446,14 @@ export const createCustomer = async (req: Request, res: Response) => {
     }
 
     if (existingProfile && existingProfile.company_id !== req.companyId) {
-      throw new AppError('User does not belong to this company', 403);
+      const { error: profileUpdateError } = await supabase
+        .from('profiles')
+        .update({ company_id: req.companyId })
+        .eq('id', userId);
+
+      if (profileUpdateError) {
+        console.error('Error updating profile company_id:', profileUpdateError);
+      }
     }
 
     if (!existingProfile) {
@@ -463,6 +472,22 @@ export const createCustomer = async (req: Request, res: Response) => {
       }
     }
     
+    const membershipClient = supabaseAdmin || supabase;
+    const { error: membershipError } = await membershipClient
+      .from('company_memberships')
+      .upsert({
+        user_id: userId,
+        company_id: req.companyId,
+        role: 'user',
+        is_active: true
+      }, {
+        onConflict: 'user_id,company_id'
+      });
+
+    if (membershipError) {
+      console.error('Error creating company membership:', membershipError);
+    }
+
     // Create customer payload
     const customerPayload = {
       name,
@@ -776,7 +801,9 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
       email_confirm: true, // Auto-confirm email so user can login immediately
       user_metadata: {
         name,
-        phone
+        phone,
+        company_id: req.companyId,
+        role: 'user'
       }
     });
 
@@ -818,7 +845,14 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
     }
 
     if (existingProfile && existingProfile.company_id !== req.companyId) {
-      throw new AppError('User does not belong to this company', 403);
+      const { error: profileUpdateError } = await supabase
+        .from('profiles')
+        .update({ company_id: req.companyId })
+        .eq('id', userId);
+
+      if (profileUpdateError) {
+        console.error('Error updating profile company_id:', profileUpdateError);
+      }
     }
 
     if (!existingProfile) {
@@ -835,6 +869,22 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
         console.error('Error creating profile:', profileError);
         // Continue anyway as profile might have been created by trigger
       }
+    }
+
+    const membershipClient = supabaseAdmin || supabase;
+    const { error: membershipError } = await membershipClient
+      .from('company_memberships')
+      .upsert({
+        user_id: userId,
+        company_id: req.companyId,
+        role: 'user',
+        is_active: true
+      }, {
+        onConflict: 'user_id,company_id'
+      });
+
+    if (membershipError) {
+      console.error('Error creating company membership:', membershipError);
     }
 
     // Create or update customer

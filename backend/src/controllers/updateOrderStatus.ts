@@ -18,33 +18,9 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ error: 'Company context is required' });
     }
     
-    // Check if user is admin or sales
-    let isAdmin = false;
-    let isSales = false;
-    
-    try {
-      // Get user's role from profiles
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
-      
-      if (profileError) {
-        console.error('Error fetching profile:', profileError);
-      } else if (profile) {
-        isAdmin = profile.role === 'admin';
-        isSales = profile.role === 'sales';
-      }
-    } catch (error) {
-      console.error('Error during role check:', error);
-    }
-    
-    // Fall back to middleware role check
-    if (!isAdmin && !isSales) {
-      isAdmin = req.user.role === 'admin';
-      isSales = req.user.role === 'sales';
-    }
+    // Use role from middleware (already resolved from memberships)
+    const isAdmin = req.user.role === 'admin';
+    const isSales = req.user.role === 'sales';
     
     // Get the order to check permissions
     const { data: order, error: orderError } = await supabase

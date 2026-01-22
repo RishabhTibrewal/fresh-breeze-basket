@@ -2,6 +2,59 @@ import { Request, Response } from 'express';
 import { supabase, createAuthClient, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
+const findAuthUserByEmail = async (email: string) => {
+  if (!supabaseAdmin) {
+    return null;
+  }
+
+  const { data, error } = await supabaseAdmin.auth.admin.listUsers();
+  if (error) {
+    console.error('Error listing auth users:', error);
+    return null;
+  }
+
+  return data?.users.find(user => user.email === email) || null;
+};
+
+const ensureMembership = async (userId: string, companyId: string, role: string) => {
+  const client = supabaseAdmin || supabase;
+  const { error } = await client
+    .from('company_memberships')
+    .upsert({
+      user_id: userId,
+      company_id: companyId,
+      role,
+      is_active: true
+    }, {
+      onConflict: 'user_id,company_id'
+    });
+
+  return error;
+};
+
+const getMembership = async (userId: string, companyId?: string) => {
+  const client = supabaseAdmin || supabase;
+  let query = client
+    .from('company_memberships')
+    .select('company_id, role, is_active')
+    .eq('user_id', userId)
+    .eq('is_active', true);
+
+  if (companyId) {
+    query = query.eq('company_id', companyId);
+  } else {
+    query = query.order('created_at', { ascending: true }).limit(1);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) {
+    console.error('Error fetching company membership:', error);
+    return null;
+  }
+
+  return data || null;
+};
+
 // Register new user
 export const register = async (req: Request, res: Response) => {
   try {
@@ -23,27 +76,50 @@ export const register = async (req: Request, res: Response) => {
       });
     }
     
-    // Check if a profile with this email already exists in this company
-    const { data: existingProfileByEmail, error: emailCheckError } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('email', email)
-      .eq('company_id', req.companyId)
-      .single();
-    
-    if (emailCheckError && emailCheckError.code !== 'PGRST116') {
-      console.error('Error checking email:', emailCheckError);
-      return res.status(500).json({
-        success: false,
-        message: 'Error checking email availability'
-      });
-    }
-    
-    if (existingProfileByEmail) {
-      // User already exists, return message to login instead
-      return res.status(400).json({
-        success: false,
-        message: 'Already registered, please login'
+    const existingAuthUser = await findAuthUserByEmail(email);
+    if (existingAuthUser) {
+      const membershipError = await ensureMembership(existingAuthUser.id, req.companyId, 'user');
+      if (membershipError) {
+        console.error('Error creating membership:', membershipError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to link user to company'
+        });
+      }
+
+      const { data: existingProfile } = await supabaseAdmin!
+        .from('profiles')
+        .select('id, company_id')
+        .eq('id', existingAuthUser.id)
+        .maybeSingle();
+
+      if (!existingProfile) {
+        await supabaseAdmin!
+          .from('profiles')
+          .insert({
+            id: existingAuthUser.id,
+            email: existingAuthUser.email,
+            first_name: first_name || null,
+            last_name: last_name || null,
+            phone: phone || null,
+            company_id: req.companyId,
+            role: 'user'
+          });
+      } else if (existingProfile.company_id !== req.companyId) {
+        // Update profile company_id for RLS compatibility (membership is primary)
+        await supabaseAdmin!
+          .from('profiles')
+          .update({ company_id: req.companyId })
+          .eq('id', existingAuthUser.id);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'User linked to company successfully',
+        data: {
+          id: existingAuthUser.id,
+          email: existingAuthUser.email
+        }
       });
     }
     
@@ -95,24 +171,6 @@ export const register = async (req: Request, res: Response) => {
     
     console.log('User created in Supabase Auth with ID:', authData.user.id);
     
-    // Ensure profile is created without cross-company overwrite
-    const { data: existingProfile, error: profileCheckError } = await supabaseAdmin
-      .from('profiles')
-      .select('id, company_id')
-      .eq('id', authData.user.id)
-      .maybeSingle();
-
-    if (profileCheckError) {
-      console.error('Error checking profile:', profileCheckError);
-    }
-
-    if (existingProfile && existingProfile.company_id !== req.companyId) {
-      return res.status(403).json({
-        success: false,
-        message: 'User already exists in a different company'
-      });
-    }
-
     const profilePayload = {
       id: authData.user.id,
       email: authData.user.email,
@@ -123,20 +181,19 @@ export const register = async (req: Request, res: Response) => {
       role: 'user'
     };
 
-    const { error: profileError } = existingProfile
-      ? await supabaseAdmin
-          .from('profiles')
-          .update(profilePayload)
-          .eq('id', authData.user.id)
-          .eq('company_id', req.companyId)
-      : await supabaseAdmin
-          .from('profiles')
-          .insert(profilePayload);
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .insert(profilePayload);
 
     if (profileError) {
       console.error('Error updating profile:', profileError);
       // Don't fail the request, profile might have been created by trigger
       // But log it for debugging
+    }
+
+    const membershipError = await ensureMembership(authData.user.id, req.companyId, 'user');
+    if (membershipError) {
+      console.error('Error creating membership:', membershipError);
     }
 
     // Return success after user is created in Supabase Auth
@@ -161,13 +218,7 @@ export const register = async (req: Request, res: Response) => {
 export const login = async (req: Request, res: Response) => {
   try {
     const { email, password, supabase_token } = req.body;
-
-    if (!req.companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Company context is required'
-      });
-    }
+    let activeCompanyId = req.companyId || null;
     
     // Check if we're trying to login with a Supabase token (for keeping backend in sync)
     if (email && supabase_token) {
@@ -214,11 +265,34 @@ export const login = async (req: Request, res: Response) => {
           console.log('Profile found for token login:', profile);
         }
 
-        if (profile.company_id !== req.companyId) {
+        let membership = await getMembership(userData.user.id, activeCompanyId || undefined);
+        if (!membership && !activeCompanyId) {
+          membership = await getMembership(userData.user.id);
+        }
+
+        if (!membership) {
+          return res.status(403).json({
+            success: false,
+            message: 'User does not belong to any company'
+          });
+        }
+
+        if (!activeCompanyId) {
+          activeCompanyId = membership.company_id;
+        }
+
+        if (activeCompanyId && membership.company_id !== activeCompanyId) {
           return res.status(403).json({
             success: false,
             message: 'User does not belong to this company'
           });
+        }
+
+        if (profile.company_id !== activeCompanyId) {
+          await supabase
+            .from('profiles')
+            .update({ company_id: activeCompanyId })
+            .eq('id', profile.id);
         }
         
         // Return success with token (reusing the Supabase token)
@@ -232,8 +306,8 @@ export const login = async (req: Request, res: Response) => {
               first_name: profile.first_name,
               last_name: profile.last_name,
               phone: profile.phone,
-              role: profile.role,
-              company_id: profile.company_id
+              role: membership.role,
+              company_id: activeCompanyId
             }
           }
         });
@@ -288,11 +362,34 @@ export const login = async (req: Request, res: Response) => {
       console.log('Existing profile found during login:', profile);
     }
 
-    if (profile.company_id !== req.companyId) {
+    let membership = await getMembership(authData.user.id, activeCompanyId || undefined);
+    if (!membership && !activeCompanyId) {
+      membership = await getMembership(authData.user.id);
+    }
+
+    if (!membership) {
+      return res.status(403).json({
+        success: false,
+        message: 'User does not belong to any company'
+      });
+    }
+
+    if (!activeCompanyId) {
+      activeCompanyId = membership.company_id;
+    }
+
+    if (activeCompanyId && membership.company_id !== activeCompanyId) {
       return res.status(403).json({
         success: false,
         message: 'User does not belong to this company'
       });
+    }
+
+    if (profile.company_id !== activeCompanyId) {
+      await supabase
+        .from('profiles')
+        .update({ company_id: activeCompanyId })
+        .eq('id', profile.id);
     }
     
     return res.status(200).json({
@@ -305,8 +402,8 @@ export const login = async (req: Request, res: Response) => {
           first_name: profile.first_name,
           last_name: profile.last_name,
           phone: profile.phone,
-          role: profile.role,
-          company_id: profile.company_id
+          role: membership.role,
+          company_id: activeCompanyId
         }
       }
     });
@@ -324,14 +421,7 @@ export const getCurrentUser = async (req: Request, res: Response) => {
   try {
     const userId = req.user.id;
     
-    if (!req.companyId) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          message: 'Company context is required'
-        }
-      });
-    }
+    let activeCompanyId = req.companyId || null;
 
     // First, verify profile exists and belongs to the company
     const { data: profileCheck, error: profileCheckError } = await supabase
@@ -345,6 +435,22 @@ export const getCurrentUser = async (req: Request, res: Response) => {
       console.log('Profile not found for user ID:', userId, 'Creating new profile...');
       
       try {
+        if (!activeCompanyId) {
+          const membership = await getMembership(userId);
+          if (membership) {
+            activeCompanyId = membership.company_id;
+          }
+        }
+
+        if (!activeCompanyId) {
+          return res.status(403).json({
+            success: false,
+            error: {
+              message: 'User does not belong to any company'
+            }
+          });
+        }
+
         // Create new profile
         const { data: newProfile, error: createError } = await supabase
           .from('profiles')
@@ -352,7 +458,7 @@ export const getCurrentUser = async (req: Request, res: Response) => {
             id: userId,
             email: req.user.email,
             role: 'user',
-            company_id: req.companyId,
+            company_id: activeCompanyId,
             updated_at: new Date()
           })
           .select()
@@ -371,19 +477,6 @@ export const getCurrentUser = async (req: Request, res: Response) => {
         }
         
         console.log('New profile created successfully:', newProfile);
-        
-        // Check if user is admin
-        const { data: isAdmin } = await supabase.rpc('is_admin', { user_id: userId });
-        
-        return res.status(200).json({
-          success: true,
-          data: {
-            id: userId,
-            email: req.user.email,
-            ...newProfile,
-            isAdmin: isAdmin || false
-          }
-        });
       } catch (profileCreateError) {
         console.error('Caught exception while creating profile:', profileCreateError);
         return res.status(500).json({
@@ -403,7 +496,31 @@ export const getCurrentUser = async (req: Request, res: Response) => {
           details: profileCheckError.message
         }
       });
-    } else if (profileCheck?.company_id !== req.companyId) {
+    } else if (!profileCheck?.company_id && !activeCompanyId) {
+      // allow membership-based resolution below
+    } else if (profileCheck?.company_id && activeCompanyId && profileCheck.company_id !== activeCompanyId) {
+      // allow membership-based resolution below
+    }
+
+    let membership = await getMembership(userId, activeCompanyId || undefined);
+    if (!membership && !activeCompanyId) {
+      membership = await getMembership(userId);
+    }
+
+    if (!membership) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          message: 'User does not belong to any company'
+        }
+      });
+    }
+
+    if (!activeCompanyId) {
+      activeCompanyId = membership.company_id;
+    }
+
+    if (activeCompanyId && membership.company_id !== activeCompanyId) {
       return res.status(403).json({
         success: false,
         error: {
@@ -417,7 +534,6 @@ export const getCurrentUser = async (req: Request, res: Response) => {
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .eq('company_id', req.companyId)
       .single();
 
     if (error) {
@@ -434,13 +550,22 @@ export const getCurrentUser = async (req: Request, res: Response) => {
     // Check if user is admin
     const { data: isAdmin } = await supabase.rpc('is_admin', { user_id: userId });
     
+    if (profile?.company_id !== activeCompanyId) {
+      await supabase
+        .from('profiles')
+        .update({ company_id: activeCompanyId })
+        .eq('id', userId);
+    }
+
     return res.status(200).json({
       success: true,
       data: {
         id: userId,
         email: req.user.email,
         ...profile,
-        isAdmin: isAdmin || false
+        isAdmin: isAdmin || false,
+        company_id: activeCompanyId,
+        role: membership.role
       }
     });
   } catch (error) {
@@ -942,15 +1067,15 @@ export const checkAdminStatus = async (req: Request, res: Response) => {
       });
     }
     
-    // Check admin status using RPC function
+    // Check admin status using RPC function (uses memberships)
     const { data: isAdminRpc, error: rpcError } = await supabase.rpc('is_admin', { user_id: userId });
     
     if (rpcError) {
       console.error('Error in is_admin RPC call:', rpcError);
     }
     
-    // Direct role check
-    const isAdmin = profile?.role === 'admin';
+    // Use RPC result (membership-based) as primary, fallback to middleware role
+    const isAdmin = isAdminRpc || req.user.role === 'admin';
     
     return res.status(200).json({
       success: true,
@@ -960,7 +1085,7 @@ export const checkAdminStatus = async (req: Request, res: Response) => {
         profile,
         isAdmin,
         isAdminRpc,
-        profileRole: profile?.role || 'none'
+        membershipRole: req.user.role || 'none' // Role from membership (via middleware)
       }
     });
   } catch (error) {

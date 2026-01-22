@@ -56,14 +56,16 @@ export const registerCompany = async (req: Request, res: Response) => {
       });
     }
 
-    // Check if email already exists
     const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
     const existingUser = existingUsers?.users.find(u => u.email === email);
-    
+
+    // Security: Prevent unauthorized company creation with existing email
+    // If user already exists, they must use a different email or be authenticated
+    // This prevents attackers from creating companies for existing users without password verification
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'Email already registered'
+        message: 'Email already registered. Please use a different email or login to create a company.'
       });
     }
 
@@ -86,7 +88,7 @@ export const registerCompany = async (req: Request, res: Response) => {
       });
     }
 
-    // Create user using Supabase Auth Admin API (proper way)
+    // Create new admin user (existing user check already performed above)
     const { data: newUser, error: userError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
@@ -111,24 +113,47 @@ export const registerCompany = async (req: Request, res: Response) => {
       });
     }
 
-    // Update profile with company_id and role (trigger should create profile, but ensure it's correct)
-    const { error: profileError } = await supabaseAdmin
+    const adminUser = newUser.user;
+
+    const { data: existingProfile } = await supabaseAdmin
       .from('profiles')
+      .select('id, company_id')
+      .eq('id', adminUser.id)
+      .maybeSingle();
+
+    if (!existingProfile) {
+      await supabaseAdmin
+        .from('profiles')
+        .insert({
+          id: adminUser.id,
+          email: adminUser.email,
+          first_name: first_name || null,
+          last_name: last_name || null,
+          phone: phone || null,
+          company_id: newCompany.id,
+          role: 'admin'
+        });
+    } else if (existingProfile.company_id !== newCompany.id) {
+      // Update profile company_id for RLS compatibility (membership is primary)
+      await supabaseAdmin
+        .from('profiles')
+        .update({ company_id: newCompany.id })
+        .eq('id', adminUser.id);
+    }
+
+    const { error: membershipError } = await supabaseAdmin
+      .from('company_memberships')
       .upsert({
-        id: newUser.user.id,
-        email: newUser.user.email,
-        first_name: first_name || null,
-        last_name: last_name || null,
-        phone: phone || null,
+        user_id: adminUser.id,
         company_id: newCompany.id,
-        role: 'admin'
+        role: 'admin',
+        is_active: true
       }, {
-        onConflict: 'id'
+        onConflict: 'user_id,company_id'
       });
 
-    if (profileError) {
-      console.error('Error updating profile:', profileError);
-      // Don't fail the request, profile might have been created by trigger
+    if (membershipError) {
+      console.error('Error creating company membership:', membershipError);
     }
 
     const baseDomain = process.env.TENANT_BASE_DOMAIN || 'gofreshco.com';
@@ -142,7 +167,7 @@ export const registerCompany = async (req: Request, res: Response) => {
           slug
         },
         admin: {
-          id: newUser.user.id,
+          id: adminUser.id,
           email,
           role: 'admin'
         },

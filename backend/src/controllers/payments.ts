@@ -730,14 +730,10 @@ export const createMissingPaymentRecords = async (req: Request, res: Response) =
       throw new ApiError(400, 'Company context is required');
     }
     
-    // Only allow admins to run this
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', userId)
-      .single();
+    // Only allow admins to run this (use RPC function which checks memberships)
+    const { data: isAdmin, error: rpcError } = await supabase.rpc('is_admin', { user_id: userId });
     
-    if (profileError || !profile || profile.role !== 'admin') {
+    if (rpcError || !isAdmin) {
       throw new ApiError(403, 'Admin access required');
     }
 

@@ -14,47 +14,9 @@ export const getOrders = async (req: Request, res: Response) => {
     // Log to help with debugging
     console.log('getOrders for user ID:', userId);
     
-    // Check if the user exists in profiles table
-    let isAdmin = false;
-    
-    try {
-      // First try to get the profile from profiles table
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId);
-      
-      if (profileError) {
-        console.error('Error fetching profile:', profileError);
-      } else if (profile && profile.length > 0) {
-        // Check if any of the returned rows has admin role
-        isAdmin = profile.some(p => p.role === 'admin');
-        console.log('Profile found in profiles table, admin status:', isAdmin);
-      } else {
-        console.log('Profile not found in profiles table, checking users table');
-        
-        // If profile not found, try users table or another table that might have role information
-        const { data: user, error: userError } = await supabase
-          .from('users')  // Change this to whatever table might have the role information
-          .select('role')
-          .eq('id', userId)
-          .single();
-          
-        if (!userError && user) {
-          isAdmin = user.role === 'admin';
-          console.log('User found in users table, admin status:', isAdmin);
-        }
-      }
-    } catch (error) {
-      console.error('Error during admin check:', error);
-    }
-    
-    // Fall back to authenticated middleware's check if we couldn't determine admin status
-    if (!isAdmin) {
-      // The user passed the adminOnly middleware, so they should be an admin
-      console.log('Using middleware admin verification as fallback');
-      isAdmin = req.user.role === 'admin';
-    }
+    // Use role from middleware (already resolved from memberships)
+    // Note: This endpoint is protected by adminOnly middleware, so req.user.role should be 'admin'
+    const isAdmin = req.user.role === 'admin';
     
     if (!isAdmin) {
       console.error('Non-admin user attempting to access all orders');
@@ -172,36 +134,9 @@ export const getOrderById = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Company context is required' });
     }
     
-    // Check if the user exists in profiles table
-    let isAdmin = false;
-    let isSales = false;
-    
-    try {
-      // First try to get the profile from profiles table
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
-      
-      if (profileError) {
-        console.error('Error fetching profile:', profileError);
-      } else if (profile) {
-        // Check role
-        isAdmin = profile.role === 'admin';
-        isSales = profile.role === 'sales';
-        console.log('Profile found in profiles table, admin status:', isAdmin, 'sales status:', isSales);
-      }
-    } catch (error) {
-      console.error('Error during admin check:', error);
-    }
-    
-    // Fall back to middleware's check if we couldn't determine status
-    if (!isAdmin && !isSales) {
-      console.log('Using middleware admin verification as fallback');
-      isAdmin = req.user.role === 'admin';
-      isSales = req.user.role === 'sales';
-    }
+    // Use role from middleware (already resolved from memberships)
+    const isAdmin = req.user.role === 'admin';
+    const isSales = req.user.role === 'sales';
     
     console.log('User admin status:', isAdmin, 'User sales status:', isSales);
     
@@ -752,33 +687,9 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     } = req.body;
     const userId = req.user.id;
     
-    // Check user role (admin or sales)
-    let isAdmin = false;
-    let isSales = false;
-    
-    try {
-      // Get user's role from profiles
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
-      
-      if (profileError) {
-        console.error('Error fetching profile:', profileError);
-      } else if (profile) {
-        isAdmin = profile.role === 'admin';
-        isSales = profile.role === 'sales';
-      }
-    } catch (error) {
-      console.error('Error checking user role:', error);
-    }
-    
-    // Fallback to middleware role check
-    if (!isAdmin && !isSales) {
-      isAdmin = req.user.role === 'admin';
-      isSales = req.user.role === 'sales';
-    }
+    // Use role from middleware (already resolved from memberships)
+    const isAdmin = req.user.role === 'admin';
+    const isSales = req.user.role === 'sales';
     
     // Only allow admins and sales executives to update orders
     if (!isAdmin && !isSales) {

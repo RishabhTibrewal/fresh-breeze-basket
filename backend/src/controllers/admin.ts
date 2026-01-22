@@ -287,31 +287,39 @@ export const updateUserRole = async (req: Request, res: Response) => {
       });
     }
 
-    // Update profile role (filtered by company_id)
-    const { data: profile, error } = await supabase
+    // Update membership role (memberships are the source of truth)
+    const { data: membership, error: membershipError } = await supabase
+      .from('company_memberships')
+      .update({ 
+        role,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+      .eq('company_id', req.companyId)
+      .select()
+      .single();
+
+    if (membershipError || !membership) {
+      console.error('Error updating membership role:', membershipError);
+      return res.status(500).json({
+        success: false,
+        message: `Failed to update user role: ${membershipError?.message || 'Membership not found'}`
+      });
+    }
+
+    // Also update profile role for backward compatibility (RLS may still reference it)
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .update({ 
         role,
         updated_at: new Date().toISOString()
       })
       .eq('id', userId)
-      .eq('company_id', req.companyId)
       .select()
       .single();
 
-    if (error) {
-      console.error('Error updating user role:', error);
-      return res.status(500).json({
-        success: false,
-        message: `Failed to update user role: ${error.message}`
-      });
-    }
-
-    if (!profile) {
-      return res.status(404).json({
-        success: false,
-        message: 'User profile not found'
-      });
+    if (profileError) {
+      console.error('Error updating profile role (non-critical):', profileError);
     }
 
     // Invalidate role cache so the new role is reflected immediately
@@ -567,25 +575,26 @@ export const createSalesTarget = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Company context is required');
     }
 
-    // Verify sales executive exists and has sales role (filtered by company_id)
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
+    // Verify sales executive exists and has sales role in this company (check membership)
+    const { data: membership, error: membershipError } = await supabase
+      .from('company_memberships')
       .select('id, role')
-      .eq('id', sales_executive_id)
+      .eq('user_id', sales_executive_id)
       .eq('company_id', req.companyId)
+      .eq('is_active', true)
       .single();
 
-    if (profileError || !profile) {
+    if (membershipError || !membership) {
       return res.status(404).json({
         success: false,
-        message: 'Sales executive not found'
+        message: 'Sales executive not found in this company'
       });
     }
 
-    if (profile.role !== 'sales') {
+    if (membership.role !== 'sales') {
       return res.status(400).json({
         success: false,
-        message: 'User is not a sales executive'
+        message: 'User is not a sales executive in this company'
       });
     }
 
@@ -1080,20 +1089,21 @@ export const createLeadAdmin = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Company context is required');
     }
 
-    // Validate that sales_executive_id exists and is a sales role (filtered by company_id)
-    const { data: salesExecutive, error: salesError } = await supabase
-      .from('profiles')
+    // Validate that sales_executive_id exists and is a sales role in this company (check membership)
+    const { data: membership, error: membershipError } = await supabase
+      .from('company_memberships')
       .select('id, role')
-      .eq('id', sales_executive_id)
+      .eq('user_id', sales_executive_id)
       .eq('company_id', req.companyId)
+      .eq('is_active', true)
       .single();
 
-    if (salesError || !salesExecutive) {
-      throw new ApiError(404, 'Sales executive not found');
+    if (membershipError || !membership) {
+      throw new ApiError(404, 'Sales executive not found in this company');
     }
 
-    if (salesExecutive.role !== 'sales') {
-      throw new ApiError(400, 'Assigned user must have sales role');
+    if (membership.role !== 'sales') {
+      throw new ApiError(400, 'Assigned user must have sales role in this company');
     }
 
     // Validate stage, priority, source (using same constants as leadsController)

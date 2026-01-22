@@ -28,11 +28,26 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     phone TEXT,
     password TEXT,
     avatar_url TEXT,
-    company_id UUID NOT NULL REFERENCES public.companies(id),
+    company_id UUID REFERENCES public.companies(id),
     role user_role DEFAULT 'user',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Company Memberships Table (multi-company support)
+CREATE TABLE IF NOT EXISTS public.company_memberships (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+    role user_role DEFAULT 'user',
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, company_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_company_memberships_user_id ON public.company_memberships(user_id);
+CREATE INDEX IF NOT EXISTS idx_company_memberships_company_id ON public.company_memberships(company_id);
 
 -- Categories Table
 CREATE TABLE IF NOT EXISTS public.categories (
@@ -151,31 +166,50 @@ CREATE TABLE IF NOT EXISTS public.addresses (
 ALTER TABLE public.addresses ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for addresses table
-CREATE POLICY "Admin has full access to all addresses"
-ON public.addresses FOR ALL TO authenticated
-USING (
-  EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid()
-    AND profiles.role = 'admin'
+DROP POLICY IF EXISTS "Admin has full access to all addresses" ON public.addresses;
+DROP POLICY IF EXISTS "Enable delete for users to their own addresses" ON public.addresses;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON public.addresses;
+DROP POLICY IF EXISTS "Enable read access for users to their own addresses" ON public.addresses;
+DROP POLICY IF EXISTS "Enable update for users to their own addresses" ON public.addresses;
+DROP POLICY IF EXISTS "Company admins can manage all addresses" ON public.addresses;
+DROP POLICY IF EXISTS "Users can manage their own addresses" ON public.addresses;
+DROP POLICY IF EXISTS "Sales can manage customer addresses" ON public.addresses;
+
+-- Admins can manage all addresses in their company
+CREATE POLICY "Company admins can manage all addresses"
+  ON public.addresses FOR ALL TO authenticated
+  USING (public.is_admin(auth.uid()) AND company_id = public.current_company_id())
+  WITH CHECK (public.is_admin(auth.uid()) AND company_id = public.current_company_id());
+
+-- Users can manage their own addresses
+CREATE POLICY "Users can manage their own addresses"
+  ON public.addresses FOR ALL TO authenticated
+  USING (auth.uid() = user_id AND company_id = public.current_company_id())
+  WITH CHECK (auth.uid() = user_id AND company_id = public.current_company_id());
+
+-- Sales executives can manage addresses for their customers
+CREATE POLICY "Sales can manage customer addresses"
+  ON public.addresses FOR ALL TO authenticated
+  USING (
+    company_id = public.current_company_id()
+    AND public.is_admin_or_sales(auth.uid())
+    AND EXISTS (
+      SELECT 1 FROM public.customers
+      WHERE customers.user_id = addresses.user_id
+        AND customers.sales_executive_id = auth.uid()
+        AND customers.company_id = public.current_company_id()
+    )
   )
-);
-
-CREATE POLICY "Enable delete for users to their own addresses"
-ON public.addresses FOR DELETE TO authenticated
-USING (auth.uid() = user_id);
-
-CREATE POLICY "Enable insert for authenticated users only"
-ON public.addresses FOR INSERT TO authenticated
-WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Enable read access for users to their own addresses"
-ON public.addresses FOR SELECT TO authenticated
-USING (auth.uid() = user_id);
-
-CREATE POLICY "Enable update for users to their own addresses"
-ON public.addresses FOR UPDATE TO authenticated
-USING (auth.uid() = user_id);
+  WITH CHECK (
+    company_id = public.current_company_id()
+    AND public.is_admin_or_sales(auth.uid())
+    AND EXISTS (
+      SELECT 1 FROM public.customers
+      WHERE customers.user_id = addresses.user_id
+        AND customers.sales_executive_id = auth.uid()
+        AND customers.company_id = public.current_company_id()
+    )
+  );
 
 -- Orders Table
 CREATE TABLE IF NOT EXISTS public.orders (
@@ -332,18 +366,55 @@ CREATE TRIGGER create_order_status_history_trigger
     EXECUTE FUNCTION public.create_order_status_history();
 
 -- Function to check if user is admin
-CREATE OR REPLACE FUNCTION public.is_admin(user_id UUID)
+CREATE OR REPLACE FUNCTION public.is_admin(p_user_id UUID)
 RETURNS BOOLEAN AS $$
 DECLARE
     role_val TEXT;
 BEGIN
     SELECT role INTO role_val
-    FROM public.profiles
-    WHERE id = user_id;
+    FROM public.company_memberships
+    WHERE user_id = p_user_id
+      AND company_id = public.current_company_id()
+      AND is_active = true
+    LIMIT 1;
     
     RETURN role_val = 'admin';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql STABLE;
+
+-- Function to check if user is sales in current company
+CREATE OR REPLACE FUNCTION public.is_sales(p_user_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+    role_val TEXT;
+BEGIN
+    SELECT role INTO role_val
+    FROM public.company_memberships
+    WHERE user_id = p_user_id
+      AND company_id = public.current_company_id()
+      AND is_active = true
+    LIMIT 1;
+    
+    RETURN role_val = 'sales';
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- Function to check if user is admin or sales in current company
+CREATE OR REPLACE FUNCTION public.is_admin_or_sales(p_user_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+    role_val TEXT;
+BEGIN
+    SELECT role INTO role_val
+    FROM public.company_memberships
+    WHERE user_id = p_user_id
+      AND company_id = public.current_company_id()
+      AND is_active = true
+    LIMIT 1;
+    
+    RETURN role_val IN ('admin', 'sales');
+END;
+$$ LANGUAGE plpgsql STABLE;
 
 -- Create company and admin user in one transaction
 CREATE OR REPLACE FUNCTION public.create_company_with_admin(
@@ -453,6 +524,19 @@ BEGIN
         now()
     );
 
+    -- Create company membership for admin user
+    INSERT INTO public.company_memberships (
+        user_id,
+        company_id,
+        role,
+        is_active
+    ) VALUES (
+        new_user_id,
+        new_company_id,
+        'admin',
+        true
+    );
+
     RETURN jsonb_build_object(
         'company_id', new_company_id,
         'user_id', new_user_id
@@ -471,7 +555,13 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+    v_company_id UUID;
+    v_role user_role;
 BEGIN
+    v_company_id := (NEW.raw_user_meta_data->>'company_id')::uuid;
+    v_role := COALESCE(NULLIF(NEW.raw_user_meta_data->>'role', ''), 'user')::user_role;
+
     INSERT INTO public.profiles (
         id,
         email,
@@ -487,9 +577,26 @@ BEGIN
         NULLIF(NEW.raw_user_meta_data->>'first_name', ''),
         NULLIF(NEW.raw_user_meta_data->>'last_name', ''),
         NULLIF(NEW.raw_user_meta_data->>'phone', ''),
-        (NEW.raw_user_meta_data->>'company_id')::uuid,
-        COALESCE(NULLIF(NEW.raw_user_meta_data->>'role', ''), 'user')::user_role
+        v_company_id,
+        v_role
     );
+
+    -- Create company membership if company_id is provided
+    IF v_company_id IS NOT NULL THEN
+        INSERT INTO public.company_memberships (
+            user_id,
+            company_id,
+            role,
+            is_active
+        )
+        VALUES (
+            NEW.id,
+            v_company_id,
+            v_role,
+            true
+        )
+        ON CONFLICT (user_id, company_id) DO NOTHING;
+    END IF;
 
     RETURN NEW;
 END;
@@ -557,20 +664,8 @@ CREATE POLICY "Categories are viewable by everyone"
 CREATE POLICY "Categories are editable by admins only"
     ON public.categories FOR ALL
     TO authenticated
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    )
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    );
+    USING (public.is_admin(auth.uid()))
+    WITH CHECK (public.is_admin(auth.uid()));
 
 -- Products policies
 CREATE POLICY "Products are viewable by everyone"
@@ -578,23 +673,21 @@ CREATE POLICY "Products are viewable by everyone"
     TO PUBLIC
     USING (true);
 
-CREATE POLICY "Products are editable by admins only"
-    ON public.products FOR ALL
+CREATE POLICY "Products are editable by admins and sales"
+    ON public.products FOR UPDATE
     TO authenticated
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    )
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    );
+    USING (public.is_admin_or_sales(auth.uid()))
+    WITH CHECK (public.is_admin_or_sales(auth.uid()));
+
+CREATE POLICY "Products are insertable by admins and sales"
+    ON public.products FOR INSERT
+    TO authenticated
+    WITH CHECK (public.is_admin_or_sales(auth.uid()));
+
+CREATE POLICY "Products are deletable by admins only"
+    ON public.products FOR DELETE
+    TO authenticated
+    USING (public.is_admin(auth.uid()));
 
 -- Product images policies
 CREATE POLICY "Product images are viewable by everyone"
@@ -605,20 +698,8 @@ CREATE POLICY "Product images are viewable by everyone"
 CREATE POLICY "Product images are editable by admins only"
     ON public.product_images FOR ALL
     TO authenticated
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    )
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    );
+    USING (public.is_admin(auth.uid()))
+    WITH CHECK (public.is_admin(auth.uid()));
 
 -- Inventory policies
 CREATE POLICY "Inventory is viewable by everyone"
@@ -629,20 +710,8 @@ CREATE POLICY "Inventory is viewable by everyone"
 CREATE POLICY "Inventory is editable by admins only"
     ON public.inventory FOR ALL
     TO authenticated
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    )
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    );
+    USING (public.is_admin(auth.uid()))
+    WITH CHECK (public.is_admin(auth.uid()));
 
 -- Orders policies
 CREATE POLICY "Users can view their own orders"
@@ -669,23 +738,11 @@ CREATE POLICY "Users can cancel their own orders"
         user_id = auth.uid()
     );
 
-CREATE POLICY "Orders are editable by admins only"
+CREATE POLICY "Orders are editable by admins and sales"
     ON public.orders FOR UPDATE
     TO authenticated
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    )
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    );
+    USING (public.is_admin_or_sales(auth.uid()))
+    WITH CHECK (public.is_admin_or_sales(auth.uid()));
 
 -- Order status history policies
 CREATE POLICY "Users can view their own order status history"
@@ -705,24 +762,12 @@ CREATE POLICY "Allow order status history creation via triggers"
     TO authenticated
     WITH CHECK (true);
 
--- Allow admins to manage all order status history
-CREATE POLICY "Admins can manage all order status history"
+-- Allow admins and sales to manage all order status history
+CREATE POLICY "Admins and sales can manage all order status history"
     ON public.order_status_history FOR ALL
     TO authenticated
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    )
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE profiles.id = auth.uid()
-            AND profiles.role = 'admin'
-        )
-    );
+    USING (public.is_admin_or_sales(auth.uid()))
+    WITH CHECK (public.is_admin_or_sales(auth.uid()));
 
 -- Order items policies
 CREATE POLICY "Users can view their own order items"
@@ -871,33 +916,21 @@ CREATE POLICY "Sales executives can view their own customers"
 ON public.customers FOR SELECT TO authenticated
 USING (
     sales_executive_id = auth.uid() OR
-    EXISTS (
-        SELECT 1 FROM profiles
-        WHERE profiles.id = auth.uid()
-        AND profiles.role IN ('admin', 'sales')
-    )
+    public.is_admin_or_sales(auth.uid())
 );
 
 CREATE POLICY "Sales executives can insert their own customers"
 ON public.customers FOR INSERT TO authenticated
 WITH CHECK (
     sales_executive_id = auth.uid() OR
-    EXISTS (
-        SELECT 1 FROM profiles
-        WHERE profiles.id = auth.uid()
-        AND profiles.role IN ('admin', 'sales')
-    )
+    public.is_admin_or_sales(auth.uid())
 );
 
 CREATE POLICY "Sales executives can update their own customers"
 ON public.customers FOR UPDATE TO authenticated
 USING (
     sales_executive_id = auth.uid() OR
-    EXISTS (
-        SELECT 1 FROM profiles
-        WHERE profiles.id = auth.uid()
-        AND profiles.role IN ('admin', 'sales')
-    )
+    public.is_admin_or_sales(auth.uid())
 );
 
 -- Admins have full access to customers table
@@ -916,11 +949,7 @@ USING (
         WHERE customers.id = credit_periods.customer_id
         AND customers.sales_executive_id = auth.uid()
     ) OR
-    EXISTS (
-        SELECT 1 FROM profiles
-        WHERE profiles.id = auth.uid()
-        AND profiles.role IN ('admin', 'sales')
-    )
+    public.is_admin_or_sales(auth.uid())
 );
 
 CREATE POLICY "Sales executives can insert transactions for their customers"
@@ -931,11 +960,7 @@ WITH CHECK (
         WHERE customers.id = credit_periods.customer_id
         AND customers.sales_executive_id = auth.uid()
     ) OR
-    EXISTS (
-        SELECT 1 FROM profiles
-        WHERE profiles.id = auth.uid()
-        AND profiles.role IN ('admin', 'sales')
-    )
+    public.is_admin_or_sales(auth.uid())
 );
 
 -- Admins have full access to credit_periods table
