@@ -1,5 +1,4 @@
 import apiClient from '@/lib/apiClient';
-import { API_BASE_URL } from '../config';
 import type { ProductCategory } from '@/types/product';
 
 export interface Category {
@@ -54,11 +53,8 @@ export const categoriesService = {
 };
 
 export const fetchCategories = async (): Promise<ProductCategory[]> => {
-  const response = await fetch(`${API_BASE_URL}/categories`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch categories');
-  }
-  const { data } = await response.json();
+  const { data: response } = await apiClient.get<ApiResponse<ProductCategory[]>>('/categories');
+  const { data } = response;
   console.log("categories data", data);
   return data;
 } 
