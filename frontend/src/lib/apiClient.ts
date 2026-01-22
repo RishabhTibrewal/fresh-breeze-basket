@@ -63,10 +63,14 @@ apiClient.interceptors.request.use(
         const parts = hostname.split('.');
         const isLocalhostDomain = parts.length === 2 && parts[1] === 'localhost';
         const hasSubdomain = parts.length > 2 || isLocalhostDomain;
+        const isRootDomain = parts.length === 2 && !isLocalhostDomain;
         const candidate = parts[0];
 
-        // Map common non-tenant prefixes to a default tenant
-        if (hasSubdomain && candidate === 'www') {
+        // Map common non-tenant prefixes/root domains to a default tenant
+        if (isRootDomain) {
+          subdomain = 'default';
+          console.log(`[API Client] Using default tenant for root domain: ${hostname}`);
+        } else if (hasSubdomain && candidate === 'www') {
           subdomain = 'default';
           console.log(`[API Client] Using default tenant for hostname: ${hostname}`);
         } else if (hasSubdomain) {
