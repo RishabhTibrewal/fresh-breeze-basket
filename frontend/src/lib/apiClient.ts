@@ -61,9 +61,16 @@ apiClient.interceptors.request.use(
       // Priority 2: Extract from URL if on a subdomain (e.g., gulffresh.gofreshco.com or gulffresh.localhost)
       else if (hostname.includes('.') && !hostname.startsWith('127.0.0.1')) {
         const parts = hostname.split('.');
-        // Check if it's a subdomain pattern (e.g., gulffresh.gofreshco.com or gulffresh.localhost)
-        if (parts.length > 2 || (parts.length === 2 && parts[0] !== 'localhost' && !parts[0].match(/^\d+$/))) {
-          subdomain = parts[0];
+        const isLocalhostDomain = parts.length === 2 && parts[1] === 'localhost';
+        const hasSubdomain = parts.length > 2 || isLocalhostDomain;
+        const candidate = parts[0];
+
+        // Map common non-tenant prefixes to a default tenant
+        if (hasSubdomain && candidate === 'www') {
+          subdomain = 'default';
+          console.log(`[API Client] Using default tenant for hostname: ${hostname}`);
+        } else if (hasSubdomain) {
+          subdomain = candidate;
           console.log(`[API Client] Extracted subdomain from hostname: ${subdomain} (from ${hostname})`);
         }
       }
