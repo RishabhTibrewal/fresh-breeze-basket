@@ -51,9 +51,13 @@ export const resolveTenant = async (req: Request, res: Response, next: NextFunct
           // Extract subdomain from origin (e.g., "gulffresh" from "gulffresh.gofreshco.com")
           if (originHostname.includes('.') && !originHostname.startsWith('localhost')) {
             const parts = originHostname.split('.');
+            const isRootDomain = parts.length === 2 && originHostname.endsWith(BASE_DOMAIN);
             if (parts.length > 2) {
               subdomain = parts[0].toLowerCase();
               console.log(`[Tenant] ✅ Extracted subdomain from Origin header: ${subdomain} (from ${originHostname})`);
+            } else if (isRootDomain || originHostname === `www.${BASE_DOMAIN}`) {
+              subdomain = DEFAULT_COMPANY_SLUG;
+              console.log(`[Tenant] ✅ Using default tenant for Origin header: ${originHostname}`);
             }
           }
         } catch (e) {
