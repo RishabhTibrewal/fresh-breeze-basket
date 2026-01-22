@@ -26,12 +26,17 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
       throw new ValidationError('User ID is required');
     }
 
-    // Get product prices
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
+    // Get product prices (filtered by company_id)
     const productIds = items.map((item: any) => item.product_id);
     const { data: products, error: productsError } = await supabase
       .from('products')
       .select('id, price, sale_price')
-      .in('id', productIds);
+      .in('id', productIds)
+      .eq('company_id', req.companyId);
 
     if (productsError || !products) {
       throw new ApiError(400, 'Failed to fetch product prices');
@@ -65,7 +70,7 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
 
     // Get default warehouse if needed
     const { getDefaultWarehouseId } = await import('../utils/warehouseInventory');
-    const defaultWarehouseId = await getDefaultWarehouseId();
+    const defaultWarehouseId = await getDefaultWarehouseId(req.companyId);
 
     // Reserve stock for all items
     const reservationErrors: string[] = [];
@@ -81,6 +86,7 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
           item.product_id,
           warehouseId,
           item.quantity,
+          req.companyId,
           true // Use admin client
         );
       } catch (err: any) {
@@ -107,11 +113,12 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
       orderNotes = customerInfo.join(', ') + (orderNotes ? ` | ${orderNotes}` : '');
     }
 
-    // Create order (without customer/user_id for POS orders)
+    // Create order (without customer/user_id for POS orders) (with company_id)
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
         user_id: null, // POS orders don't require a user
+        company_id: req.companyId,
         total_amount: totalAmount,
         status: 'pending',
         payment_method: payment_method,
@@ -130,7 +137,7 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
         try {
           const warehouseId = item.warehouse_id || defaultWarehouseId;
           if (warehouseId) {
-            await restoreReservedStock(item.product_id, warehouseId, item.quantity, true);
+            await restoreReservedStock(item.product_id, warehouseId, item.quantity, req.companyId, true);
           }
         } catch (err) {
           console.error(`Error rolling back reservation for product ${item.product_id}:`, err);
@@ -142,6 +149,7 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
     // Create order items using admin client to bypass RLS (POS orders have null user_id)
     const itemsToInsert = orderItems.map(item => ({
       order_id: order.id,
+      company_id: req.companyId,
       product_id: item.product_id,
       quantity: item.quantity,
       unit_price: item.unit_price,
@@ -155,14 +163,14 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
 
     if (itemsError) {
       console.error('Error creating order items:', itemsError);
-      // Rollback order and stock reservations
-      await supabase.from('orders').delete().eq('id', order.id);
+      // Rollback order and stock reservations (filtered by company_id)
+      await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
       const { restoreReservedStock } = await import('../utils/warehouseInventory');
       for (const item of orderItems) {
         try {
           const warehouseId = item.warehouse_id || defaultWarehouseId;
           if (warehouseId) {
-            await restoreReservedStock(item.product_id, warehouseId, item.quantity, true);
+            await restoreReservedStock(item.product_id, warehouseId, item.quantity, req.companyId, true);
           }
         } catch (err) {
           console.error(`Error rolling back reservation for product ${item.product_id}:`, err);
@@ -171,7 +179,7 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
       throw new ApiError(500, `Failed to create order items: ${itemsError.message}`);
     }
 
-    // Fetch complete order
+    // Fetch complete order (filtered by company_id)
     const { data: completeOrder, error: fetchError } = await supabase
       .from('orders')
       .select(`
@@ -182,6 +190,7 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
         )
       `)
       .eq('id', order.id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (fetchError) {

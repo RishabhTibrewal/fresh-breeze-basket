@@ -6,7 +6,7 @@ import { updateWarehouseStock } from '../utils/warehouseInventory';
 /**
  * Generate GRN number (e.g., GRN-2024-001)
  */
-const generateGRNNumber = async (): Promise<string> => {
+const generateGRNNumber = async (companyId: string): Promise<string> => {
   const year = new Date().getFullYear();
   
   const adminClient = supabaseAdmin || supabase;
@@ -14,6 +14,7 @@ const generateGRNNumber = async (): Promise<string> => {
     .schema('procurement')
     .from('goods_receipts')
     .select('grn_number')
+    .eq('company_id', companyId)
     .ilike('grn_number', `GRN-${year}-%`)
     .order('grn_number', { ascending: false })
     .limit(1)
@@ -65,6 +66,10 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
       throw new ValidationError('User ID is required');
     }
 
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
     // Verify purchase order exists
     const adminClient = supabaseAdmin || supabase;
     const { data: purchaseOrder, error: poError } = await adminClient
@@ -72,6 +77,7 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
       .from('purchase_orders')
       .select('*')
       .eq('id', purchase_order_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (poError || !purchaseOrder) {
@@ -79,7 +85,7 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
     }
 
     // Generate GRN number
-    const grn_number = await generateGRNNumber();
+    const grn_number = await generateGRNNumber(req.companyId);
 
     // Calculate total received amount
     let total_received_amount = 0;
@@ -103,7 +109,8 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
         inspection_notes,
         total_received_amount,
         notes,
-        status: 'pending'
+        status: 'pending',
+        company_id: req.companyId
       })
       .select()
       .single();
@@ -124,7 +131,8 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
       unit_price: item.unit_price,
       batch_number: item.batch_number,
       expiry_date: item.expiry_date,
-      condition_notes: item.condition_notes
+      condition_notes: item.condition_notes,
+      company_id: req.companyId
     }));
 
     const { data: createdItems, error: itemsError } = await adminClient
@@ -135,7 +143,12 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
 
     if (itemsError) {
       console.error('Error creating goods receipt items:', itemsError);
-      await adminClient.schema('procurement').from('goods_receipts').delete().eq('id', goodsReceipt.id);
+      await adminClient
+        .schema('procurement')
+        .from('goods_receipts')
+        .delete()
+        .eq('id', goodsReceipt.id)
+        .eq('company_id', req.companyId);
       throw new ApiError(500, `Failed to create goods receipt items: ${itemsError.message}`);
     }
 
@@ -156,11 +169,16 @@ export const getGoodsReceipts = async (req: Request, res: Response, next: NextFu
   try {
     const { status, warehouse_id, purchase_order_id, search } = req.query;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const adminClient = supabaseAdmin || supabase;
     let query = adminClient
       .schema('procurement')
       .from('goods_receipts')
       .select('*')
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     if (status) {
@@ -198,7 +216,8 @@ export const getGoodsReceipts = async (req: Request, res: Response, next: NextFu
         .schema('procurement')
         .from('purchase_orders')
         .select('*')
-        .in('id', purchaseOrderIds);
+        .in('id', purchaseOrderIds)
+        .eq('company_id', req.companyId);
       
       purchaseOrders?.forEach((po: any) => {
         purchaseOrdersMap.set(po.id, po);
@@ -209,7 +228,8 @@ export const getGoodsReceipts = async (req: Request, res: Response, next: NextFu
       const { data: warehouses } = await adminClient
         .from('warehouses')
         .select('*')
-        .in('id', warehouseIds);
+        .in('id', warehouseIds)
+        .eq('company_id', req.companyId);
       
       warehouses?.forEach((warehouse: any) => {
         warehousesMap.set(warehouse.id, warehouse);
@@ -239,6 +259,10 @@ export const getGoodsReceiptById = async (req: Request, res: Response, next: Nex
   try {
     const { id } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const adminClient = supabaseAdmin || supabase;
     
     // Fetch goods receipt from procurement schema
@@ -247,6 +271,7 @@ export const getGoodsReceiptById = async (req: Request, res: Response, next: Nex
       .from('goods_receipts')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (error) {
@@ -262,15 +287,16 @@ export const getGoodsReceiptById = async (req: Request, res: Response, next: Nex
       .schema('procurement')
       .from('goods_receipt_items')
       .select('*')
-      .eq('goods_receipt_id', id);
+      .eq('goods_receipt_id', id)
+      .eq('company_id', req.companyId);
 
     // Fetch related purchase order and warehouse from public/procurement schemas
     const [purchaseOrderResult, warehouseResult] = await Promise.all([
       goodsReceipt.purchase_order_id 
-        ? adminClient.schema('procurement').from('purchase_orders').select('*').eq('id', goodsReceipt.purchase_order_id).single()
+        ? adminClient.schema('procurement').from('purchase_orders').select('*').eq('id', goodsReceipt.purchase_order_id).eq('company_id', req.companyId).single()
         : Promise.resolve({ data: null, error: null }),
       goodsReceipt.warehouse_id
-        ? adminClient.from('warehouses').select('*').eq('id', goodsReceipt.warehouse_id).single()
+        ? adminClient.from('warehouses').select('*').eq('id', goodsReceipt.warehouse_id).eq('company_id', req.companyId).single()
         : Promise.resolve({ data: null, error: null })
     ]);
 
@@ -288,7 +314,8 @@ export const getGoodsReceiptById = async (req: Request, res: Response, next: Nex
       const { data: products } = await adminClient
         .from('products')
         .select('*')
-        .in('id', productIds);
+        .in('id', productIds)
+        .eq('company_id', req.companyId);
       
       products?.forEach((product: any) => {
         productsMap.set(product.id, product);
@@ -300,7 +327,8 @@ export const getGoodsReceiptById = async (req: Request, res: Response, next: Nex
         .schema('procurement')
         .from('purchase_order_items')
         .select('*')
-        .in('id', purchaseOrderItemIds);
+        .in('id', purchaseOrderItemIds)
+        .eq('company_id', req.companyId);
       
       purchaseOrderItems?.forEach((poItem: any) => {
         purchaseOrderItemsMap.set(poItem.id, poItem);
@@ -347,6 +375,10 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
       updated_at: new Date().toISOString()
     };
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     if (receipt_date !== undefined) updateData.receipt_date = receipt_date;
     if (inspection_notes !== undefined) updateData.inspection_notes = inspection_notes;
     if (notes !== undefined) updateData.notes = notes;
@@ -357,6 +389,7 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
       .from('procurement.goods_receipts')
       .update(updateData)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -373,7 +406,8 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
       await supabase
         .from('procurement.goods_receipt_items')
         .delete()
-        .eq('goods_receipt_id', id);
+        .eq('goods_receipt_id', id)
+        .eq('company_id', req.companyId);
 
       if (items.length > 0) {
         const receiptItems = items.map((item: any) => ({
@@ -386,7 +420,8 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
           unit_price: item.unit_price,
           batch_number: item.batch_number,
           expiry_date: item.expiry_date,
-          condition_notes: item.condition_notes
+          condition_notes: item.condition_notes,
+          company_id: req.companyId
         }));
 
         const { error: itemsError } = await supabase
@@ -407,7 +442,8 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
         await supabase
           .from('procurement.goods_receipts')
           .update({ total_received_amount })
-          .eq('id', id);
+          .eq('id', id)
+          .eq('company_id', req.companyId);
       }
     }
 
@@ -424,6 +460,7 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
         )
       `)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (fetchError) {
@@ -447,6 +484,10 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
     const { id } = req.params;
     const { items } = req.body;
 
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
     if (!items || !Array.isArray(items)) {
       throw new ValidationError('Items array is required');
     }
@@ -456,6 +497,7 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
       .from('procurement.goods_receipts')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (grnError || !goodsReceipt) {
@@ -476,6 +518,7 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
           product_id,
           warehouse_id,
           quantity_accepted,
+          req.companyId,
           false, // Don't allow negative
           true // Use admin client
         );
@@ -489,6 +532,7 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
         .from('procurement.purchase_order_items')
         .select('received_quantity')
         .eq('id', item.purchase_order_item_id)
+        .eq('company_id', req.companyId)
         .single();
 
       if (poiData) {
@@ -496,7 +540,8 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
         await supabase
           .from('procurement.purchase_order_items')
           .update({ received_quantity: newReceivedQuantity })
-          .eq('id', item.purchase_order_item_id);
+          .eq('id', item.purchase_order_item_id)
+          .eq('company_id', req.companyId);
       }
     }
 
@@ -508,6 +553,7 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -533,10 +579,15 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
   try {
     const { id } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const { data: goodsReceipt, error: grnError } = await supabase
       .from('procurement.goods_receipts')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (grnError || !goodsReceipt) {
@@ -547,7 +598,8 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
     const { data: items, error: itemsError } = await supabase
       .from('procurement.goods_receipt_items')
       .select('*')
-      .eq('goods_receipt_id', id);
+      .eq('goods_receipt_id', id)
+      .eq('company_id', req.companyId);
 
     if (itemsError) {
       console.error('Error fetching goods receipt items:', itemsError);
@@ -563,6 +615,7 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
             item.product_id,
             goodsReceipt.warehouse_id,
             item.quantity_accepted,
+            req.companyId,
             false,
             true
           );
@@ -575,6 +628,7 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
           .from('procurement.purchase_order_items')
           .select('received_quantity')
           .eq('id', item.purchase_order_item_id)
+          .eq('company_id', req.companyId)
           .single();
 
         if (poiData) {
@@ -582,7 +636,8 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
           await supabase
             .from('procurement.purchase_order_items')
             .update({ received_quantity: newReceivedQuantity })
-            .eq('id', item.purchase_order_item_id);
+            .eq('id', item.purchase_order_item_id)
+            .eq('company_id', req.companyId);
         }
       }
     }
@@ -595,6 +650,7 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 

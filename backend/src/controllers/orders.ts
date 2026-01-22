@@ -63,12 +63,17 @@ export const getOrders = async (req: Request, res: Response) => {
     
     console.log('Admin status confirmed, fetching all orders');
     
-    // First get the total count
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
+    // First get the total count (filtered by company_id)
     const { count: totalCount } = await supabase
       .from('orders')
-      .select('*', { count: 'exact', head: true });
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', req.companyId);
     
-    let query = supabase.from('orders').select('*, order_items(*, products(*))');
+    let query = supabase.from('orders').select('*, order_items(*, products(*))').eq('company_id', req.companyId);
     
     // Apply filters
     if (status) {
@@ -128,10 +133,15 @@ export const getUserOrders = async (req: Request, res: Response) => {
   try {
     const userId = req.user.id;
     
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { data, error } = await supabase
       .from('orders')
       .select('*, order_items(*)')
       .eq('user_id', userId)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
     
     if (error) {
@@ -157,6 +167,10 @@ export const getOrderById = async (req: Request, res: Response) => {
     const userId = req.user.id;
     
     console.log('getOrderById, Order ID:', id, 'User ID:', userId);
+
+    if (!req.companyId) {
+      return res.status(400).json({ error: 'Company context is required' });
+    }
     
     // Check if the user exists in profiles table
     let isAdmin = false;
@@ -205,6 +219,7 @@ export const getOrderById = async (req: Request, res: Response) => {
         )
       `)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (orderError) {
@@ -221,6 +236,7 @@ export const getOrderById = async (req: Request, res: Response) => {
         .from('customers')
         .select('id, sales_executive_id')
         .eq('user_id', order.user_id)
+        .eq('company_id', req.companyId)
         .single();
         
       if (customer && customer.sales_executive_id === userId) {
@@ -245,7 +261,8 @@ export const getOrderById = async (req: Request, res: Response) => {
         *,
         product:products (*)
       `)
-      .eq('order_id', id);
+      .eq('order_id', id)
+      .eq('company_id', req.companyId);
       
     if (itemsError) {
       console.error('Error fetching order items:', itemsError);
@@ -261,6 +278,7 @@ export const getOrderById = async (req: Request, res: Response) => {
         .from('credit_periods')
         .select('*')
         .eq('order_id', id)
+        .eq('company_id', req.companyId)
         .single();
       
       if (!creditError && creditPeriod) {
@@ -299,6 +317,7 @@ export const getOrderById = async (req: Request, res: Response) => {
       .from('customers')
       .select('*')
       .eq('user_id', order.user_id)
+      .eq('company_id', req.companyId)
       .single();
       
     if (!customerError && customer) {
@@ -784,6 +803,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       .from('orders')
       .select('*, order_items(product_id, quantity, warehouse_id), status, inventory_updated, user_id, payment_status')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (currentOrderError || !currentOrder) {
@@ -799,6 +819,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         .from('customers')
         .select('sales_executive_id')
         .eq('user_id', currentOrder.user_id)
+        .eq('company_id', req.companyId)
         .single();
         
       if (!customerError && customer && customer.sales_executive_id === userId) {
@@ -889,7 +910,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         const { updateWarehouseStock, getDefaultWarehouseId } = await import('../utils/warehouseInventory');
         
         // Get default warehouse if needed
-        const defaultWarehouseId = await getDefaultWarehouseId();
+        const defaultWarehouseId = await getDefaultWarehouseId(req.companyId);
         
         // Process each item and release reserved stock (deduct from reserved_stock)
         const { releaseReservedStock } = await import('../utils/warehouseInventory');
@@ -911,6 +932,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
               item.product_id,
               warehouseId,
               item.quantity,
+              req.companyId,
               isSalesDashboardOrder, // Allow negative for sales orders
               true // Use admin client to bypass RLS for system operations
             );
@@ -931,6 +953,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       .from('orders')
       .update(updateData)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
     
@@ -946,6 +969,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           .from('credit_periods')
           .select('*')
           .eq('order_id', id)
+          .eq('company_id', req.companyId)
           .single();
           
         if (creditError) {
@@ -1005,6 +1029,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
               .from('credit_periods')
               .update(creditUpdateData)
               .eq('id', creditPeriod.id)
+              .eq('company_id', req.companyId)
               .select(); // Added .select() to get the result of the update
 
             if (updateCreditError) {
@@ -1017,6 +1042,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
                 .from('customers')
                 .select('id, current_credit')
                 .eq('user_id', currentOrder.user_id)
+                .eq('company_id', req.companyId)
                 .single();
                 
               if (customerError) {
@@ -1029,7 +1055,8 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
                 const { error: customerUpdateError } = await supabase
                   .from('customers')
                   .update({ current_credit: newCreditAmount })
-                  .eq('id', customer.id);
+                  .eq('id', customer.id)
+                  .eq('company_id', req.companyId);
                   
                 if (customerUpdateError) {
                   console.error('Error updating customer credit:', customerUpdateError);
@@ -1055,6 +1082,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         .from('credit_periods')
         .select('*')
         .eq('order_id', id)
+        .eq('company_id', req.companyId)
         .single();
         
       if (!creditError && creditPeriod) {
@@ -1065,6 +1093,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           .from('customers')
           .select('id, current_credit')
           .eq('user_id', currentOrder.user_id)
+          .eq('company_id', req.companyId)
           .single();
           
         if (!customerError && customer) {
@@ -1084,7 +1113,8 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           const { error: updateError } = await supabase
             .from('customers')
             .update({ current_credit: newCreditAmount })
-            .eq('id', customer.id);
+            .eq('id', customer.id)
+            .eq('company_id', req.companyId);
             
           if (updateError) {
             console.error('Error updating customer credit after cancellation:', updateError);
@@ -1107,7 +1137,8 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
             // amount: 0, // Set amount to 0 since the credit is cancelled
             end_date: new Date().toISOString().split('T')[0] // Set end date to current date
           })
-          .eq('id', creditPeriod.id);
+          .eq('id', creditPeriod.id)
+          .eq('company_id', req.companyId);
         if (creditUpdateResult.error) {
           console.error('Error updating credit period:', creditUpdateResult.error);
         } else {
@@ -1142,6 +1173,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
       .from('orders')
       .select('*, order_items(product_id, quantity, warehouse_id), user_id') // Ensure user_id is selected
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     const { data: order, error: orderError } = await orderQuery;
@@ -1174,6 +1206,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
         .from('customers')
         .select('sales_executive_id')
         .eq('user_id', order.user_id)
+        .eq('company_id', req.companyId)
         .single();
       if (customer && customer.sales_executive_id === userId) {
         hasPermission = true;
@@ -1236,6 +1269,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
         updated_at: new Date()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
     
@@ -1251,7 +1285,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
       const { restoreReservedStock, updateWarehouseStock, getDefaultWarehouseId } = await import('../utils/warehouseInventory');
       
       // Get default warehouse if needed
-      const defaultWarehouseId = await getDefaultWarehouseId();
+      const defaultWarehouseId = await getDefaultWarehouseId(req.companyId);
       
       for (const item of orderItems) {
         try {
@@ -1270,6 +1304,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
               item.product_id,
               warehouseId,
               item.quantity, // Positive to restore stock
+              req.companyId,
               false, // Don't allow negative
               true // Use admin client to bypass RLS for system operations
             );
@@ -1282,6 +1317,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
               item.product_id,
               warehouseId,
               item.quantity,
+              req.companyId,
               true // Use admin client to bypass RLS for system operations
             );
             
@@ -1298,6 +1334,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
       .from('credit_periods')
       .select('*')
       .eq('order_id', id)
+      .eq('company_id', req.companyId)
       .single();
     console.log('[CancelOrder] creditPeriod lookup result:', { creditPeriod, creditError });
     if (!creditError && creditPeriod) {
@@ -1307,6 +1344,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
         .from('customers')
         .select('id, current_credit')
         .eq('user_id', order.user_id)
+        .eq('company_id', req.companyId)
         .single();
       if (!customerError && customer) {
         // Calculate new current_credit by subtracting the credit amount
@@ -1317,7 +1355,8 @@ export const cancelOrder = async (req: Request, res: Response) => {
         const { error: updateError } = await supabase
           .from('customers')
           .update({ current_credit: newCreditAmount })
-          .eq('id', customer.id);
+          .eq('id', customer.id)
+          .eq('company_id', req.companyId);
         if (updateError) {
           console.error('[CancelOrder] Error updating customer credit after cancellation:', updateError);
         } else {
@@ -1332,7 +1371,8 @@ export const cancelOrder = async (req: Request, res: Response) => {
           amount: 0, // Set amount to 0 since the credit is cancelled
           end_date: new Date().toISOString().split('T')[0] // Set end date to current date
         })
-        .eq('id', creditPeriod.id);
+        .eq('id', creditPeriod.id)
+        .eq('company_id', req.companyId);
       if (creditUpdateResult.error) {
         console.error('Error updating credit period:', creditUpdateResult.error);
       } else {
@@ -1359,14 +1399,19 @@ export const cancelOrder = async (req: Request, res: Response) => {
 // Get all orders for sales executive's customers
 export const getSalesOrders = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      return res.status(400).json({ error: 'Company context is required' });
+    }
+    
     const sales_executive_id = req.user?.id;
     console.log('Fetching orders for sales executive:', sales_executive_id);
 
-    // Get all customers for this sales executive
+    // Get all customers for this sales executive (filtered by company_id)
     const { data: customers, error: customersError } = await supabase
       .from('customers')
       .select('id, user_id, name')
-      .eq('sales_executive_id', sales_executive_id);
+      .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId);
 
     if (customersError) {
       console.error('Error fetching customers:', customersError);
@@ -1395,6 +1440,7 @@ export const getSalesOrders = async (req: Request, res: Response) => {
         credit_periods (*)
       `)
       .in('user_id', customerUserIds)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     if (ordersError) {
@@ -1447,23 +1493,29 @@ export const getSalesOrders = async (req: Request, res: Response) => {
 // Get sales dashboard statistics for the logged-in sales executive
 export const getSalesDashboardStats = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      return res.status(400).json({ error: 'Company context is required' });
+    }
+    
     const sales_executive_id = req.user?.id;
-    // Get all customers for this sales executive
+    // Get all customers for this sales executive (filtered by company_id)
     const { data: customers, error: customersError } = await supabase
       .from('customers')
       .select('id, user_id, name, current_credit')
-      .eq('sales_executive_id', sales_executive_id);
+      .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId);
     if (customersError) {
       console.error('Error fetching customers:', customersError);
       return res.status(500).json({ error: 'Failed to fetch customers' });
     }
     const totalCustomers = customers?.length || 0;
     const customerUserIds = customers.map(c => c.user_id);
-    // Get all orders for these customers
+    // Get all orders for these customers (filtered by company_id)
     const { data: orders, error: ordersError } = await supabase
       .from('orders')
       .select('id, user_id, total_amount, status, created_at')
-      .in('user_id', customerUserIds);
+      .in('user_id', customerUserIds)
+      .eq('company_id', req.companyId);
     if (ordersError) {
       console.error('Error fetching orders:', ordersError);
       return res.status(500).json({ error: 'Failed to fetch orders' });
@@ -1500,6 +1552,10 @@ export const getSalesDashboardStats = async (req: Request, res: Response) => {
 // Get detailed sales analytics for sales executive
 export const getSalesAnalytics = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      return res.status(400).json({ error: 'Company context is required' });
+    }
+    
     const sales_executive_id = req.user?.id;
     const { period = '30' } = req.query; // Default to last 30 days
     const days = parseInt(period as string, 10);
@@ -1509,11 +1565,12 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get all customers for this sales executive
+    // Get all customers for this sales executive (filtered by company_id)
     const { data: customers, error: customersError } = await supabase
       .from('customers')
       .select('id, user_id, name, current_credit, credit_limit')
-      .eq('sales_executive_id', sales_executive_id);
+      .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId);
 
     if (customersError) {
       console.error('Error fetching customers:', customersError);
@@ -1556,11 +1613,12 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
       });
     }
 
-    // Get all orders for these customers within the date range
+    // Get all orders for these customers within the date range (filtered by company_id)
     const { data: orders, error: ordersError } = await supabase
       .from('orders')
       .select('id, user_id, total_amount, status, payment_status, payment_method, created_at')
       .in('user_id', customerUserIds)
+      .eq('company_id', req.companyId)
       .gte('created_at', startDate.toISOString())
       .lte('created_at', endDate.toISOString())
       .order('created_at', { ascending: false });
@@ -1572,12 +1630,13 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
 
     const filteredOrders = orders?.filter(order => order.status !== 'cancelled') || [];
 
-    // Get credit periods for orders with partial or credit payments to calculate actual amounts
+    // Get credit periods for orders with partial or credit payments to calculate actual amounts (filtered by company_id)
     const orderIds = filteredOrders.map(o => o.id);
     const { data: creditPeriods, error: creditError } = await supabase
       .from('credit_periods')
       .select('order_id, amount')
-      .in('order_id', orderIds);
+      .in('order_id', orderIds)
+      .eq('company_id', req.companyId);
 
     // Create a map of order_id to credit amount (unpaid amount)
     const creditAmountMap = new Map<string, number>();
@@ -1692,12 +1751,13 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
     const totalLimit = customers?.reduce((sum, c) => sum + parseFloat(c.credit_limit || '0'), 0) || 0;
     const utilizationRate = totalLimit > 0 ? (totalCredit / totalLimit) * 100 : 0;
 
-    // Get top products (need to fetch order items)
+    // Get top products (need to fetch order items) (filtered by company_id)
     const productOrderIds = filteredOrders.map(o => o.id);
     const { data: orderItems, error: itemsError } = await supabase
       .from('order_items')
       .select('product_id, quantity, price, product:products(name)')
-      .in('order_id', productOrderIds);
+      .in('order_id', productOrderIds)
+      .eq('company_id', req.companyId);
 
     const productSales: { [key: string]: { name: string; quantity: number; revenue: number } } = {};
     if (orderItems && !itemsError) {
@@ -1734,12 +1794,13 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
       ? ((secondHalfOrders.length - firstHalfOrders.length) / firstHalfOrders.length) * 100 
       : 0;
 
-    // Get current active sales target
+    // Get current active sales target (filtered by company_id)
     const today = new Date().toISOString().split('T')[0];
     const { data: currentTarget } = await supabase
       .from('sales_targets')
       .select('*')
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .eq('is_active', true)
       .lte('period_start', today)
       .gte('period_end', today)

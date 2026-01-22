@@ -9,6 +9,16 @@ END $$;
 -- Create enum for user roles
 CREATE TYPE user_role AS ENUM ('user', 'admin', "sales");
 
+-- Companies Table
+CREATE TABLE IF NOT EXISTS public.companies (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    slug TEXT UNIQUE NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Profiles Table
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -18,6 +28,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     phone TEXT,
     password TEXT,
     avatar_url TEXT,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     role user_role DEFAULT 'user',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -30,6 +41,7 @@ CREATE TABLE IF NOT EXISTS public.categories (
     description TEXT,
     image_url TEXT,
     slug VARCHAR(100) UNIQUE NOT NULL,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -51,6 +63,7 @@ CREATE TABLE IF NOT EXISTS public.products (
     nutritional_info JSONB,
     origin VARCHAR(100),
     best_before DATE,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -62,6 +75,7 @@ CREATE TABLE IF NOT EXISTS public.product_images (
     image_url TEXT NOT NULL,
     is_primary BOOLEAN DEFAULT false,
     display_order INTEGER DEFAULT 0,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -69,7 +83,7 @@ CREATE TABLE IF NOT EXISTS public.product_images (
 CREATE TABLE IF NOT EXISTS public.warehouses (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
-    code VARCHAR(50) UNIQUE NOT NULL,
+    code VARCHAR(50) NOT NULL,
     address TEXT,
     city VARCHAR(100),
     state VARCHAR(100),
@@ -79,8 +93,11 @@ CREATE TABLE IF NOT EXISTS public.warehouses (
     contact_phone VARCHAR(50),
     contact_email VARCHAR(255),
     is_active BOOLEAN DEFAULT true,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    -- Composite unique constraint: warehouse codes must be unique within each company
+    CONSTRAINT warehouses_company_code_unique UNIQUE (company_id, code)
 );
 
 -- Warehouse Inventory Table (replaces single stock_count in products)
@@ -92,6 +109,7 @@ CREATE TABLE IF NOT EXISTS public.warehouse_inventory (
     reserved_stock INTEGER DEFAULT 0,
     max_stock INTEGER,
     location TEXT,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(warehouse_id, product_id),
@@ -106,6 +124,7 @@ CREATE TABLE IF NOT EXISTS public.inventory (
     low_stock_threshold INTEGER DEFAULT 10,
     batch_number VARCHAR(100),
     expiry_date DATE,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT positive_quantity CHECK (quantity >= 0)
@@ -123,6 +142,7 @@ CREATE TABLE IF NOT EXISTS public.addresses (
     postal_code TEXT NOT NULL,
     country TEXT NOT NULL,
     is_default BOOLEAN DEFAULT false,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -171,6 +191,7 @@ CREATE TABLE IF NOT EXISTS public.orders (
     payment_intent_id TEXT,
     payment_status VARCHAR(50) DEFAULT 'pending',
     payment_method VARCHAR(50) DEFAULT 'card',
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT valid_status CHECK (status IN ('pending', 'processing', 'shipped', 'delivered', 'cancelled'))
@@ -182,6 +203,7 @@ CREATE TABLE IF NOT EXISTS public.order_status_history (
     order_id UUID REFERENCES public.orders(id) ON DELETE CASCADE,
     status VARCHAR(50) NOT NULL,
     notes TEXT,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT valid_status CHECK (status IN ('pending', 'processing', 'shipped', 'delivered', 'cancelled'))
 );
@@ -194,6 +216,7 @@ CREATE TABLE IF NOT EXISTS public.order_items (
     quantity INTEGER NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     warehouse_id UUID REFERENCES public.warehouses(id),
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT positive_quantity CHECK (quantity > 0)
 );
@@ -208,6 +231,7 @@ CREATE TABLE IF NOT EXISTS public.payments (
     stripe_payment_intent_id VARCHAR(255),
     payment_gateway_response JSONB,
     transaction_references JSONB,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT valid_status CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
@@ -218,6 +242,7 @@ CREATE TABLE IF NOT EXISTS public.payments (
 CREATE TABLE IF NOT EXISTS public.carts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id)
@@ -229,6 +254,7 @@ CREATE TABLE IF NOT EXISTS public.cart_items (
     cart_id UUID REFERENCES public.carts(id) ON DELETE CASCADE,
     product_id UUID REFERENCES public.products(id) ON DELETE CASCADE,
     quantity INTEGER NOT NULL DEFAULT 1,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT positive_quantity CHECK (quantity > 0),
@@ -319,6 +345,162 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Create company and admin user in one transaction
+CREATE OR REPLACE FUNCTION public.create_company_with_admin(
+    p_company_name TEXT,
+    p_company_slug TEXT,
+    p_email TEXT,
+    p_password TEXT,
+    p_first_name TEXT DEFAULT NULL,
+    p_last_name TEXT DEFAULT NULL,
+    p_phone TEXT DEFAULT NULL
+)
+RETURNS JSONB
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    new_company_id UUID;
+    new_user_id UUID;
+    auth_instance_id UUID;
+BEGIN
+    IF p_company_name IS NULL OR p_email IS NULL OR p_password IS NULL THEN
+        RAISE EXCEPTION 'company_name, email, and password are required';
+    END IF;
+
+    IF p_company_slug IS NULL OR btrim(p_company_slug) = '' THEN
+        RAISE EXCEPTION 'company_slug is required';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM public.companies WHERE slug = p_company_slug) THEN
+        RAISE EXCEPTION 'Company slug already in use';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM auth.users WHERE email = p_email) THEN
+        RAISE EXCEPTION 'Email already registered';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM public.profiles WHERE email = p_email) THEN
+        RAISE EXCEPTION 'Email already registered';
+    END IF;
+
+    SELECT id INTO auth_instance_id
+    FROM auth.instances
+    LIMIT 1;
+
+    IF auth_instance_id IS NULL THEN
+        SELECT instance_id INTO auth_instance_id
+        FROM auth.users
+        WHERE instance_id IS NOT NULL
+        LIMIT 1;
+    END IF;
+
+    IF auth_instance_id IS NULL THEN
+        RAISE EXCEPTION 'Auth instance not found';
+    END IF;
+
+    INSERT INTO public.companies (name, slug)
+    VALUES (p_company_name, p_company_slug)
+    RETURNING id INTO new_company_id;
+
+    new_user_id := gen_random_uuid();
+
+    INSERT INTO auth.users (
+        id,
+        instance_id,
+        aud,
+        role,
+        email,
+        email_confirmed_at,
+        raw_app_meta_data,
+        raw_user_meta_data,
+        created_at,
+        updated_at,
+        encrypted_password
+    ) VALUES (
+        new_user_id,
+        auth_instance_id,
+        'authenticated',
+        'authenticated',
+        p_email,
+        now(),
+        jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email')),
+        jsonb_build_object(
+            'first_name', p_first_name,
+            'last_name', p_last_name,
+            'phone', p_phone,
+            'company_id', new_company_id,
+            'role', 'admin'
+        ),
+        now(),
+        now(),
+        extensions.crypt(p_password, extensions.gen_salt('bf'))
+    );
+
+    INSERT INTO auth.identities (
+        user_id,
+        provider,
+        provider_id,
+        identity_data,
+        created_at,
+        updated_at
+    ) VALUES (
+        new_user_id,
+        'email',
+        new_user_id::text,
+        jsonb_build_object('sub', new_user_id::text, 'email', p_email),
+        now(),
+        now()
+    );
+
+    RETURN jsonb_build_object(
+        'company_id', new_company_id,
+        'user_id', new_user_id
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+GRANT EXECUTE ON FUNCTION public.create_company_with_admin(
+    TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
+) TO service_role;
+
+-- Create a trigger to sync new auth users to profiles with company context
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    INSERT INTO public.profiles (
+        id,
+        email,
+        first_name,
+        last_name,
+        phone,
+        company_id,
+        role
+    )
+    VALUES (
+        NEW.id,
+        NEW.email,
+        NULLIF(NEW.raw_user_meta_data->>'first_name', ''),
+        NULLIF(NEW.raw_user_meta_data->>'last_name', ''),
+        NULLIF(NEW.raw_user_meta_data->>'phone', ''),
+        (NEW.raw_user_meta_data->>'company_id')::uuid,
+        COALESCE(NULLIF(NEW.raw_user_meta_data->>'role', ''), 'user')::user_role
+    );
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_new_user();
+
 -- Profiles policies
 CREATE POLICY "Users can view their own profile"
     ON public.profiles FOR SELECT
@@ -336,6 +518,19 @@ CREATE POLICY "Allow profile creation during registration"
     ON public.profiles FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = id);
+
+-- Allow auth admin/service role to insert profiles from auth trigger
+DROP POLICY IF EXISTS "Allow profile insert from auth admin" ON public.profiles;
+CREATE POLICY "Allow profile insert from auth admin"
+    ON public.profiles FOR INSERT
+    TO supabase_auth_admin
+    WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow profile insert from service role" ON public.profiles;
+CREATE POLICY "Allow profile insert from service role"
+    ON public.profiles FOR INSERT
+    TO service_role
+    WITH CHECK (true);
 
 -- Remove the recursive admin policies and replace with simpler ones
 DROP POLICY IF EXISTS "Admins can view all profiles" ON public.profiles;
@@ -640,6 +835,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
     credit_period_days INTEGER DEFAULT 0,
     credit_limit DECIMAL(10,2) DEFAULT 0,
     current_credit DECIMAL(10,2) DEFAULT 0,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT positive_credit_period CHECK (credit_period_days >= 0),
@@ -657,6 +853,7 @@ CREATE TABLE IF NOT EXISTS public.credit_periods (
     end_date DATE NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('credit', 'payment')),
     description TEXT,
+    company_id UUID NOT NULL REFERENCES public.companies(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

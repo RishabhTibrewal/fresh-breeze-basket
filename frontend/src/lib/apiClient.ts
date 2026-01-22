@@ -1,8 +1,33 @@
 import axios from 'axios';
 import { supabase } from '../integrations/supabase/client';
+import { API_BASE_URL as configApiBaseUrl } from '../config';
 
-// // const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://rishabh.dtsanskar.tech/api'||'http://localhost:5000/api';
+const resolveApiBaseUrl = () => {
+  // Priority 1: Use environment variable if set
+  const envBase = import.meta.env.VITE_API_BASE_URL;
+  if (envBase) {
+    return envBase;
+  }
+
+  // Priority 2: Use config file (which has production default)
+  if (configApiBaseUrl) {
+    return configApiBaseUrl;
+  }
+
+  // Priority 3: Fallback to localhost for development
+  if (typeof window !== 'undefined') {
+    const { protocol, host } = window.location;
+    if (host.includes('localhost')) {
+      return 'http://localhost:5000/api';
+    }
+    // For production, this shouldn't be reached if config is set correctly
+    return `${protocol}//${host}/api`;
+  }
+
+  return 'http://localhost:5000/api';
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -22,6 +47,52 @@ let isRefreshing = false;
 // Add request interceptor for auth token
 apiClient.interceptors.request.use(
   async (config) => {
+    // Extract subdomain from current host and add as header for tenant resolution
+    if (typeof window !== 'undefined') {
+      const hostname = window.location.hostname;
+      let subdomain: string | null = null;
+      
+      // Priority 1: Check localStorage for manually set tenant (useful for localhost testing)
+      const storedSubdomain = localStorage.getItem('tenant_subdomain');
+      if (storedSubdomain) {
+        subdomain = storedSubdomain;
+        console.log(`[API Client] Using tenant_subdomain from localStorage: ${subdomain}`);
+      } 
+      // Priority 2: Extract from URL if on a subdomain (e.g., gulffresh.gofreshco.com or gulffresh.localhost)
+      else if (hostname.includes('.') && !hostname.startsWith('127.0.0.1')) {
+        const parts = hostname.split('.');
+        // Check if it's a subdomain pattern (e.g., gulffresh.gofreshco.com or gulffresh.localhost)
+        if (parts.length > 2 || (parts.length === 2 && parts[0] !== 'localhost' && !parts[0].match(/^\d+$/))) {
+          subdomain = parts[0];
+          console.log(`[API Client] Extracted subdomain from hostname: ${subdomain} (from ${hostname})`);
+        }
+      }
+      // Priority 3: For localhost/127.0.0.1, use default or check URL hash/query params
+      else if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        // Check URL hash or query params for tenant (e.g., ?tenant=gulffresh or #tenant=gulffresh)
+        const urlParams = new URLSearchParams(window.location.search);
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const tenantFromUrl = urlParams.get('tenant') || hashParams.get('tenant');
+        
+        if (tenantFromUrl) {
+          subdomain = tenantFromUrl;
+          localStorage.setItem('tenant_subdomain', subdomain); // Remember it
+          console.log(`[API Client] Using tenant from URL: ${subdomain}`);
+        } else {
+          subdomain = 'default'; // Default fallback for localhost
+          console.log(`[API Client] Using default tenant for localhost: ${subdomain}`);
+        }
+      }
+      
+      // Always send the subdomain header
+      if (subdomain) {
+        config.headers['X-Tenant-Subdomain'] = subdomain;
+        console.log(`[API Client] ✅ Sending X-Tenant-Subdomain header: ${subdomain}`);
+      } else {
+        console.warn(`[API Client] ⚠️ Could not determine tenant subdomain from hostname: ${hostname}`);
+      }
+    }
+    
     // Check localStorage first for token (faster than Supabase API call)
     const cachedToken = localStorage.getItem('supabase_token');
     
@@ -244,4 +315,25 @@ apiClient.interceptors.response.use(
   }
 );
 
-export default apiClient; 
+export default apiClient;
+
+// Helper function to set tenant subdomain for localhost testing
+// Usage: window.setTenant('gulffresh') or window.setTenant('default')
+if (typeof window !== 'undefined') {
+  (window as any).setTenant = (subdomain: string) => {
+    localStorage.setItem('tenant_subdomain', subdomain);
+    console.log(`✅ Tenant subdomain set to: ${subdomain}. Refresh the page for changes to take effect.`);
+    return subdomain;
+  };
+  
+  (window as any).getTenant = () => {
+    const tenant = localStorage.getItem('tenant_subdomain');
+    console.log(`Current tenant subdomain: ${tenant || 'not set (will use default)'}`);
+    return tenant;
+  };
+  
+  (window as any).clearTenant = () => {
+    localStorage.removeItem('tenant_subdomain');
+    console.log(`✅ Tenant subdomain cleared. Will use default on next request.`);
+  };
+} 

@@ -13,6 +13,10 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
     const { id } = req.params;
     const { status, tracking_number, estimated_delivery, notes } = req.body;
     const userId = req.user.id;
+
+    if (!req.companyId) {
+      return res.status(400).json({ error: 'Company context is required' });
+    }
     
     // Check if user is admin or sales
     let isAdmin = false;
@@ -47,6 +51,7 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
       .from('orders')
       .select('*, user_id')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
       
     if (orderError) {
@@ -62,6 +67,7 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
         .from('customers')
         .select('sales_executive_id')
         .eq('user_id', order.user_id)
+        .eq('company_id', req.companyId)
         .single();
         
       if (customer && customer.sales_executive_id === userId) {
@@ -90,6 +96,7 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
       .from('orders')
       .update(updateData)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
       

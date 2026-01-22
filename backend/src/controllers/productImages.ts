@@ -7,6 +7,10 @@ export const addProductImage = async (req: Request, res: Response, next: NextFun
     const { product_id } = req.params;
     const { image_url, is_primary = false, display_order = 0 } = req.body;
 
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
     if (!image_url) {
       throw new ValidationError('Image URL is required');
     }
@@ -16,6 +20,7 @@ export const addProductImage = async (req: Request, res: Response, next: NextFun
       .insert([
         {
           product_id,
+          company_id: req.companyId,
           image_url,
           is_primary,
           display_order
@@ -41,10 +46,15 @@ export const getProductImages = async (req: Request, res: Response, next: NextFu
   try {
     const { product_id } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const { data, error } = await supabase
       .from('product_images')
       .select('*')
       .eq('product_id', product_id)
+      .eq('company_id', req.companyId)
       .order('display_order', { ascending: true });
 
     if (error) {
@@ -65,11 +75,16 @@ export const updateProductImage = async (req: Request, res: Response, next: Next
     const { id } = req.params;
     const { image_url, is_primary, display_order } = req.body;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     // First get the current image to check if display_order is changing
     const { data: currentImage, error: fetchError } = await supabase
       .from('product_images')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (fetchError) {
@@ -83,6 +98,7 @@ export const updateProductImage = async (req: Request, res: Response, next: Next
         .from('product_images')
         .select('*')
         .eq('product_id', currentImage.product_id)
+        .eq('company_id', req.companyId)
         .order('display_order', { ascending: true });
 
       if (allImagesError) {
@@ -117,7 +133,8 @@ export const updateProductImage = async (req: Request, res: Response, next: Next
           await supabase
             .from('product_images')
             .update({ display_order: newOrder })
-            .eq('id', image.id);
+            .eq('id', image.id)
+            .eq('company_id', req.companyId);
         }
       });
 
@@ -130,6 +147,7 @@ export const updateProductImage = async (req: Request, res: Response, next: Next
         .from('product_images')
         .update({ is_primary: false })
         .eq('product_id', currentImage.product_id)
+        .eq('company_id', req.companyId)
         .neq('id', id);
     }
 
@@ -142,6 +160,7 @@ export const updateProductImage = async (req: Request, res: Response, next: Next
         display_order
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -162,10 +181,15 @@ export const deleteProductImage = async (req: Request, res: Response, next: Next
   try {
     const { id } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const { error } = await supabase
       .from('product_images')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('company_id', req.companyId);
 
     if (error) {
       throw new ApiError(500, 'Error deleting product image');
@@ -185,6 +209,10 @@ export const bulkAddProductImages = async (req: Request, res: Response, next: Ne
     const { product_id } = req.params;
     const { images } = req.body;
 
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
     if (!Array.isArray(images) || images.length === 0) {
       throw new ValidationError('Images array is required');
     }
@@ -192,6 +220,7 @@ export const bulkAddProductImages = async (req: Request, res: Response, next: Ne
     // Format the images with the product_id
     const imagesData = images.map(img => ({
       product_id,
+      company_id: req.companyId,
       image_url: img.image_url,
       is_primary: img.is_primary || false,
       display_order: img.display_order || 0

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
@@ -8,9 +8,17 @@ import { getDefaultWarehouseId, updateWarehouseStock } from '../utils/warehouseI
 // Get all products with optional filtering
 export const getProducts = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
     const { category, minPrice, maxPrice, inStock, sortBy, limit, page } = req.query;
     
-    let query = supabase.from('products').select('*');
+    const client = supabaseAdmin || supabase;
+    let query = client.from('products').select('*');
+
+    if (req.companyId) {
+      query = query.eq('company_id', req.companyId);
+    }
     
     // Apply filters
     if (category) {
@@ -72,11 +80,24 @@ export const getProductById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Company context is required',
+          code: 400
+        }
+      });
+    }
+    
+    const client = supabaseAdmin || supabase;
+
     // First get the product with its category
-    const { data: product, error: productError } = await supabase
+    const { data: product, error: productError } = await client
       .from('products')
       .select('*, categories(*)')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
     
     if (productError || !product) {
@@ -90,10 +111,11 @@ export const getProductById = async (req: Request, res: Response) => {
     }
 
     // Then get the product images
-    const { data: images, error: imagesError } = await supabase
+    const { data: images, error: imagesError } = await client
       .from('product_images')
       .select('*')
       .eq('product_id', id)
+      .eq('company_id', req.companyId)
       .order('display_order', { ascending: true });
 
     if (imagesError) {
@@ -154,6 +176,10 @@ export const createProduct = async (req: Request, res: Response) => {
       badge
     } = req.body;
     
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     // Validate required fields
     if (!name || !price) {
       throw new ApiError(400, 'Please provide all required fields');
@@ -193,7 +219,8 @@ export const createProduct = async (req: Request, res: Response) => {
         origin: origin || null,
         best_before: best_before || null,
         unit: unit || null,
-        badge: badge || null
+        badge: badge || null,
+        company_id: req.companyId
       })
       .select();
     
@@ -218,7 +245,7 @@ export const createProduct = async (req: Request, res: Response) => {
         throw new ApiError(400, 'Selected warehouse is invalid or inactive');
       }
     } else {
-      const defaultWarehouseId = await getDefaultWarehouseId();
+      const defaultWarehouseId = await getDefaultWarehouseId(req.companyId);
       if (!defaultWarehouseId) {
         // Rollback product creation to avoid inconsistent state
         await supabaseWithAuth.from('products').delete().eq('id', createdProduct.id);
@@ -229,7 +256,7 @@ export const createProduct = async (req: Request, res: Response) => {
 
     try {
       // Upsert inventory even when initialStock is 0
-      await updateWarehouseStock(createdProduct.id, selectedWarehouseId, initialStock, false, true);
+      await updateWarehouseStock(createdProduct.id, selectedWarehouseId, initialStock, req.companyId, false, true);
     } catch (inventoryError) {
       // Rollback product creation to avoid inconsistent state
       await supabaseWithAuth.from('products').delete().eq('id', createdProduct.id);

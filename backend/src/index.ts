@@ -26,12 +26,15 @@ import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import { errorHandler } from './middleware/error';
 import { initOrderScheduler } from './utils/orderScheduler';
+import { resolveTenant } from './middleware/tenant';
 
 // Extend Express Request type to include user
 declare global {
   namespace Express {
     interface Request {
       user?: any;
+      companyId?: string;
+      companySlug?: string;
     }
   }
 }
@@ -45,7 +48,8 @@ import {
   categoryRoutes,
   adminRoutes,
   customerRoutes,
-  creditPeriodRoutes
+  creditPeriodRoutes,
+  companyRoutes
 } from './routes';
 import productImagesRouter from './routes/productImages';
 import inventoryRouter from './routes/inventory';
@@ -104,7 +108,7 @@ const corsOptions: cors.CorsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Tenant-Subdomain'],
   exposedHeaders: ['Content-Length', 'Content-Type'],
   maxAge: 86400, // 24 hours
   preflightContinue: false, // Let cors handle preflight
@@ -182,8 +186,12 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Resolve tenant (company) before API routes
+app.use(resolveTenant);
+
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/companies', companyRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/orders', orderRoutes);
@@ -212,7 +220,7 @@ app.use((req: express.Request, res: express.Response) => {
   if (origin && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Tenant-Subdomain');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   }
 
@@ -239,7 +247,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   if (origin && !res.getHeader('Access-Control-Allow-Origin') && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Tenant-Subdomain');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   }
   

@@ -16,7 +16,7 @@ export const scheduleOrderProcessing = (orderId: string, delayMinutes: number = 
       // 1. Fetch the order to get the items and check current status
       const { data: order, error: orderError } = await supabase
         .from('orders')
-        .select('*, order_items(product_id, quantity, warehouse_id)')
+        .select('*, company_id, order_items(product_id, quantity, warehouse_id)')
         .eq('id', orderId)
         .single();
       
@@ -56,6 +56,7 @@ export const scheduleOrderProcessing = (orderId: string, delayMinutes: number = 
           inventory_updated: true // Mark that inventory will be updated
         })
         .eq('id', orderId)
+        .eq('company_id', order.company_id)
         .eq('status', 'pending') // Only update if still pending
         .select()
         .single();
@@ -75,6 +76,7 @@ export const scheduleOrderProcessing = (orderId: string, delayMinutes: number = 
         .from('orders')
         .select('status')
         .eq('id', orderId)
+        .eq('company_id', order.company_id)
         .single();
         
       if (latestOrderError) {
@@ -94,6 +96,7 @@ export const scheduleOrderProcessing = (orderId: string, delayMinutes: number = 
         .from('customers')
         .select('id')
         .eq('user_id', order.user_id)
+        .eq('company_id', order.company_id)
         .single();
       
       const isSalesDashboardOrder = !!customer;
@@ -105,7 +108,7 @@ export const scheduleOrderProcessing = (orderId: string, delayMinutes: number = 
         console.log(`Is sales dashboard order: ${isSalesDashboardOrder}`);
         
         // Get default warehouse if needed
-        const defaultWarehouseId = await getDefaultWarehouseId();
+        const defaultWarehouseId = await getDefaultWarehouseId(order.company_id);
         
         // Process each item and update stock
         for (const item of orderItems) {
@@ -134,6 +137,7 @@ export const scheduleOrderProcessing = (orderId: string, delayMinutes: number = 
               item.product_id,
               warehouseId,
               item.quantity,
+              order.company_id,
               isSalesDashboardOrder, // Allow negative for sales orders
               true // Use admin client for scheduled jobs
             );

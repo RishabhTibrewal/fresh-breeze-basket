@@ -17,6 +17,10 @@ export type LeadSource = typeof LEAD_SOURCES[number];
 // Get all leads for the sales executive
 export const getLeads = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const sales_executive_id = req.user?.id;
     const { stage, priority, source, search } = req.query;
 
@@ -28,6 +32,7 @@ export const getLeads = async (req: Request, res: Response) => {
       .from('leads')
       .select('*')
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     // Apply filters
@@ -77,6 +82,10 @@ export const getLeads = async (req: Request, res: Response) => {
 // Get a single lead by ID
 export const getLeadById = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const { id } = req.params;
     const sales_executive_id = req.user?.id;
 
@@ -89,6 +98,7 @@ export const getLeadById = async (req: Request, res: Response) => {
       .select('*')
       .eq('id', id)
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (error) {
@@ -124,6 +134,10 @@ export const getLeadById = async (req: Request, res: Response) => {
 // Create a new lead
 export const createLead = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const sales_executive_id = req.user?.id;
 
     if (!sales_executive_id) {
@@ -179,6 +193,7 @@ export const createLead = async (req: Request, res: Response) => {
       .from('leads')
       .insert({
         sales_executive_id,
+        company_id: req.companyId,
         company_name: company_name || null,
         contact_name,
         contact_email: contact_email || null,
@@ -232,6 +247,10 @@ export const createLead = async (req: Request, res: Response) => {
 // Update a lead
 export const updateLead = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const { id } = req.params;
     const sales_executive_id = req.user?.id;
 
@@ -266,12 +285,13 @@ export const updateLead = async (req: Request, res: Response) => {
       append_note
     } = req.body;
 
-    // Check if lead exists and belongs to the sales executive
+    // Check if lead exists and belongs to the sales executive (filtered by company_id)
     const { data: existingLead, error: checkError } = await supabase
       .from('leads')
       .select('id, sales_executive_id, converted_at, lost_at')
       .eq('id', id)
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (checkError || !existingLead) {
@@ -337,6 +357,7 @@ export const updateLead = async (req: Request, res: Response) => {
         .from('leads')
         .select('notes')
         .eq('id', id)
+        .eq('company_id', req.companyId)
         .single();
       
       if (!currentError && currentLead) {
@@ -391,6 +412,10 @@ export const updateLead = async (req: Request, res: Response) => {
 // Delete a lead
 export const deleteLead = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const { id } = req.params;
     const sales_executive_id = req.user?.id;
 
@@ -398,12 +423,13 @@ export const deleteLead = async (req: Request, res: Response) => {
       throw new AppError('Sales executive ID is required', 400);
     }
 
-    // Check if lead exists and belongs to the sales executive
+    // Check if lead exists and belongs to the sales executive (filtered by company_id)
     const { data: existingLead, error: checkError } = await supabase
       .from('leads')
       .select('id, sales_executive_id')
       .eq('id', id)
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (checkError || !existingLead) {
@@ -414,7 +440,8 @@ export const deleteLead = async (req: Request, res: Response) => {
       .from('leads')
       .delete()
       .eq('id', id)
-      .eq('sales_executive_id', sales_executive_id);
+      .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId);
 
     if (error) {
       throw new AppError(`Error deleting lead: ${error.message}`, 500);
@@ -442,6 +469,10 @@ export const deleteLead = async (req: Request, res: Response) => {
 // Quick action: Log call (updates last_follow_up and appends note)
 export const logCall = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const { id } = req.params;
     const sales_executive_id = req.user?.id;
     const { note } = req.body;
@@ -450,12 +481,13 @@ export const logCall = async (req: Request, res: Response) => {
       throw new AppError('Sales executive ID is required', 400);
     }
 
-    // Check if lead exists and belongs to the sales executive
+    // Check if lead exists and belongs to the sales executive (filtered by company_id)
     const { data: existingLead, error: checkError } = await supabase
       .from('leads')
       .select('id, sales_executive_id, notes')
       .eq('id', id)
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (checkError || !existingLead) {
@@ -487,6 +519,7 @@ export const logCall = async (req: Request, res: Response) => {
       .update(updateData)
       .eq('id', id)
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -516,6 +549,10 @@ export const logCall = async (req: Request, res: Response) => {
 // Quick action: Reschedule (updates next_follow_up)
 export const rescheduleFollowUp = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const { id } = req.params;
     const sales_executive_id = req.user?.id;
     const { next_follow_up } = req.body;
@@ -528,12 +565,13 @@ export const rescheduleFollowUp = async (req: Request, res: Response) => {
       throw new AppError('next_follow_up is required', 400);
     }
 
-    // Check if lead exists and belongs to the sales executive
+    // Check if lead exists and belongs to the sales executive (filtered by company_id)
     const { data: existingLead, error: checkError } = await supabase
       .from('leads')
       .select('id, sales_executive_id')
       .eq('id', id)
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (checkError || !existingLead) {
@@ -545,6 +583,7 @@ export const rescheduleFollowUp = async (req: Request, res: Response) => {
       .update({ next_follow_up })
       .eq('id', id)
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -574,6 +613,10 @@ export const rescheduleFollowUp = async (req: Request, res: Response) => {
 // Quick action: Mark as Won (converts lead to won stage)
 export const markAsWon = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const { id } = req.params;
     const sales_executive_id = req.user?.id;
 
@@ -581,12 +624,13 @@ export const markAsWon = async (req: Request, res: Response) => {
       throw new AppError('Sales executive ID is required', 400);
     }
 
-    // Check if lead exists and belongs to the sales executive
+    // Check if lead exists and belongs to the sales executive (filtered by company_id)
     const { data: existingLead, error: checkError } = await supabase
       .from('leads')
       .select('id, sales_executive_id, converted_at')
       .eq('id', id)
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (checkError || !existingLead) {
@@ -607,6 +651,7 @@ export const markAsWon = async (req: Request, res: Response) => {
       .update(updateData)
       .eq('id', id)
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -637,6 +682,10 @@ export const markAsWon = async (req: Request, res: Response) => {
 // Get lead statistics for dashboard
 export const getLeadStats = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const sales_executive_id = req.user?.id;
 
     if (!sales_executive_id) {
@@ -646,7 +695,8 @@ export const getLeadStats = async (req: Request, res: Response) => {
     const { data: leads, error } = await supabase
       .from('leads')
       .select('stage, priority, estimated_value')
-      .eq('sales_executive_id', sales_executive_id);
+      .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId);
 
     if (error) {
       throw new AppError(`Error fetching lead stats: ${error.message}`, 500);
@@ -702,6 +752,10 @@ export const getLeadStats = async (req: Request, res: Response) => {
 // Get Smart Follow-Up Reminder: leads where next_follow_up is today or overdue
 export const getFollowUpReminders = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const sales_executive_id = req.user?.id;
 
     if (!sales_executive_id) {
@@ -717,6 +771,7 @@ export const getFollowUpReminders = async (req: Request, res: Response) => {
       .from('leads')
       .select('*')
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .not('stage', 'eq', 'won')
       .not('stage', 'eq', 'lost')
       .not('next_follow_up', 'is', null)
@@ -749,6 +804,10 @@ export const getFollowUpReminders = async (req: Request, res: Response) => {
 // Get Lead Aging Alert: leads that have been in the same stage for too long
 export const getAgingLeads = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const sales_executive_id = req.user?.id;
     const { days = 7 } = req.query; // Default to 7 days
 
@@ -774,6 +833,7 @@ export const getAgingLeads = async (req: Request, res: Response) => {
       .from('leads')
       .select('*')
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .not('stage', 'eq', 'won')
       .not('stage', 'eq', 'lost')
       .lte('updated_at', thresholdISO)

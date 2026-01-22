@@ -21,6 +21,7 @@ import Shipping from "./pages/Shipping";
 import Returns from "./pages/Returns";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
+import CreateCompany from "./pages/CreateCompany";
 import AccountLayout from "./layouts/AccountLayout";
 import ProfilePage from "./pages/account/ProfilePage";
 import AddressPage from "./pages/account/AddressPage";
@@ -104,6 +105,7 @@ const App: React.FC = () => {
                   <Route path="/shipping" element={<Shipping />} />
                   <Route path="/returns" element={<Returns />} />
                   <Route path="/auth" element={<Auth />} />
+                  <Route path="/create-company" element={<CreateCompany />} />
                   <Route path="/test-payment" element={<TestPayment />} />
                   
                   {/* Protected Routes */}

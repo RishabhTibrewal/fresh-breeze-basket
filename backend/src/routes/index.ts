@@ -6,6 +6,7 @@ import categoryRoutes from './categories';
 import adminRoutes from './admin';
 import customerRoutes from './customerRoutes';
 import creditPeriodRoutes from './creditPeriod';
+import companyRoutes from './companies';
 
 export {
   authRoutes,
@@ -15,5 +16,6 @@ export {
   categoryRoutes,
   adminRoutes,
   customerRoutes,
-  creditPeriodRoutes
+  creditPeriodRoutes,
+  companyRoutes
 }; 

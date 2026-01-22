@@ -5,12 +5,13 @@ import { ApiError, ValidationError } from '../middleware/error';
 /**
  * Generate payment number (e.g., PAY-2024-001)
  */
-const generatePaymentNumber = async (): Promise<string> => {
+const generatePaymentNumber = async (companyId: string): Promise<string> => {
   const year = new Date().getFullYear();
   
   const { data: latestPayment, error } = await supabase
     .from('procurement.supplier_payments')
     .select('payment_number')
+    .eq('company_id', companyId)
     .like('payment_number', `PAY-${year}-%`)
     .order('payment_number', { ascending: false })
     .limit(1)
@@ -74,11 +75,16 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
       throw new ValidationError('User ID is required');
     }
 
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
     // Verify invoice exists and get supplier_id if not provided
     const { data: invoice, error: invoiceError } = await supabase
       .from('procurement.purchase_invoices')
       .select('*, procurement.purchase_orders!inner(supplier_id)')
       .eq('id', purchase_invoice_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (invoiceError || !invoice) {
@@ -96,7 +102,7 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
     }
 
     // Generate payment number
-    const payment_number = await generatePaymentNumber();
+    const payment_number = await generatePaymentNumber(req.companyId);
 
     // Create supplier payment
     const { data: payment, error: paymentError } = await supabase
@@ -114,7 +120,8 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
         transaction_id,
         notes,
         status: 'pending',
-        created_by: userId
+        created_by: userId,
+        company_id: req.companyId
       })
       .select()
       .single();
@@ -129,6 +136,7 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
       .from('procurement.purchase_invoices')
       .select('paid_amount, total_amount')
       .eq('id', purchase_invoice_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (invoiceData) {
@@ -148,7 +156,8 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
           status: newStatus,
           updated_at: new Date().toISOString()
         })
-        .eq('id', purchase_invoice_id);
+        .eq('id', purchase_invoice_id)
+        .eq('company_id', req.companyId);
     }
 
     // Fetch complete payment with relations
@@ -160,6 +169,7 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
         suppliers (*)
       `)
       .eq('id', payment.id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (fetchError) {
@@ -182,6 +192,10 @@ export const getSupplierPayments = async (req: Request, res: Response, next: Nex
   try {
     const { supplier_id, status, date_from, date_to, payment_method } = req.query;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     let query = supabase
       .from('procurement.supplier_payments')
       .select(`
@@ -189,6 +203,7 @@ export const getSupplierPayments = async (req: Request, res: Response, next: Nex
         procurement.purchase_invoices (*),
         suppliers (*)
       `)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     if (supplier_id) {
@@ -234,6 +249,10 @@ export const getSupplierPaymentById = async (req: Request, res: Response, next: 
   try {
     const { id } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const { data: payment, error } = await supabase
       .from('procurement.supplier_payments')
       .select(`
@@ -242,6 +261,7 @@ export const getSupplierPaymentById = async (req: Request, res: Response, next: 
         suppliers (*)
       `)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (error) {
@@ -293,10 +313,15 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
     if (notes !== undefined) updateData.notes = notes;
     if (status !== undefined) updateData.status = status;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const { data: payment, error: updateError } = await supabase
       .from('procurement.supplier_payments')
       .update(updateData)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -313,7 +338,8 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
       const { data: payments } = await supabase
         .from('procurement.supplier_payments')
         .select('amount')
-        .eq('purchase_invoice_id', payment.purchase_invoice_id);
+        .eq('purchase_invoice_id', payment.purchase_invoice_id)
+        .eq('company_id', req.companyId);
 
       if (payments) {
         const totalPaid = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
@@ -322,6 +348,7 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
           .from('procurement.purchase_invoices')
           .select('total_amount')
           .eq('id', payment.purchase_invoice_id)
+          .eq('company_id', req.companyId)
           .single();
 
         if (invoiceData) {
@@ -339,7 +366,8 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
               status: newStatus,
               updated_at: new Date().toISOString()
             })
-            .eq('id', payment.purchase_invoice_id);
+            .eq('id', payment.purchase_invoice_id)
+            .eq('company_id', req.companyId);
         }
       }
     }
@@ -352,6 +380,7 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
         suppliers (*)
       `)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (fetchError) {

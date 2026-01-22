@@ -50,6 +50,25 @@ const getUserRole = async (userId: string): Promise<string> => {
   }
 };
 
+const getUserCompanyId = async (userId: string): Promise<string | null> => {
+  try {
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('company_id')
+      .eq('id', userId)
+      .single();
+
+    if (profileError || !profile?.company_id) {
+      return null;
+    }
+
+    return profile.company_id;
+  } catch (error) {
+    console.error(`Error fetching company_id for user ${userId}:`, error);
+    return null;
+  }
+};
+
 // Export function to invalidate role cache (useful when role is updated)
 export const invalidateRoleCache = (userId: string): void => {
   roleCache.delete(userId);
@@ -99,14 +118,41 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         throw new AuthenticationError('Invalid authentication token');
       }
 
-      // Get user's role (uses cache to minimize database queries)
+      // Get user's role and company (uses cache to minimize role queries)
       const userRole = await getUserRole(user.id);
+      let userCompanyId = await getUserCompanyId(user.id);
+
+      // If user's profile doesn't have company_id but req.companyId is set (from tenant resolution),
+      // update the profile to fix the data issue
+      if (!userCompanyId && req.companyId) {
+        console.warn(`User ${user.id} profile missing company_id, updating with tenant company_id: ${req.companyId}`);
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({ company_id: req.companyId })
+          .eq('id', user.id);
+        
+        if (updateError) {
+          console.error(`Failed to update user profile company_id:`, updateError);
+          throw new AuthenticationError('User company is not set and could not be updated');
+        }
+        
+        userCompanyId = req.companyId;
+      }
+
+      if (!userCompanyId) {
+        throw new AuthenticationError('User company is not set');
+      }
+
+      if (req.companyId && req.companyId !== userCompanyId) {
+        throw new AuthorizationError('User does not belong to this company');
+      }
 
       // Add user info to request
       req.user = {
         id: user.id,
         email: user.email || '',
-        role: userRole // Use the fetched/cached role
+        role: userRole, // Use the fetched/cached role
+        company_id: userCompanyId
       };
 
       console.log('User authenticated successfully:', { id: user.id, email: user.email, role: userRole });

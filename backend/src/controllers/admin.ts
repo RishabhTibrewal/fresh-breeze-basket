@@ -5,6 +5,10 @@ import { ApiError } from '../middleware/error';
 // Get all users (admin only)
 export const getAllUsers = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { page = '1', limit = '10', search } = req.query;
     
     // Parse page and limit to numbers
@@ -14,7 +18,8 @@ export const getAllUsers = async (req: Request, res: Response) => {
     
     let query = supabase
       .from('profiles')
-      .select('*', { count: 'exact' });
+      .select('*', { count: 'exact' })
+      .eq('company_id', req.companyId);
     
     // Add search filter if provided
     if (search) {
@@ -57,60 +62,70 @@ export const getAllUsers = async (req: Request, res: Response) => {
 // Get dashboard statistics (admin only)
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
-    // Get total number of users
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    // Get total number of users (filtered by company_id)
     const { count: userCount, error: userError } = await supabase
       .from('profiles')
-      .select('*', { count: 'exact', head: true });
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', req.companyId);
     
     if (userError) {
       throw new ApiError(500, `Error fetching user count: ${userError.message}`);
     }
     
-    // Get total number of products
+    // Get total number of products (filtered by company_id)
     const { count: productCount, error: productError } = await supabase
       .from('products')
-      .select('*', { count: 'exact', head: true });
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', req.companyId);
     
     if (productError) {
       throw new ApiError(500, `Error fetching product count: ${productError.message}`);
     }
     
-    // Get number of products added in last week
+    // Get number of products added in last week (filtered by company_id)
     const lastWeekDate = new Date();
     lastWeekDate.setDate(lastWeekDate.getDate() - 7);
     
     const { count: newProductsCount, error: newProductsError } = await supabase
       .from('products')
       .select('*', { count: 'exact', head: true })
+      .eq('company_id', req.companyId)
       .gte('created_at', lastWeekDate.toISOString());
     
     if (newProductsError) {
       throw new ApiError(500, `Error fetching new products count: ${newProductsError.message}`);
     }
     
-    // Get total number of orders
+    // Get total number of orders (filtered by company_id)
     const { count: orderCount, error: orderError } = await supabase
       .from('orders')
-      .select('*', { count: 'exact', head: true });
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', req.companyId);
     
     if (orderError) {
       throw new ApiError(500, `Error fetching order count: ${orderError.message}`);
     }
     
-    // Get number of active orders (pending or processing)
+    // Get number of active orders (pending or processing) (filtered by company_id)
     const { count: activeOrderCount, error: activeOrderError } = await supabase
       .from('orders')
       .select('*', { count: 'exact', head: true })
+      .eq('company_id', req.companyId)
       .in('status', ['pending', 'processing']);
     
     if (activeOrderError) {
       throw new ApiError(500, `Error fetching active orders count: ${activeOrderError.message}`);
     }
     
-    // Get total sales amount
+    // Get total sales amount (filtered by company_id)
     const { data: salesData, error: salesError } = await supabase
       .from('orders')
-      .select('total_amount');
+      .select('total_amount')
+      .eq('company_id', req.companyId);
     
     if (salesError) {
       throw new ApiError(500, `Error fetching sales data: ${salesError.message}`);
@@ -118,13 +133,14 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     
     const totalSales = salesData.reduce((sum, order) => sum + (order.total_amount || 0), 0);
     
-    // Get sales from last month
+    // Get sales from last month (filtered by company_id)
     const lastMonthDate = new Date();
     lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
     
     const { data: lastMonthSalesData, error: lastMonthSalesError } = await supabase
       .from('orders')
       .select('total_amount')
+      .eq('company_id', req.companyId)
       .gte('created_at', lastMonthDate.toISOString());
     
     if (lastMonthSalesError) {
@@ -133,13 +149,14 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     
     const lastMonthSales = lastMonthSalesData.reduce((sum, order) => sum + (order.total_amount || 0), 0);
     
-    // Get sales from two months ago for percentage calculation
+    // Get sales from two months ago for percentage calculation (filtered by company_id)
     const twoMonthsAgoDate = new Date();
     twoMonthsAgoDate.setMonth(twoMonthsAgoDate.getMonth() - 2);
     
     const { data: twoMonthsAgoSalesData, error: twoMonthsAgoSalesError } = await supabase
       .from('orders')
       .select('total_amount')
+      .eq('company_id', req.companyId)
       .gte('created_at', twoMonthsAgoDate.toISOString())
       .lt('created_at', lastMonthDate.toISOString());
     
@@ -155,10 +172,11 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       salesPercentChange = ((lastMonthSales - twoMonthsAgoSales) / twoMonthsAgoSales) * 100;
     }
     
-    // Get products with low inventory (stock <= 5)
+    // Get products with low inventory (stock <= 5) (filtered by company_id)
     const { data: lowInventoryProducts, error: lowInventoryError } = await supabase
       .from('products')
       .select('id, name, category_id, stock_count, categories(name)')
+      .eq('company_id', req.companyId)
       .lte('stock_count', 5)
       .order('stock_count', { ascending: true })
       .limit(5);
@@ -167,7 +185,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       throw new ApiError(500, `Error fetching low inventory products: ${lowInventoryError.message}`);
     }
     
-    // Get recent orders
+    // Get recent orders (filtered by company_id)
     const { data: recentOrders, error: recentOrdersError } = await supabase
       .from('orders')
       .select(`
@@ -177,6 +195,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         total_amount,
         created_at
       `)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false })
       .limit(5);
     
@@ -184,13 +203,14 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       throw new ApiError(500, `Error fetching recent orders: ${recentOrdersError.message}`);
     }
     
-    // Fetch profile data separately for each order
+    // Fetch profile data separately for each order (filtered by company_id)
     const enhancedOrders = [];
     for (const order of recentOrders || []) {
       const { data: profileData } = await supabase
         .from('profiles')
         .select('email, first_name, last_name')
         .eq('id', order.user_id)
+        .eq('company_id', req.companyId)
         .single();
       
       enhancedOrders.push({
@@ -260,7 +280,14 @@ export const updateUserRole = async (req: Request, res: Response) => {
       });
     }
 
-    // Update profile role
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+
+    // Update profile role (filtered by company_id)
     const { data: profile, error } = await supabase
       .from('profiles')
       .update({ 
@@ -268,6 +295,7 @@ export const updateUserRole = async (req: Request, res: Response) => {
         updated_at: new Date().toISOString()
       })
       .eq('id', userId)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -309,10 +337,15 @@ export const updateUserRole = async (req: Request, res: Response) => {
 // Get all sales executives (admin only)
 export const getSalesExecutives = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { data: salesExecutives, error } = await supabase
       .from('profiles')
       .select('id, email, first_name, last_name, phone, role')
       .eq('role', 'sales')
+      .eq('company_id', req.companyId)
       .order('first_name', { ascending: true });
 
     if (error) {
@@ -334,11 +367,16 @@ export const getSalesExecutives = async (req: Request, res: Response) => {
 // Get all sales targets (admin only)
 export const getSalesTargets = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { sales_executive_id, period_type, is_active } = req.query;
 
     let query = supabase
       .from('sales_targets')
       .select('*')
+      .eq('company_id', req.companyId)
       .order('period_start', { ascending: false });
 
     if (sales_executive_id) {
@@ -369,11 +407,12 @@ export const getSalesTargets = async (req: Request, res: Response) => {
           .single();
 
         // Calculate achieved amount for this target period
-        // Get all customers for this sales executive
+        // Get all customers for this sales executive (filtered by company_id)
         const { data: customers, error: customersError } = await supabase
           .from('customers')
           .select('user_id')
-          .eq('sales_executive_id', target.sales_executive_id);
+          .eq('sales_executive_id', target.sales_executive_id)
+          .eq('company_id', req.companyId);
 
         let achievedAmount = 0;
         let progressPercentage = 0;
@@ -394,6 +433,7 @@ export const getSalesTargets = async (req: Request, res: Response) => {
             .from('orders')
             .select('total_amount, created_at, status')
             .in('user_id', customerUserIds)
+            .eq('company_id', req.companyId)
             .gte('created_at', periodStart)
             .lte('created_at', periodEnd);
 
@@ -440,23 +480,29 @@ export const getSalesTargets = async (req: Request, res: Response) => {
 // Get sales target by ID
 export const getSalesTargetById = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { id } = req.params;
 
     const { data: target, error } = await supabase
       .from('sales_targets')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (error) {
       throw new ApiError(404, `Sales target not found: ${error.message}`);
     }
 
-    // Fetch profile data for the sales executive
+    // Fetch profile data for the sales executive (filtered by company_id)
     const { data: profile } = await supabase
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', target.sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     const targetWithProfile = {
@@ -517,11 +563,16 @@ export const createSalesTarget = async (req: Request, res: Response) => {
       });
     }
 
-    // Verify sales executive exists and has sales role
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    // Verify sales executive exists and has sales role (filtered by company_id)
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id, role')
       .eq('id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (profileError || !profile) {
@@ -538,11 +589,12 @@ export const createSalesTarget = async (req: Request, res: Response) => {
       });
     }
 
-    // Create target
+    // Create target (with company_id)
     const { data: target, error } = await supabase
       .from('sales_targets')
       .insert({
         sales_executive_id,
+        company_id: req.companyId,
         target_amount: parseFloat(target_amount),
         period_type,
         period_start,
@@ -558,11 +610,12 @@ export const createSalesTarget = async (req: Request, res: Response) => {
       throw new ApiError(500, `Error creating sales target: ${error.message}`);
     }
 
-    // Fetch profile data for the sales executive
+    // Fetch profile data for the sales executive (filtered by company_id)
     const { data: salesExecutiveProfile } = await supabase
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     const targetWithProfile = {
@@ -599,11 +652,16 @@ export const updateSalesTarget = async (req: Request, res: Response) => {
       is_active
     } = req.body;
 
-    // Check if target exists
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    // Check if target exists (filtered by company_id)
     const { data: existingTarget, error: fetchError } = await supabase
       .from('sales_targets')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (fetchError || !existingTarget) {
@@ -663,11 +721,12 @@ export const updateSalesTarget = async (req: Request, res: Response) => {
       updateData.is_active = is_active;
     }
 
-    // Update target
+    // Update target (filtered by company_id)
     const { data: target, error } = await supabase
       .from('sales_targets')
       .update(updateData)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select('*')
       .single();
 
@@ -675,11 +734,12 @@ export const updateSalesTarget = async (req: Request, res: Response) => {
       throw new ApiError(500, `Error updating sales target: ${error.message}`);
     }
 
-    // Fetch profile data for the sales executive
+    // Fetch profile data for the sales executive (filtered by company_id)
     const { data: salesExecutiveProfile } = await supabase
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', target.sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     const targetWithProfile = {
@@ -706,12 +766,17 @@ export const updateSalesTarget = async (req: Request, res: Response) => {
 // Delete sales target (admin only)
 export const deleteSalesTarget = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { id } = req.params;
 
     const { error } = await supabase
       .from('sales_targets')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('company_id', req.companyId);
 
     if (error) {
       throw new ApiError(500, `Error deleting sales target: ${error.message}`);
@@ -735,6 +800,10 @@ export const deleteSalesTarget = async (req: Request, res: Response) => {
 // Get current active target for a sales executive
 export const getCurrentSalesTarget = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const sales_executive_id = req.user?.id;
     const today = new Date().toISOString().split('T')[0];
 
@@ -742,6 +811,7 @@ export const getCurrentSalesTarget = async (req: Request, res: Response) => {
       .from('sales_targets')
       .select('*')
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .eq('is_active', true)
       .lte('period_start', today)
       .gte('period_end', today)
@@ -771,12 +841,17 @@ export const getCurrentSalesTarget = async (req: Request, res: Response) => {
 // Get all leads (admin only) - not filtered by sales executive
 export const getAllLeads = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { stage, priority, source, search, sales_executive_id } = req.query;
 
-    // First get all leads
+    // First get all leads (filtered by company_id)
     let query = supabase
       .from('leads')
       .select('*')
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     // Apply filters
@@ -815,6 +890,7 @@ export const getAllLeads = async (req: Request, res: Response) => {
           .from('profiles')
           .select('id, email, first_name, last_name')
           .eq('id', lead.sales_executive_id)
+          .eq('company_id', req.companyId)
           .single();
 
         return {
@@ -839,12 +915,17 @@ export const getAllLeads = async (req: Request, res: Response) => {
 // Get lead by ID (admin only)
 export const getLeadByIdAdmin = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { id } = req.params;
 
     const { data: lead, error } = await supabase
       .from('leads')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (error) {
@@ -854,11 +935,12 @@ export const getLeadByIdAdmin = async (req: Request, res: Response) => {
       throw new ApiError(500, `Error fetching lead: ${error.message}`);
     }
 
-    // Fetch sales executive profile
+    // Fetch sales executive profile (filtered by company_id)
     const { data: profile } = await supabase
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', lead.sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     const leadWithProfile = {
@@ -884,11 +966,16 @@ export const updateLeadAdmin = async (req: Request, res: Response) => {
     const { id } = req.params;
     const updateData = req.body;
 
-    // Get existing lead to preserve notes if appending
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    // Get existing lead to preserve notes if appending (filtered by company_id)
     const { data: existingLead } = await supabase
       .from('leads')
       .select('notes, stage, converted_at, lost_at')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (!existingLead) {
@@ -918,6 +1005,7 @@ export const updateLeadAdmin = async (req: Request, res: Response) => {
       .from('leads')
       .update(updateData)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select('*')
       .single();
 
@@ -988,11 +1076,16 @@ export const createLeadAdmin = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Sales executive ID is required');
     }
 
-    // Validate that sales_executive_id exists and is a sales role
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    // Validate that sales_executive_id exists and is a sales role (filtered by company_id)
     const { data: salesExecutive, error: salesError } = await supabase
       .from('profiles')
       .select('id, role')
       .eq('id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (salesError || !salesExecutive) {
@@ -1024,6 +1117,7 @@ export const createLeadAdmin = async (req: Request, res: Response) => {
       .from('leads')
       .insert({
         sales_executive_id,
+        company_id: req.companyId,
         company_name: company_name || null,
         contact_name,
         contact_email: contact_email || null,
@@ -1055,11 +1149,12 @@ export const createLeadAdmin = async (req: Request, res: Response) => {
       throw new ApiError(500, `Error creating lead: ${error.message}`);
     }
 
-    // Fetch sales executive profile for response
+    // Fetch sales executive profile for response (filtered by company_id)
     const { data: profile } = await supabase
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .single();
 
     return res.status(201).json({
@@ -1080,12 +1175,17 @@ export const createLeadAdmin = async (req: Request, res: Response) => {
 // Delete lead (admin only)
 export const deleteLeadAdmin = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { id } = req.params;
 
     const { error } = await supabase
       .from('leads')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('company_id', req.companyId);
 
     if (error) {
       throw new ApiError(500, `Error deleting lead: ${error.message}`);

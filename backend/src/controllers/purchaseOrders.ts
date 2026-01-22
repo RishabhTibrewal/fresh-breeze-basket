@@ -14,6 +14,9 @@ const queryProcurementTable = async (table: string, operation: 'select' | 'inser
     switch (operation) {
       case 'select':
         let selectQuery: any = adminClient.schema('procurement').from(table).select(options.select || '*');
+        if (options.companyId) {
+          selectQuery = selectQuery.eq('company_id', options.companyId);
+        }
         if (options.filter) {
           selectQuery = selectQuery.eq(options.filter.key, options.filter.value);
         }
@@ -33,16 +36,22 @@ const queryProcurementTable = async (table: string, operation: 'select' | 'inser
       
       case 'insert':
         const insertData = Array.isArray(options.data) ? options.data : [options.data];
+        const insertWithCompany = options.companyId
+          ? insertData.map((row: any) => ({ company_id: options.companyId, ...row }))
+          : insertData;
         const { data: insertResult, error: insertError } = await adminClient
           .schema('procurement')
           .from(table)
-          .insert(insertData)
+          .insert(insertWithCompany)
           .select();
         if (insertError) throw insertError;
         return insertResult;
       
       case 'update':
         let updateQuery: any = adminClient.schema('procurement').from(table).update(options.data);
+        if (options.companyId) {
+          updateQuery = updateQuery.eq('company_id', options.companyId);
+        }
         if (options.filter) {
           updateQuery = updateQuery.eq(options.filter.key, options.filter.value);
         }
@@ -52,6 +61,9 @@ const queryProcurementTable = async (table: string, operation: 'select' | 'inser
       
       case 'delete':
         let deleteQuery: any = adminClient.schema('procurement').from(table).delete();
+        if (options.companyId) {
+          deleteQuery = deleteQuery.eq('company_id', options.companyId);
+        }
         if (options.filter) {
           deleteQuery = deleteQuery.eq(options.filter.key, options.filter.value);
         }
@@ -84,7 +96,7 @@ const queryProcurementTable = async (table: string, operation: 'select' | 'inser
 /**
  * Generate PO number (e.g., PO-2024-001)
  */
-const generatePONumber = async (): Promise<string> => {
+const generatePONumber = async (companyId: string): Promise<string> => {
   const year = new Date().getFullYear();
   
   try {
@@ -99,6 +111,7 @@ const generatePONumber = async (): Promise<string> => {
       .schema('procurement')
       .from('purchase_orders')
       .select('po_number')
+      .eq('company_id', companyId)
       .ilike('po_number', `PO-${year}-%`)
       .order('po_number', { ascending: false })
       .limit(1);
@@ -161,8 +174,12 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
       throw new ValidationError('User ID is required');
     }
 
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
     // Generate PO number
-    const po_number = await generatePONumber();
+    const po_number = await generatePONumber(req.companyId);
 
     // Calculate total amount
     let total_amount = 0;
@@ -186,11 +203,13 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
       notes,
       terms_conditions,
       status: 'draft',
-      created_by: userId
+      created_by: userId,
+      company_id: req.companyId
     };
 
     const purchaseOrderResult = await queryProcurementTable('purchase_orders', 'insert', {
-      data: purchaseOrderData
+      data: purchaseOrderData,
+      companyId: req.companyId
     });
 
     if (!purchaseOrderResult || (Array.isArray(purchaseOrderResult) && purchaseOrderResult.length === 0)) {
@@ -205,12 +224,14 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
       product_id: item.product_id,
       quantity: item.quantity,
       unit_price: item.unit_price,
-      line_total: item.quantity * item.unit_price
+      line_total: item.quantity * item.unit_price,
+      company_id: req.companyId
     }));
 
     try {
       const createdItems = await queryProcurementTable('purchase_order_items', 'insert', {
-        data: orderItems
+        data: orderItems,
+        companyId: req.companyId
       });
 
       // Fetch complete purchase order with items and relations
@@ -228,7 +249,8 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
       // Rollback purchase order
       try {
         await queryProcurementTable('purchase_orders', 'delete', {
-          filter: { key: 'id', value: po.id }
+          filter: { key: 'id', value: po.id },
+          companyId: req.companyId
         });
       } catch (deleteError) {
         console.error('Error rolling back purchase order:', deleteError);
@@ -247,11 +269,16 @@ export const getPurchaseOrders = async (req: Request, res: Response, next: NextF
   try {
     const { status, warehouse_id, supplier_id, search } = req.query;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const adminClient = supabaseAdmin || supabase;
     let query = adminClient
       .schema('procurement')
       .from('purchase_orders')
       .select('*')
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     // Apply filters
@@ -289,7 +316,8 @@ export const getPurchaseOrders = async (req: Request, res: Response, next: NextF
       const { data: suppliers } = await adminClient
         .from('suppliers')
         .select('*')
-        .in('id', supplierIds);
+        .in('id', supplierIds)
+        .eq('company_id', req.companyId);
       
       suppliers?.forEach((supplier: any) => {
         suppliersMap.set(supplier.id, supplier);
@@ -300,7 +328,8 @@ export const getPurchaseOrders = async (req: Request, res: Response, next: NextF
       const { data: warehouses } = await adminClient
         .from('warehouses')
         .select('*')
-        .in('id', warehouseIds);
+        .in('id', warehouseIds)
+        .eq('company_id', req.companyId);
       
       warehouses?.forEach((warehouse: any) => {
         warehousesMap.set(warehouse.id, warehouse);
@@ -330,6 +359,10 @@ export const getPurchaseOrderById = async (req: Request, res: Response, next: Ne
   try {
     const { id } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const adminClient = supabaseAdmin || supabase;
     
     // Fetch purchase order from procurement schema
@@ -338,6 +371,7 @@ export const getPurchaseOrderById = async (req: Request, res: Response, next: Ne
       .from('purchase_orders')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (error) {
@@ -353,15 +387,16 @@ export const getPurchaseOrderById = async (req: Request, res: Response, next: Ne
       .schema('procurement')
       .from('purchase_order_items')
       .select('*')
-      .eq('purchase_order_id', id);
+      .eq('purchase_order_id', id)
+      .eq('company_id', req.companyId);
 
     // Fetch related supplier and warehouse from public schema
     const [supplierResult, warehouseResult] = await Promise.all([
       purchaseOrder.supplier_id 
-        ? adminClient.from('suppliers').select('*').eq('id', purchaseOrder.supplier_id).single()
+        ? adminClient.from('suppliers').select('*').eq('id', purchaseOrder.supplier_id).eq('company_id', req.companyId).single()
         : Promise.resolve({ data: null, error: null }),
       purchaseOrder.warehouse_id
-        ? adminClient.from('warehouses').select('*').eq('id', purchaseOrder.warehouse_id).single()
+        ? adminClient.from('warehouses').select('*').eq('id', purchaseOrder.warehouse_id).eq('company_id', req.companyId).single()
         : Promise.resolve({ data: null, error: null })
     ]);
 
@@ -375,7 +410,8 @@ export const getPurchaseOrderById = async (req: Request, res: Response, next: Ne
       const { data: products } = await adminClient
         .from('products')
         .select('*')
-        .in('id', productIds);
+        .in('id', productIds)
+        .eq('company_id', req.companyId);
       
       products?.forEach((product: any) => {
         productsMap.set(product.id, product);
@@ -423,6 +459,10 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
       updated_at: new Date().toISOString()
     };
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     if (supplier_id !== undefined) updateData.supplier_id = supplier_id;
     if (warehouse_id !== undefined) updateData.warehouse_id = warehouse_id;
     if (expected_delivery_date !== undefined) updateData.expected_delivery_date = expected_delivery_date;
@@ -436,6 +476,7 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
       .from('purchase_orders')
       .update(updateData)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -454,7 +495,8 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
         .schema('procurement')
         .from('purchase_order_items')
         .delete()
-        .eq('purchase_order_id', id);
+        .eq('purchase_order_id', id)
+        .eq('company_id', req.companyId);
 
       // Insert new items
       if (items.length > 0) {
@@ -463,7 +505,8 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
           product_id: item.product_id,
           quantity: item.quantity,
           unit_price: item.unit_price,
-          line_total: item.quantity * item.unit_price
+          line_total: item.quantity * item.unit_price,
+          company_id: req.companyId
         }));
 
         const { error: itemsError } = await adminClient
@@ -486,7 +529,8 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
           .schema('procurement')
           .from('purchase_orders')
           .update({ total_amount })
-          .eq('id', id);
+          .eq('id', id)
+          .eq('company_id', req.companyId);
       }
     }
 
@@ -496,17 +540,18 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
       .from('purchase_orders')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     // Fetch relations separately
     const [supplierResult, warehouseResult, orderItemsResult] = await Promise.all([
       updatedPO?.supplier_id 
-        ? adminClient.from('suppliers').select('*').eq('id', updatedPO.supplier_id).single()
+        ? adminClient.from('suppliers').select('*').eq('id', updatedPO.supplier_id).eq('company_id', req.companyId).single()
         : Promise.resolve({ data: null, error: null }),
       updatedPO?.warehouse_id
-        ? adminClient.from('warehouses').select('*').eq('id', updatedPO.warehouse_id).single()
+        ? adminClient.from('warehouses').select('*').eq('id', updatedPO.warehouse_id).eq('company_id', req.companyId).single()
         : Promise.resolve({ data: null, error: null }),
-      adminClient.schema('procurement').from('purchase_order_items').select('*').eq('purchase_order_id', id)
+      adminClient.schema('procurement').from('purchase_order_items').select('*').eq('purchase_order_id', id).eq('company_id', req.companyId)
     ]);
 
     const supplier = supplierResult.error ? null : supplierResult.data;
@@ -520,7 +565,8 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
       const { data: products } = await adminClient
         .from('products')
         .select('*')
-        .in('id', productIds);
+        .in('id', productIds)
+        .eq('company_id', req.companyId);
       
       products?.forEach((product: any) => {
         productsMap.set(product.id, product);
@@ -558,6 +604,10 @@ export const approvePurchaseOrder = async (req: Request, res: Response, next: Ne
       throw new ValidationError('User ID is required');
     }
 
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
     const adminClient = supabaseAdmin || supabase;
     const { data: purchaseOrder, error } = await adminClient
       .schema('procurement')
@@ -569,6 +619,7 @@ export const approvePurchaseOrder = async (req: Request, res: Response, next: Ne
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -597,6 +648,10 @@ export const cancelPurchaseOrder = async (req: Request, res: Response, next: Nex
   try {
     const { id } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const adminClient = supabaseAdmin || supabase;
     const { data: purchaseOrder, error } = await adminClient
       .schema('procurement')
@@ -606,6 +661,7 @@ export const cancelPurchaseOrder = async (req: Request, res: Response, next: Nex
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 

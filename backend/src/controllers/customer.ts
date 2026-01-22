@@ -11,6 +11,10 @@ export const getCustomerDetails = async (req: Request, res: Response) => {
       throw new ApiError(401, 'User not authenticated');
     }
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     // Get customer details
     const { data: customer, error: customerError } = await supabase
       .from('customers')
@@ -28,6 +32,7 @@ export const getCustomerDetails = async (req: Request, res: Response) => {
         )
       `)
       .eq('user_id', userId)
+      .eq('company_id', req.companyId)
       .single();
 
     if (customerError) {

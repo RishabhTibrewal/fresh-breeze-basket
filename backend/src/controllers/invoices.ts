@@ -11,6 +11,10 @@ export const getPOSInvoice = async (req: Request, res: Response, next: NextFunct
   try {
     const { orderId } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     // Fetch order with all details
     const { data: order, error: orderError } = await supabase
       .from('orders')
@@ -22,6 +26,7 @@ export const getPOSInvoice = async (req: Request, res: Response, next: NextFunct
         )
       `)
       .eq('id', orderId)
+      .eq('company_id', req.companyId)
       .single();
 
     if (orderError || !order) {
@@ -37,6 +42,7 @@ export const getPOSInvoice = async (req: Request, res: Response, next: NextFunct
         .from('customers')
         .select('name, phone')
         .eq('user_id', order.user_id)
+        .eq('company_id', req.companyId)
         .single();
       
       if (customer) {
@@ -243,6 +249,10 @@ export const getCustomerBill = async (req: Request, res: Response, next: NextFun
   try {
     const { orderId } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     // Fetch order with all details
     const { data: order, error: orderError } = await supabase
       .from('orders')
@@ -254,6 +264,7 @@ export const getCustomerBill = async (req: Request, res: Response, next: NextFun
         )
       `)
       .eq('id', orderId)
+      .eq('company_id', req.companyId)
       .single();
 
     if (orderError || !order) {
@@ -271,6 +282,7 @@ export const getCustomerBill = async (req: Request, res: Response, next: NextFun
         .from('customers')
         .select('name, email, phone')
         .eq('user_id', order.user_id)
+        .eq('company_id', req.companyId)
         .single();
       
       if (customer) {
@@ -285,6 +297,7 @@ export const getCustomerBill = async (req: Request, res: Response, next: NextFun
           .from('addresses')
           .select('*')
           .eq('id', order.shipping_address_id)
+          .eq('company_id', req.companyId)
           .single();
         
         if (address) {

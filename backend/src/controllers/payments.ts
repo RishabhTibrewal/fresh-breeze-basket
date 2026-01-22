@@ -9,6 +9,10 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
   try {
     const { amount, order_id, currency = 'usd' } = req.body;
     const userId = req.user?.id || 'anonymous';
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
     
     if (!amount) {
       throw new ApiError(400, 'Please provide amount');
@@ -47,7 +51,8 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
             payment_intent_id: paymentIntent.id
           })
           .eq('id', order_id)
-          .eq('user_id', req.user.id);
+          .eq('user_id', req.user.id)
+          .eq('company_id', req.companyId);
       } catch (orderError) {
         console.warn('Could not update order with payment intent ID:', orderError);
       }
@@ -72,12 +77,17 @@ export const getPaymentById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
     
     // Get payment from database
     const { data: payment, error: dbError } = await supabase
       .from('payments')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
     
     if (dbError || !payment) {
@@ -90,6 +100,7 @@ export const getPaymentById = async (req: Request, res: Response) => {
         .from('orders')
         .select('user_id')
         .eq('id', payment.order_id)
+        .eq('company_id', req.companyId)
         .single();
       
       if (orderError || !order || order.user_id !== userId) {
@@ -115,12 +126,17 @@ export const getPaymentHistory = async (req: Request, res: Response) => {
     const userId = req.user.id;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
     
     // Get user's orders first
     const { data: orders, error: ordersError } = await supabase
       .from('orders')
       .select('id')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .eq('company_id', req.companyId);
     
     if (ordersError) {
       throw new ApiError(500, 'Error fetching user orders');
@@ -133,6 +149,7 @@ export const getPaymentHistory = async (req: Request, res: Response) => {
       .from('payments')
       .select('*', { count: 'exact' })
       .in('order_id', orderIds)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false })
       .range((page - 1) * limit, page * limit - 1);
     
@@ -204,12 +221,40 @@ const handlePaymentSuccess = async (paymentIntent: any) => {
   });
   
   try {
+    let companyId: string | null = null;
+    if (order_id && order_id !== 'pending_order') {
+      const { data: order, error: orderError } = await supabaseAdmin
+        .from('orders')
+        .select('company_id')
+        .eq('id', order_id)
+        .single();
+
+      if (orderError) {
+        console.error('Error fetching order company_id:', orderError);
+      } else {
+        companyId = order?.company_id || null;
+      }
+    }
+
+    if (!companyId) {
+      console.warn('Skipping payment success handling due to missing company_id', {
+        paymentIntentId: paymentIntent.id,
+        orderId: order_id
+      });
+      return;
+    }
+
     // Check if a payment record already exists for this payment intent
-    const { data: existingPayment, error: checkError } = await supabaseAdmin
+    let existingPaymentQuery = supabaseAdmin
       .from('payments')
       .select('id, order_id')
-      .eq('stripe_payment_intent_id', paymentIntent.id)
-      .single();
+      .eq('stripe_payment_intent_id', paymentIntent.id);
+
+    if (companyId) {
+      existingPaymentQuery = existingPaymentQuery.eq('company_id', companyId);
+    }
+
+    const { data: existingPayment, error: checkError } = await existingPaymentQuery.single();
 
     if (existingPayment) {
       console.log('Payment record already exists for payment intent:', paymentIntent.id);
@@ -218,13 +263,19 @@ const handlePaymentSuccess = async (paymentIntent: any) => {
       if (order_id && order_id !== 'pending_order' && !existingPayment.order_id) {
         console.log('Updating existing payment record with order_id:', order_id);
         
-        const { error: updateError } = await supabaseAdmin
+        let updatePaymentQuery = supabaseAdmin
           .from('payments')
           .update({
             order_id: order_id,
             updated_at: new Date()
           })
           .eq('id', existingPayment.id);
+
+        if (companyId) {
+          updatePaymentQuery = updatePaymentQuery.eq('company_id', companyId);
+        }
+
+        const { error: updateError } = await updatePaymentQuery;
 
         if (updateError) {
           console.error('Error updating payment record with order_id:', updateError);
@@ -235,7 +286,7 @@ const handlePaymentSuccess = async (paymentIntent: any) => {
       
       // Update order if we have a valid order_id
       if (order_id && order_id !== 'pending_order') {
-        const { error: orderUpdateError } = await supabaseAdmin
+        let orderUpdateQuery = supabaseAdmin
           .from('orders')
           .update({
             payment_status: 'paid',
@@ -243,6 +294,12 @@ const handlePaymentSuccess = async (paymentIntent: any) => {
             updated_at: new Date()
           })
           .eq('id', order_id);
+
+        if (companyId) {
+          orderUpdateQuery = orderUpdateQuery.eq('company_id', companyId);
+        }
+
+        const { error: orderUpdateError } = await orderUpdateQuery;
 
         if (orderUpdateError) {
           console.error('Error updating order payment status:', orderUpdateError);
@@ -263,6 +320,7 @@ const handlePaymentSuccess = async (paymentIntent: any) => {
         status: 'completed',
         payment_method: paymentIntent.payment_method_types[0] || 'card',
         stripe_payment_intent_id: paymentIntent.id,
+        company_id: companyId,
         payment_gateway_response: {
           source: 'stripe_webhook',
           payment_intent_id: paymentIntent.id,
@@ -285,7 +343,7 @@ const handlePaymentSuccess = async (paymentIntent: any) => {
 
     // Update order if we have a valid order_id (not pending_order)
     if (order_id && order_id !== 'pending_order') {
-      const { error: orderUpdateError } = await supabaseAdmin
+      let orderUpdateQuery = supabaseAdmin
         .from('orders')
         .update({
           payment_status: 'paid',
@@ -293,6 +351,12 @@ const handlePaymentSuccess = async (paymentIntent: any) => {
           updated_at: new Date()
         })
         .eq('id', order_id);
+
+      if (companyId) {
+        orderUpdateQuery = orderUpdateQuery.eq('company_id', companyId);
+      }
+
+      const { error: orderUpdateError } = await orderUpdateQuery;
 
       if (orderUpdateError) {
         console.error('Error updating order payment status:', orderUpdateError);
@@ -319,6 +383,29 @@ const handlePaymentFailure = async (paymentIntent: any) => {
   });
   
   try {
+    let companyId: string | null = null;
+    if (order_id && order_id !== 'pending_order') {
+      const { data: order, error: orderError } = await supabaseAdmin
+        .from('orders')
+        .select('company_id')
+        .eq('id', order_id)
+        .single();
+
+      if (orderError) {
+        console.error('Error fetching order company_id:', orderError);
+      } else {
+        companyId = order?.company_id || null;
+      }
+    }
+
+    if (!companyId) {
+      console.warn('Skipping payment failure handling due to missing company_id', {
+        paymentIntentId: paymentIntent.id,
+        orderId: order_id
+      });
+      return;
+    }
+
     // Create payment record in database using admin client
     const { data: payment, error: paymentError } = await supabaseAdmin
       .from('payments')
@@ -328,6 +415,7 @@ const handlePaymentFailure = async (paymentIntent: any) => {
         status: 'failed',
         payment_method: paymentIntent.payment_method_types[0] || 'card',
         stripe_payment_intent_id: paymentIntent.id,
+        company_id: companyId,
         payment_gateway_response: {
           stripe_payment_intent: paymentIntent,
           event_type: 'payment_intent.payment_failed',
@@ -349,13 +437,19 @@ const handlePaymentFailure = async (paymentIntent: any) => {
     
     // Update order if order_id exists and is not pending
     if (order_id && order_id !== 'pending_order') {
-      const { error: orderError } = await supabaseAdmin
+      let orderUpdateQuery = supabaseAdmin
         .from('orders')
         .update({
           payment_status: 'failed',
           updated_at: new Date()
         })
         .eq('id', order_id);
+
+      if (companyId) {
+        orderUpdateQuery = orderUpdateQuery.eq('company_id', companyId);
+      }
+
+      const { error: orderError } = await orderUpdateQuery;
         
       if (orderError) {
         console.error('Error updating order:', orderError);
@@ -376,6 +470,10 @@ export const linkPaymentToOrder = async (req: Request, res: Response) => {
   try {
     const { payment_intent_id, order_id } = req.body;
     const userId = req.user.id;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
     
     if (!payment_intent_id || !order_id) {
       throw new ApiError(400, 'Payment intent ID and order ID are required');
@@ -387,6 +485,7 @@ export const linkPaymentToOrder = async (req: Request, res: Response) => {
       .select('id, user_id, total_amount')
       .eq('id', order_id)
       .eq('user_id', userId)
+      .eq('company_id', req.companyId)
       .single();
     
     if (orderError || !order) {
@@ -398,6 +497,7 @@ export const linkPaymentToOrder = async (req: Request, res: Response) => {
       .from('payments')
       .select('id, order_id, amount')
       .eq('stripe_payment_intent_id', payment_intent_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (existingPayment) {
@@ -414,6 +514,7 @@ export const linkPaymentToOrder = async (req: Request, res: Response) => {
             updated_at: new Date()
           })
           .eq('id', existingPayment.id)
+          .eq('company_id', req.companyId)
           .select()
           .single();
         
@@ -441,7 +542,8 @@ export const linkPaymentToOrder = async (req: Request, res: Response) => {
         status: 'processing',
         updated_at: new Date()
       })
-      .eq('id', order_id);
+      .eq('id', order_id)
+      .eq('company_id', req.companyId);
     
     if (orderUpdateError) {
       console.error('Error updating order:', orderUpdateError);
@@ -476,6 +578,10 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
     } = req.body;
     const userId = req.user?.id;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     if (!order_id || !amount || !payment_method) {
       throw new ApiError(400, 'Order ID, amount, and payment method are required');
     }
@@ -486,6 +592,7 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       .select('id, user_id, total_amount')
       .eq('id', order_id)
       .eq('user_id', userId)
+      .eq('company_id', req.companyId)
       .single();
 
     if (orderError || !order) {
@@ -504,6 +611,7 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       .from('payments')
       .select('id, stripe_payment_intent_id')
       .eq('order_id', order_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (existingPayment) {
@@ -519,7 +627,8 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
             stripe_payment_intent_id: stripe_payment_intent_id,
             updated_at: new Date()
           })
-          .eq('id', existingPayment.id);
+          .eq('id', existingPayment.id)
+          .eq('company_id', req.companyId);
 
         if (updateError) {
           console.error('Error updating payment record with stripe_payment_intent_id:', updateError);
@@ -537,7 +646,8 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
           payment_intent_id: stripe_payment_intent_id || existingPayment.stripe_payment_intent_id,
           updated_at: new Date()
         })
-        .eq('id', order_id);
+        .eq('id', order_id)
+        .eq('company_id', req.companyId);
 
       if (orderUpdateError) {
         console.error('Error updating order payment status:', orderUpdateError);
@@ -562,6 +672,7 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
         status,
         payment_method,
         stripe_payment_intent_id: stripe_payment_intent_id || null,
+        company_id: req.companyId,
         payment_gateway_response: {
           source: 'manual_creation',
           created_by: userId,
@@ -588,7 +699,8 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
         payment_intent_id: stripe_payment_intent_id,
         updated_at: new Date()
       })
-      .eq('id', order_id);
+      .eq('id', order_id)
+      .eq('company_id', req.companyId);
 
     if (orderUpdateError) {
       console.error('Error updating order payment status:', orderUpdateError);
@@ -613,6 +725,10 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
 export const createMissingPaymentRecords = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
     
     // Only allow admins to run this
     const { data: profile, error: profileError } = await supabase
@@ -637,6 +753,7 @@ export const createMissingPaymentRecords = async (req: Request, res: Response) =
         created_at
       `)
       .eq('payment_status', 'paid')
+      .eq('company_id', req.companyId)
       .is('payment_intent_id', null);
 
     if (ordersError) {
@@ -663,6 +780,7 @@ export const createMissingPaymentRecords = async (req: Request, res: Response) =
           .from('payments')
           .select('id')
           .eq('order_id', order.id)
+          .eq('company_id', req.companyId)
           .single();
 
         if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is "not found"
@@ -684,6 +802,7 @@ export const createMissingPaymentRecords = async (req: Request, res: Response) =
             status: 'completed',
             payment_method: 'card', // Default assumption
             stripe_payment_intent_id: null,
+            company_id: req.companyId,
             payment_gateway_response: {
               source: 'retroactive_creation',
               created_by: userId,

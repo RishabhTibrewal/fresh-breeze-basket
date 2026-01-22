@@ -33,6 +33,10 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
       throw new ValidationError('User ID is required');
     }
 
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
     // Create supplier
     const { data: supplier, error: supplierError } = await supabase
       .from('suppliers')
@@ -51,7 +55,8 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
         payment_terms,
         notes,
         created_by: userId,
-        is_active: true
+        is_active: true,
+        company_id: req.companyId
       })
       .select()
       .single();
@@ -69,7 +74,8 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
         account_number: account.account_number,
         ifsc_code: account.ifsc_code,
         account_holder_name: account.account_holder_name,
-        is_primary: account.is_primary || false
+        is_primary: account.is_primary || false,
+        company_id: req.companyId
       }));
 
       const { error: bankError } = await supabase
@@ -90,6 +96,7 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
         supplier_bank_accounts (*)
       `)
       .eq('id', supplier.id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (fetchError) {
@@ -112,12 +119,17 @@ export const getSuppliers = async (req: Request, res: Response, next: NextFuncti
   try {
     const { is_active, search } = req.query;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     let query = supabase
       .from('suppliers')
       .select(`
         *,
         supplier_bank_accounts (*)
       `)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     // Apply filters
@@ -152,6 +164,10 @@ export const getSupplierById = async (req: Request, res: Response, next: NextFun
   try {
     const { id } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const { data: supplier, error } = await supabase
       .from('suppliers')
       .select(`
@@ -159,6 +175,7 @@ export const getSupplierById = async (req: Request, res: Response, next: NextFun
         supplier_bank_accounts (*)
       `)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (error) {
@@ -202,6 +219,10 @@ export const updateSupplier = async (req: Request, res: Response, next: NextFunc
       bank_accounts
     } = req.body;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     // Update supplier
     const { data: supplier, error: updateError } = await supabase
       .from('suppliers')
@@ -223,6 +244,7 @@ export const updateSupplier = async (req: Request, res: Response, next: NextFunc
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -240,7 +262,8 @@ export const updateSupplier = async (req: Request, res: Response, next: NextFunc
       await supabase
         .from('supplier_bank_accounts')
         .delete()
-        .eq('supplier_id', id);
+        .eq('supplier_id', id)
+        .eq('company_id', req.companyId);
 
       // Insert new bank accounts
       if (bank_accounts.length > 0) {
@@ -250,7 +273,8 @@ export const updateSupplier = async (req: Request, res: Response, next: NextFunc
           account_number: account.account_number,
           ifsc_code: account.ifsc_code,
           account_holder_name: account.account_holder_name,
-          is_primary: account.is_primary || false
+          is_primary: account.is_primary || false,
+          company_id: req.companyId
         }));
 
         const { error: bankError } = await supabase
@@ -272,6 +296,7 @@ export const updateSupplier = async (req: Request, res: Response, next: NextFunc
         supplier_bank_accounts (*)
       `)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (fetchError) {
@@ -294,6 +319,10 @@ export const deleteSupplier = async (req: Request, res: Response, next: NextFunc
   try {
     const { id } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const { data: supplier, error } = await supabase
       .from('suppliers')
       .update({
@@ -301,6 +330,7 @@ export const deleteSupplier = async (req: Request, res: Response, next: NextFunc
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 

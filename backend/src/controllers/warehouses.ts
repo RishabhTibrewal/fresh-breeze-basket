@@ -5,11 +5,16 @@ import { ApiError } from '../middleware/error';
 // Get all warehouses
 export const getAllWarehouses = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { is_active } = req.query;
     
     let query = supabase
       .from('warehouses')
       .select('*')
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
     
     if (is_active !== undefined) {
@@ -37,12 +42,17 @@ export const getAllWarehouses = async (req: Request, res: Response) => {
 // Get warehouse by ID
 export const getWarehouseById = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { warehouseId } = req.params;
     
     const { data, error } = await supabase
       .from('warehouses')
       .select('*')
       .eq('id', warehouseId)
+      .eq('company_id', req.companyId)
       .single();
     
     if (error || !data) {
@@ -64,6 +74,10 @@ export const getWarehouseById = async (req: Request, res: Response) => {
 // Create warehouse (admin only)
 export const createWarehouse = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const {
       name,
       code,
@@ -95,7 +109,8 @@ export const createWarehouse = async (req: Request, res: Response) => {
         contact_name,
         contact_phone,
         contact_email,
-        is_active
+        is_active,
+        company_id: req.companyId
       })
       .select()
       .single();
@@ -119,12 +134,17 @@ export const createWarehouse = async (req: Request, res: Response) => {
 // Update warehouse (admin only)
 export const updateWarehouse = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { id } = req.params;
     const updateData = req.body;
     
     // Remove id from updateData if present
     delete updateData.id;
     delete updateData.created_at;
+    delete updateData.company_id; // Prevent company_id changes
     
     const { data, error } = await supabase
       .from('warehouses')
@@ -133,6 +153,7 @@ export const updateWarehouse = async (req: Request, res: Response) => {
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
     
@@ -155,6 +176,10 @@ export const updateWarehouse = async (req: Request, res: Response) => {
 // Delete warehouse (admin only - soft delete by setting is_active to false)
 export const deleteWarehouse = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { id } = req.params;
     
     // Soft delete by setting is_active to false
@@ -165,6 +190,7 @@ export const deleteWarehouse = async (req: Request, res: Response) => {
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
     
@@ -188,6 +214,10 @@ export const deleteWarehouse = async (req: Request, res: Response) => {
 // Get warehouse inventory
 export const getWarehouseInventory = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { warehouseId } = req.params;
     const { product_id, low_stock } = req.query;
     
@@ -211,6 +241,7 @@ export const getWarehouseInventory = async (req: Request, res: Response) => {
         )
       `)
       .eq('warehouse_id', warehouseId)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
     
     if (product_id) {
@@ -247,6 +278,10 @@ export const getWarehouseInventory = async (req: Request, res: Response) => {
  */
 export const getProductStockAcrossWarehouses = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { productId } = req.params;
     
     // Log warning in production to identify usage
@@ -266,6 +301,7 @@ export const getProductStockAcrossWarehouses = async (req: Request, res: Respons
         )
       `)
       .eq('product_id', productId)
+      .eq('company_id', req.companyId)
       .order('stock_count', { ascending: false });
     
     if (error) {
@@ -295,6 +331,10 @@ export const getProductStockAcrossWarehouses = async (req: Request, res: Respons
 // Get stock for multiple products across all warehouses (bulk endpoint)
 export const getBulkProductStock = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     const { productIds } = req.body;
     
     if (!Array.isArray(productIds) || productIds.length === 0) {
@@ -318,6 +358,7 @@ export const getBulkProductStock = async (req: Request, res: Response) => {
         )
       `)
       .in('product_id', productIds)
+      .eq('company_id', req.companyId)
       .order('product_id', { ascending: true })
       .order('stock_count', { ascending: false });
     

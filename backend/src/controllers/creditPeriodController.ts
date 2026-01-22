@@ -8,11 +8,16 @@ export const getCreditPeriodByOrderId = async (req: Request, res: Response) => {
     const { orderId } = req.params;
     console.log('Fetching credit period for order ID:', orderId);
 
+    if (!req.companyId) {
+      return res.status(400).json({ success: false, message: 'Company context is required' });
+    }
+
     // Query credit_periods table to find credit period associated with this order
     const { data: creditPeriod, error } = await supabase
       .from('credit_periods')
       .select('*')
       .eq('order_id', orderId)
+      .eq('company_id', req.companyId)
       .single();
 
     if (error) {
@@ -53,11 +58,16 @@ export const getCustomerCreditPeriods = async (req: Request, res: Response) => {
     const { customerId } = req.params;
     console.log('Fetching credit periods for customer ID:', customerId);
 
+    if (!req.companyId) {
+      return res.status(400).json({ success: false, message: 'Company context is required' });
+    }
+
     // Query credit_periods table to find all credit periods for this customer
     const { data: creditPeriods, error } = await supabase
       .from('credit_periods')
       .select('*')
       .eq('customer_id', customerId)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -92,6 +102,10 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
     console.log('=== CREDIT PERIOD UPDATE REQUEST ===');
     console.log('Credit Period ID:', creditPeriodId);
     console.log('Request body:', req.body);
+
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
     
     if (!status) {
       throw new AppError('Status is required', 400);
@@ -113,6 +127,7 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
       .from('credit_periods')
       .select('*, orders!credit_periods_order_id_fkey(user_id)')
       .eq('id', creditPeriodId)
+      .eq('company_id', req.companyId)
       .single();
 
     if (fetchError) {
@@ -134,6 +149,7 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
       .from('customers')
       .select('id, current_credit, credit_limit')
       .eq('user_id', userId)
+      .eq('company_id', req.companyId)
       .single();
 
     if (customerError) {
@@ -186,6 +202,7 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
       .from('credit_periods')
       .update(updateData)
       .eq('id', creditPeriodId)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -214,6 +231,7 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
         .from('customers')
         .update({ current_credit: newCreditAmount })
         .eq('id', customer.id)
+        .eq('company_id', req.companyId)
         .select()
         .single();
 
@@ -233,7 +251,8 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
           amount: paymentAmountToProcess,
           payment_date: new Date(),
           status: 'completed',
-          customer_id: customer.id
+          customer_id: customer.id,
+          company_id: req.companyId
         };
         
         console.log('Recording payment:', paymentRecord);

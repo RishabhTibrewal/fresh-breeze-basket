@@ -41,11 +41,16 @@ export const orderController = {
       console.log('Sales executive ID:', sales_executive_id);
       console.log('Customer ID:', customer_id);
 
+      if (!req.companyId) {
+        return res.status(400).json({ error: 'Company context is required' });
+      }
+
       // Verify the customer belongs to this sales executive
       const { data: customer, error: customerError } = await supabase
         .from('customers')
         .select('id, user_id, current_credit, credit_limit, sales_executive_id')
         .eq('id', customer_id)
+        .eq('company_id', req.companyId)
         .single();
 
       if (customerError) {
@@ -73,6 +78,7 @@ export const orderController = {
           .from('products')
           .select('price, sale_price')
           .eq('id', item.product_id)
+          .eq('company_id', req.companyId!)
           .single();
 
         if (productError) {
@@ -171,6 +177,7 @@ export const orderController = {
       // Create order record data object for better logging
       const orderData = {
         user_id: customer.user_id,
+        company_id: req.companyId!,
         status: 'pending',
         shipping_address_id,
         billing_address_id,
@@ -197,17 +204,18 @@ export const orderController = {
       console.log('Order created successfully:', order);
       console.log('Creating order items for items:', JSON.stringify(items, null, 2));
 
-      // First get all product prices in one query for better performance
+      // First get all product prices in one query for better performance (filtered by company_id)
       const productIds = (items as OrderItemInput[]).map(item => item.product_id);
       const { data: products, error: productsQueryError } = await supabase
         .from('products')
         .select('id, price, sale_price')
-        .in('id', productIds);
+        .in('id', productIds)
+        .eq('company_id', req.companyId!);
 
       if (productsQueryError) {
         console.error('Error fetching product prices:', productsQueryError);
         // Rollback by deleting the order if products query fails
-        await supabase.from('orders').delete().eq('id', order.id);
+        await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
         return res.status(500).json({ error: `Failed to fetch product prices: ${productsQueryError.message}` });
       }
 
@@ -237,6 +245,7 @@ export const orderController = {
         .select('id')
         .eq('code', 'WH-001')
         .eq('is_active', true)
+        .eq('company_id', req.companyId)
         .single();
 
       const defaultWarehouseId = defaultWarehouse?.id;
@@ -258,6 +267,7 @@ export const orderController = {
         
         return {
           order_id: order.id,
+          company_id: req.companyId!,
           product_id: item.product_id,
           quantity: item.quantity,
           unit_price: unitPrice,
@@ -284,6 +294,7 @@ export const orderController = {
             item.product_id,
             warehouseId,
             item.quantity,
+            req.companyId,
             true // Use admin client to bypass RLS for system operations
           );
           
@@ -297,7 +308,7 @@ export const orderController = {
       // If there were reservation errors, rollback the order
       if (reservationErrors.length > 0) {
         console.error('Stock reservation errors:', reservationErrors);
-        await supabase.from('orders').delete().eq('id', order.id);
+        await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
         return res.status(400).json({ 
           error: 'Failed to reserve stock for some products',
           details: reservationErrors
@@ -317,7 +328,7 @@ export const orderController = {
           try {
             const warehouseId = item.warehouse_id || defaultWarehouseIdForReservation;
             if (warehouseId) {
-              await restoreReservedStockUtil(item.product_id, warehouseId, item.quantity, true); // Use admin client to bypass RLS
+              await restoreReservedStockUtil(item.product_id, warehouseId, item.quantity, req.companyId, true); // Use admin client to bypass RLS
             }
           } catch (err) {
             console.error(`Error rolling back reservation for product ${item.product_id}:`, err);
@@ -325,7 +336,7 @@ export const orderController = {
         }
         
         // Rollback by deleting the order if items creation fails
-        await supabase.from('orders').delete().eq('id', order.id);
+        await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
         return res.status(500).json({ error: `Failed to create order items: ${itemsError.message}` });
       }
 
@@ -360,7 +371,8 @@ export const orderController = {
               start_date: credit_details.start_date,
               end_date: credit_details.end_date,
               type: 'credit',
-              description: credit_details.description || `Credit for order ${order.id}`
+              description: credit_details.description || `Credit for order ${order.id}`,
+              company_id: req.companyId
             });
 
           if (creditError) {
@@ -372,7 +384,8 @@ export const orderController = {
           const { error: updateCreditError } = await supabase
             .from('customers')
             .update({ current_credit: customer.current_credit + creditAmount })
-            .eq('id', customer_id);
+            .eq('id', customer_id)
+            .eq('company_id', req.companyId);
 
           if (updateCreditError) {
             console.error('Error updating customer credit:', updateCreditError);
@@ -400,6 +413,10 @@ export const orderController = {
       const { id: customer_id } = req.params;
       const sales_executive_id = req.user?.id;
 
+      if (!req.companyId) {
+        return res.status(400).json({ error: 'Company context is required' });
+      }
+
       console.log(`Fetching orders for customer ID: ${customer_id}`);
 
       // First get the customer details to get the user_id
@@ -407,6 +424,7 @@ export const orderController = {
         .from('customers')
         .select('id, user_id')
         .eq('id', customer_id)
+        .eq('company_id', req.companyId)
         .single();
 
       if (customerError) {
@@ -428,6 +446,7 @@ export const orderController = {
           credit_periods (*)
         `)
         .eq('user_id', customer.user_id)
+        .eq('company_id', req.companyId)
         .order('created_at', { ascending: false });
 
       if (ordersError) {
@@ -473,6 +492,10 @@ export const orderController = {
       const { order_id } = req.params;
       const sales_executive_id = req.user?.id;
 
+      if (!req.companyId) {
+        return res.status(400).json({ error: 'Company context is required' });
+      }
+
       // Find the order
       const { data: order, error: orderError } = await supabase
         .from('orders')
@@ -484,6 +507,7 @@ export const orderController = {
           )
         `)
         .eq('id', order_id)
+        .eq('company_id', req.companyId)
         .single();
 
       if (orderError) {
@@ -497,6 +521,7 @@ export const orderController = {
           .from('credit_periods')
           .select('*')
           .eq('order_id', order_id)
+          .eq('company_id', req.companyId)
           .single();
         
         if (!creditError && creditPeriod) {
@@ -509,6 +534,7 @@ export const orderController = {
         .from('customers')
         .select('id, name, sales_executive_id')
         .eq('user_id', order.user_id)
+        .eq('company_id', req.companyId)
         .single();
 
       if (customerError) {
@@ -540,6 +566,10 @@ export const orderController = {
       const { status } = req.body;
       const sales_executive_id = req.user?.id;
 
+      if (!req.companyId) {
+        return res.status(400).json({ error: 'Company context is required' });
+      }
+
       // Verify the order belongs to a customer of this sales executive
       const { data: order, error: orderError } = await supabase
         .from('orders')
@@ -550,6 +580,7 @@ export const orderController = {
           )
         `)
         .eq('id', order_id)
+        .eq('company_id', req.companyId)
         .single();
 
       if (orderError) throw orderError;
@@ -563,6 +594,7 @@ export const orderController = {
         .from('orders')
         .update({ status })
         .eq('id', order_id)
+        .eq('company_id', req.companyId)
         .select()
         .single();
 
@@ -577,13 +609,18 @@ export const orderController = {
   // Get all orders for sales executive's customers
   async getSalesOrders(req: Request, res: Response) {
     try {
+      if (!req.companyId) {
+        return res.status(400).json({ error: 'Company context is required' });
+      }
+      
       const sales_executive_id = req.user?.id;
 
-      // Get all customers for this sales executive
+      // Get all customers for this sales executive (filtered by company_id)
       const { data: customers, error: customersError } = await supabase
         .from('customers')
         .select('id, user_id, name')
-        .eq('sales_executive_id', sales_executive_id);
+        .eq('sales_executive_id', sales_executive_id)
+        .eq('company_id', req.companyId);
 
       if (customersError) {
         console.error('Error fetching customers:', customersError);
@@ -594,7 +631,7 @@ export const orderController = {
         return res.json([]); // Return empty array if no customers
       }
 
-      // Get all orders for these customers
+      // Get all orders for these customers (filtered by company_id)
       const customerUserIds = customers.map(c => c.user_id);
       const { data: orders, error: ordersError } = await supabase
         .from('orders')
@@ -606,6 +643,7 @@ export const orderController = {
           )
         `)
         .in('user_id', customerUserIds)
+        .eq('company_id', req.companyId)
         .order('created_at', { ascending: false });
 
       if (ordersError) {
@@ -621,6 +659,7 @@ export const orderController = {
             .from('credit_periods')
             .select('*')
             .eq('order_id', order.id)
+            .eq('company_id', req.companyId)
             .single();
           
           if (!creditError && creditPeriod) {

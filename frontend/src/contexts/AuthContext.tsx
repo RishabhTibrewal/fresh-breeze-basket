@@ -340,46 +340,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       console.log('Starting registration process', { email, firstName, lastName, phone });
       
-      const { data, error } = await supabase.auth.signUp({
+      // Call backend registration endpoint which handles tenant context and company_id
+      const response = await apiClient.post('/auth/register', {
         email,
         password,
-        phone,
-        options: {
-          data: {
-            first_name: firstName,
-            last_name: lastName
-          }
-        }
+        first_name: firstName,
+        last_name: lastName,
+        phone: phone || undefined
       });
 
-      console.log('Registration response:', { data, error });
+      console.log('Registration response:', response.data);
 
-      if (error) {
-        console.error('Supabase registration error:', error);
-        toast.error(error.message);
-        throw error;
-      }
-      
-      if (data.user) {
-        console.log('User created successfully:', data.user.id);
+      if (response.data.success) {
+        console.log('User created successfully:', response.data.data?.id);
         
-        // If Supabase registration successful, also call backend login
+        // After successful registration, sign in with Supabase to get session
         try {
-          console.log('Attempting to login with backend after registration');
-          await apiClient.post('/auth/login', { email, password });
-          console.log('Backend login after registration successful');
-        } catch (backendError) {
-          // Log backend error but don't throw since Supabase registration succeeded
-          console.error('Backend login after registration failed:', backendError);
+          console.log('Signing in with Supabase after registration');
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email,
+            password
+          });
+
+          if (signInError) {
+            console.error('Supabase sign-in error after registration:', signInError);
+            toast.warning('Registration successful, but automatic sign-in failed. Please sign in manually.');
+          } else if (signInData.user) {
+            console.log('Auto sign-in successful after registration');
+            // Update user state
+            setUser(signInData.user);
+            // Cache the token
+            if (signInData.session?.access_token) {
+              localStorage.setItem('supabase_token', signInData.session.access_token);
+            }
+            toast.success('Registration successful! You have been signed in.');
+          }
+        } catch (signInErr) {
+          console.error('Error during auto sign-in:', signInErr);
+          toast.warning('Registration successful, but automatic sign-in failed. Please sign in manually.');
         }
-        
-        toast.success('Registration successful! Please check your email for verification.');
       } else {
-        console.warn('No user data in response:', data);
-        toast.warning('Registration may have been successful, but no user data was returned.');
+        throw new Error(response.data.message || 'Registration failed');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error signing up:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to register';
+      toast.error(errorMessage);
       throw error;
     }
   };

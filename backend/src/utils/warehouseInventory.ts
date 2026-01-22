@@ -4,13 +4,22 @@ import { supabaseAdmin } from '../config/supabase';
 /**
  * Get stock count for a product in a specific warehouse
  */
-export const getWarehouseStock = async (productId: string, warehouseId: string): Promise<number> => {
-  const { data, error } = await supabase
+export const getWarehouseStock = async (
+  productId: string,
+  warehouseId: string,
+  companyId?: string
+): Promise<number> => {
+  let query = supabase
     .from('warehouse_inventory')
     .select('stock_count')
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId)
-    .single();
+    .eq('warehouse_id', warehouseId);
+
+  if (companyId) {
+    query = query.eq('company_id', companyId);
+  }
+
+  const { data, error } = await query.single();
 
   if (error || !data) {
     return 0;
@@ -27,18 +36,24 @@ export const updateWarehouseStock = async (
   productId: string,
   warehouseId: string,
   quantityChange: number,
+  companyId?: string,
   allowNegative: boolean = false,
   useAdminClient: boolean = false
 ): Promise<number> => {
   const client = useAdminClient && supabaseAdmin ? supabaseAdmin : supabase;
 
   // Get current stock using the same client to avoid RLS issues
-  const { data: currentData, error: currentError } = await client
+  let stockQuery = client
     .from('warehouse_inventory')
     .select('stock_count')
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId)
-    .maybeSingle();
+    .eq('warehouse_id', warehouseId);
+
+  if (companyId) {
+    stockQuery = stockQuery.eq('company_id', companyId);
+  }
+
+  const { data: currentData, error: currentError } = await stockQuery.maybeSingle();
 
   if (currentError) {
     console.error(`Error fetching warehouse stock for product ${productId} in warehouse ${warehouseId}:`, currentError);
@@ -51,14 +66,20 @@ export const updateWarehouseStock = async (
     : Math.max(0, currentStock + quantityChange);
 
   // Upsert warehouse inventory
+  const upsertPayload: Record<string, any> = {
+    warehouse_id: warehouseId,
+    product_id: productId,
+    stock_count: newStockCount,
+    updated_at: new Date().toISOString()
+  };
+
+  if (companyId) {
+    upsertPayload.company_id = companyId;
+  }
+
   const { data, error } = await client
     .from('warehouse_inventory')
-    .upsert({
-      warehouse_id: warehouseId,
-      product_id: productId,
-      stock_count: newStockCount,
-      updated_at: new Date().toISOString()
-    }, {
+    .upsert(upsertPayload, {
       onConflict: 'warehouse_id,product_id'
     })
     .select('stock_count')
@@ -75,11 +96,20 @@ export const updateWarehouseStock = async (
 /**
  * Get total stock across all warehouses for a product
  */
-export const getTotalProductStock = async (productId: string): Promise<number> => {
-  const { data, error } = await supabase
+export const getTotalProductStock = async (
+  productId: string,
+  companyId?: string
+): Promise<number> => {
+  let query = supabase
     .from('warehouse_inventory')
     .select('stock_count')
     .eq('product_id', productId);
+
+  if (companyId) {
+    query = query.eq('company_id', companyId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error(`Error getting total stock for product ${productId}:`, error);
@@ -95,14 +125,21 @@ export const getTotalProductStock = async (productId: string): Promise<number> =
  */
 export const findWarehouseWithStock = async (
   productId: string,
-  requiredQuantity: number
+  requiredQuantity: number,
+  companyId?: string
 ): Promise<string | null> => {
-  const { data, error } = await supabase
+  let query = supabase
     .from('warehouse_inventory')
     .select('warehouse_id, stock_count, warehouses!inner(is_active)')
     .eq('product_id', productId)
     .gte('stock_count', requiredQuantity)
-    .eq('warehouses.is_active', true)
+    .eq('warehouses.is_active', true);
+
+  if (companyId) {
+    query = query.eq('company_id', companyId);
+  }
+
+  const { data, error } = await query
     .order('stock_count', { ascending: false })
     .limit(1)
     .single();
@@ -117,13 +154,18 @@ export const findWarehouseWithStock = async (
 /**
  * Get default warehouse ID (WH-001)
  */
-export const getDefaultWarehouseId = async (): Promise<string | null> => {
-  const { data, error } = await supabase
+export const getDefaultWarehouseId = async (companyId?: string): Promise<string | null> => {
+  let query = supabase
     .from('warehouses')
     .select('id')
     .eq('code', 'WH-001')
-    .eq('is_active', true)
-    .single();
+    .eq('is_active', true);
+
+  if (companyId) {
+    query = query.eq('company_id', companyId);
+  }
+
+  const { data, error } = await query.single();
 
   if (error || !data) {
     console.error('Error getting default warehouse:', error);
@@ -141,31 +183,43 @@ export const reserveWarehouseStock = async (
   productId: string,
   warehouseId: string,
   quantity: number,
+  companyId?: string,
   useAdminClient: boolean = false
 ): Promise<{ stock_count: number; reserved_stock: number }> => {
   const client = useAdminClient && supabaseAdmin ? supabaseAdmin : supabase;
 
   // Get current inventory
-  const { data: currentInventory, error: fetchError } = await client
+  let inventoryQuery = client
     .from('warehouse_inventory')
     .select('stock_count, reserved_stock')
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId)
-    .maybeSingle(); // Use maybeSingle() instead of single() to handle no rows gracefully
+    .eq('warehouse_id', warehouseId);
+
+  if (companyId) {
+    inventoryQuery = inventoryQuery.eq('company_id', companyId);
+  }
+
+  const { data: currentInventory, error: fetchError } = await inventoryQuery.maybeSingle(); // Use maybeSingle() instead of single() to handle no rows gracefully
 
   // If inventory doesn't exist (PGRST116 or no data), create it with reserved stock
   if (fetchError?.code === 'PGRST116' || !currentInventory) {
     // If inventory doesn't exist, create it with negative stock_count for advance orders
     // Example: reserve 70 items → stock_count=-70, reserved_stock=70
+    const upsertPayload: Record<string, any> = {
+      warehouse_id: warehouseId,
+      product_id: productId,
+      stock_count: -quantity, // Negative for advance orders when no inventory exists
+      reserved_stock: quantity,
+      updated_at: new Date().toISOString()
+    };
+
+    if (companyId) {
+      upsertPayload.company_id = companyId;
+    }
+
     const { data, error } = await client
       .from('warehouse_inventory')
-      .upsert({
-        warehouse_id: warehouseId,
-        product_id: productId,
-        stock_count: -quantity, // Negative for advance orders when no inventory exists
-        reserved_stock: quantity,
-        updated_at: new Date().toISOString()
-      }, {
+      .upsert(upsertPayload, {
         onConflict: 'warehouse_id,product_id'
       })
       .select('stock_count, reserved_stock')
@@ -230,18 +284,24 @@ export const releaseReservedStock = async (
   productId: string,
   warehouseId: string,
   quantity: number,
+  companyId?: string,
   allowNegative: boolean = false,
   useAdminClient: boolean = false
 ): Promise<{ stock_count: number; reserved_stock: number }> => {
   const client = useAdminClient && supabaseAdmin ? supabaseAdmin : supabase;
 
   // Get current inventory
-  const { data: currentInventory, error: fetchError } = await client
+  let inventoryQuery = client
     .from('warehouse_inventory')
     .select('stock_count, reserved_stock')
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId)
-    .single();
+    .eq('warehouse_id', warehouseId);
+
+  if (companyId) {
+    inventoryQuery = inventoryQuery.eq('company_id', companyId);
+  }
+
+  const { data: currentInventory, error: fetchError } = await inventoryQuery.single();
 
   if (fetchError || !currentInventory) {
     console.error(`Inventory not found for product ${productId} in warehouse ${warehouseId}`);
@@ -253,14 +313,20 @@ export const releaseReservedStock = async (
     ? currentReserved - quantity
     : Math.max(0, currentReserved - quantity);
 
-  const { data, error } = await client
+  let updateQuery = client
     .from('warehouse_inventory')
     .update({
       reserved_stock: newReservedStock,
       updated_at: new Date().toISOString()
     })
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId)
+    .eq('warehouse_id', warehouseId);
+
+  if (companyId) {
+    updateQuery = updateQuery.eq('company_id', companyId);
+  }
+
+  const { data, error } = await updateQuery
     .select('stock_count, reserved_stock')
     .single();
 
@@ -280,17 +346,23 @@ export const restoreReservedStock = async (
   productId: string,
   warehouseId: string,
   quantity: number,
+  companyId?: string,
   useAdminClient: boolean = false
 ): Promise<{ stock_count: number; reserved_stock: number }> => {
   const client = useAdminClient && supabaseAdmin ? supabaseAdmin : supabase;
 
   // Get current inventory
-  const { data: currentInventory, error: fetchError } = await client
+  let inventoryQuery = client
     .from('warehouse_inventory')
     .select('stock_count, reserved_stock')
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId)
-    .single();
+    .eq('warehouse_id', warehouseId);
+
+  if (companyId) {
+    inventoryQuery = inventoryQuery.eq('company_id', companyId);
+  }
+
+  const { data: currentInventory, error: fetchError } = await inventoryQuery.single();
 
   if (fetchError || !currentInventory) {
     console.error(`Inventory not found for product ${productId} in warehouse ${warehouseId}`);
@@ -304,7 +376,7 @@ export const restoreReservedStock = async (
   const newStockCount = currentStock + quantity;
   const newReservedStock = Math.max(0, currentReserved - quantity);
 
-  const { data, error } = await client
+  let updateQuery = client
     .from('warehouse_inventory')
     .update({
       stock_count: newStockCount,
@@ -312,7 +384,13 @@ export const restoreReservedStock = async (
       updated_at: new Date().toISOString()
     })
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId)
+    .eq('warehouse_id', warehouseId);
+
+  if (companyId) {
+    updateQuery = updateQuery.eq('company_id', companyId);
+  }
+
+  const { data, error } = await updateQuery
     .select('stock_count, reserved_stock')
     .single();
 

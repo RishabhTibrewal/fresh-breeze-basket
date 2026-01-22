@@ -10,11 +10,16 @@ export const getCart = async (req: Request, res: Response) => {
             return res.status(401).json({ success: false, error: 'Unauthorized' });
         }
 
+        if (!req.companyId) {
+            return res.status(400).json({ success: false, error: 'Company context is required' });
+        }
+
         // First get or create the user's cart
         const { data: cart, error: cartError } = await supabase
             .from('carts')
             .select('id')
             .eq('user_id', userId)
+            .eq('company_id', req.companyId)
             .single();
 
         if (cartError && cartError.code !== 'PGRST116') {
@@ -26,7 +31,7 @@ export const getCart = async (req: Request, res: Response) => {
             // Create a new cart if it doesn't exist
             const { data: newCart, error: createError } = await supabase
                 .from('carts')
-                .insert([{ user_id: userId }])
+                .insert([{ user_id: userId, company_id: req.companyId }])
                 .select('id')
                 .single();
 
@@ -56,7 +61,8 @@ export const getCart = async (req: Request, res: Response) => {
                     is_featured
                 )
             `)
-            .eq('cart_id', cartId);
+            .eq('cart_id', cartId)
+            .eq('company_id', req.companyId);
 
         if (itemsError) throw itemsError;
 
@@ -75,6 +81,10 @@ export const addToCart = async (req: Request, res: Response) => {
             return res.status(401).json({ success: false, error: 'Unauthorized' });
         }
 
+        if (!req.companyId) {
+            return res.status(400).json({ success: false, error: 'Company context is required' });
+        }
+
         const { product_id, quantity } = req.body;
 
         if (!product_id || !quantity) {
@@ -86,6 +96,7 @@ export const addToCart = async (req: Request, res: Response) => {
             .from('carts')
             .select('id')
             .eq('user_id', userId)
+            .eq('company_id', req.companyId)
             .single();
 
         if (cartError && cartError.code !== 'PGRST116') {
@@ -97,7 +108,7 @@ export const addToCart = async (req: Request, res: Response) => {
             // Create a new cart if it doesn't exist
             const { data: newCart, error: createError } = await supabase
                 .from('carts')
-                .insert([{ user_id: userId }])
+                .insert([{ user_id: userId, company_id: req.companyId }])
                 .select('id')
                 .single();
 
@@ -112,6 +123,7 @@ export const addToCart = async (req: Request, res: Response) => {
             .from('products')
             .select('id, is_active')
             .eq('id', product_id)
+            .eq('company_id', req.companyId)
             .single();
 
         if (productError || !product) {
@@ -128,6 +140,7 @@ export const addToCart = async (req: Request, res: Response) => {
             .select('id, quantity')
             .eq('cart_id', cartId)
             .eq('product_id', product_id)
+            .eq('company_id', req.companyId)
             .single();
 
         if (existingError && existingError.code !== 'PGRST116') {
@@ -139,14 +152,15 @@ export const addToCart = async (req: Request, res: Response) => {
             const { error: updateError } = await supabase
                 .from('cart_items')
                 .update({ quantity: existingItem.quantity + quantity })
-                .eq('id', existingItem.id);
+                .eq('id', existingItem.id)
+                .eq('company_id', req.companyId);
 
             if (updateError) throw updateError;
         } else {
             // Add new item to cart
             const { error: insertError } = await supabase
                 .from('cart_items')
-                .insert([{ cart_id: cartId, product_id, quantity }]);
+                .insert([{ cart_id: cartId, product_id, quantity, company_id: req.companyId }]);
 
             if (insertError) throw insertError;
         }
@@ -166,6 +180,10 @@ export const updateCartItem = async (req: Request, res: Response) => {
             return res.status(401).json({ success: false, error: 'Unauthorized' });
         }
 
+        if (!req.companyId) {
+            return res.status(400).json({ success: false, error: 'Company context is required' });
+        }
+
         const { id } = req.params;
         const { quantity } = req.body;
 
@@ -178,6 +196,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
             .from('cart_items')
             .select('id, cart_id')
             .eq('id', id)
+            .eq('company_id', req.companyId)
             .single();
 
         if (checkError || !cartItem) {
@@ -190,6 +209,7 @@ export const updateCartItem = async (req: Request, res: Response) => {
             .select('id')
             .eq('id', cartItem.cart_id)
             .eq('user_id', userId)
+            .eq('company_id', req.companyId)
             .single();
 
         if (cartError || !cart) {
@@ -200,7 +220,8 @@ export const updateCartItem = async (req: Request, res: Response) => {
         const { error: updateError } = await supabase
             .from('cart_items')
             .update({ quantity })
-            .eq('id', id);
+            .eq('id', id)
+            .eq('company_id', req.companyId);
 
         if (updateError) throw updateError;
 
@@ -219,6 +240,10 @@ export const removeFromCart = async (req: Request, res: Response) => {
             return res.status(401).json({ success: false, error: 'Unauthorized' });
         }
 
+        if (!req.companyId) {
+            return res.status(400).json({ success: false, error: 'Company context is required' });
+        }
+
         const { id } = req.params;
 
         // Check if item exists in user's cart
@@ -226,6 +251,7 @@ export const removeFromCart = async (req: Request, res: Response) => {
             .from('cart_items')
             .select('id, cart_id')
             .eq('id', id)
+            .eq('company_id', req.companyId)
             .single();
 
         if (checkError || !cartItem) {
@@ -238,6 +264,7 @@ export const removeFromCart = async (req: Request, res: Response) => {
             .select('id')
             .eq('id', cartItem.cart_id)
             .eq('user_id', userId)
+            .eq('company_id', req.companyId)
             .single();
 
         if (cartError || !cart) {
@@ -248,7 +275,8 @@ export const removeFromCart = async (req: Request, res: Response) => {
         const { error: deleteError } = await supabase
             .from('cart_items')
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .eq('company_id', req.companyId);
 
         if (deleteError) throw deleteError;
 
@@ -267,10 +295,15 @@ export const clearCart = async (req: Request, res: Response) => {
             return res.status(401).json({ success: false, error: 'Unauthorized' });
         }
 
+        if (!req.companyId) {
+            return res.status(400).json({ success: false, error: 'Company context is required' });
+        }
+
         const { error } = await supabase
             .from('carts')
             .delete()
-            .eq('user_id', userId);
+            .eq('user_id', userId)
+            .eq('company_id', req.companyId);
 
         if (error) throw error;
 

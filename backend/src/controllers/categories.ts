@@ -5,9 +5,14 @@ import { ApiError } from '../middleware/error';
 // Get all categories
 export const getCategories = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const { data, error } = await supabase
       .from('categories')
       .select('*')
+      .eq('company_id', req.companyId)
       .order('name', { ascending: true });
     
     if (error) {
@@ -44,11 +49,16 @@ export const getCategories = async (req: Request, res: Response) => {
 export const getCategoryById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
     
     const { data, error } = await supabase
       .from('categories')
       .select('*, products(*)')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
     
     if (error) {
@@ -88,6 +98,10 @@ export const getCategoryById = async (req: Request, res: Response) => {
 export const createCategory = async (req: Request, res: Response) => {
   try {
     const { name, description, image_url, slug } = req.body;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
     
     // Validate required fields
     if (!name) {
@@ -103,7 +117,8 @@ export const createCategory = async (req: Request, res: Response) => {
         name,
         description: description || null,
         image_url: image_url || null,
-        slug: categorySlug
+        slug: categorySlug,
+        company_id: req.companyId
       })
       .select();
     
@@ -148,12 +163,17 @@ export const updateCategory = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { name, description, image_url, slug } = req.body;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
     
     // Check if category exists
     const { data: existingCategory, error: fetchError } = await supabase
       .from('categories')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
     
     if (fetchError) {
@@ -175,6 +195,7 @@ export const updateCategory = async (req: Request, res: Response) => {
         updated_at: new Date()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select();
     
     if (error) {
@@ -217,12 +238,17 @@ export const updateCategory = async (req: Request, res: Response) => {
 export const deleteCategory = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
     
     // Check if category exists
     const { data: existingCategory, error: fetchError } = await supabase
       .from('categories')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
     
     if (fetchError) {
@@ -237,7 +263,8 @@ export const deleteCategory = async (req: Request, res: Response) => {
     const { error } = await supabase
       .from('categories')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('company_id', req.companyId);
     
     if (error) {
       console.error('Error deleting category:', error);

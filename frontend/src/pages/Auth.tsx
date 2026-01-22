@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
@@ -116,9 +116,10 @@ const Auth = () => {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="login">Login</TabsTrigger>
             <TabsTrigger value="register">Register</TabsTrigger>
+            <TabsTrigger value="company">Register Company</TabsTrigger>
           </TabsList>
           
           <TabsContent value="login">
@@ -273,6 +274,25 @@ const Auth = () => {
                     </Button>
                   </form>
                 </Form>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="company">
+            <Card>
+              <CardHeader>
+                <CardTitle>Create a company</CardTitle>
+                <CardDescription>
+                  Set up a new company and an admin account to manage it.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">
+                  You will be redirected to a dedicated company registration form.
+                </p>
+                <Button asChild className="w-full">
+                  <Link to="/create-company">Register Company</Link>
+                </Button>
               </CardContent>
             </Card>
           </TabsContent>

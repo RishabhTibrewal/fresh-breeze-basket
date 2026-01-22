@@ -5,7 +5,7 @@ import { ApiError, ValidationError } from '../middleware/error';
 /**
  * Generate invoice number (e.g., INV-2024-001)
  */
-const generateInvoiceNumber = async (): Promise<string> => {
+const generateInvoiceNumber = async (companyId: string): Promise<string> => {
   const year = new Date().getFullYear();
   
   const adminClient = supabaseAdmin || supabase;
@@ -13,6 +13,7 @@ const generateInvoiceNumber = async (): Promise<string> => {
     .schema('procurement')
     .from('purchase_invoices')
     .select('invoice_number')
+    .eq('company_id', companyId)
     .ilike('invoice_number', `INV-${year}-%`)
     .order('invoice_number', { ascending: false })
     .limit(1)
@@ -64,6 +65,10 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
       throw new ValidationError('User ID is required');
     }
 
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
     // Verify goods receipt exists
     const adminClient = supabaseAdmin || supabase;
     const { data: goodsReceipt, error: grnError } = await adminClient
@@ -71,6 +76,7 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
       .from('goods_receipts')
       .select('*')
       .eq('id', goods_receipt_id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (grnError || !goodsReceipt) {
@@ -78,7 +84,7 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
     }
 
     // Generate invoice number
-    const invoice_number = await generateInvoiceNumber();
+    const invoice_number = await generateInvoiceNumber(req.companyId);
 
     // Calculate amounts if not provided
     const calculatedSubtotal = subtotal || goodsReceipt.total_received_amount || 0;
@@ -104,7 +110,8 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
         paid_amount: 0,
         status: 'pending',
         notes,
-        created_by: userId
+        created_by: userId,
+        company_id: req.companyId
       })
       .select()
       .single();
@@ -131,11 +138,16 @@ export const getPurchaseInvoices = async (req: Request, res: Response, next: Nex
   try {
     const { status, supplier_id, purchase_order_id, date_from, date_to } = req.query;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const adminClient = supabaseAdmin || supabase;
     let query = adminClient
       .schema('procurement')
       .from('purchase_invoices')
       .select('*')
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     if (status) {
@@ -174,7 +186,8 @@ export const getPurchaseInvoices = async (req: Request, res: Response, next: Nex
         .schema('procurement')
         .from('purchase_orders')
         .select('*')
-        .in('id', purchaseOrderIds);
+        .in('id', purchaseOrderIds)
+        .eq('company_id', req.companyId);
       
       purchaseOrders?.forEach((po: any) => {
         purchaseOrdersMap.set(po.id, po);
@@ -189,7 +202,8 @@ export const getPurchaseInvoices = async (req: Request, res: Response, next: Nex
         .schema('procurement')
         .from('goods_receipts')
         .select('*')
-        .in('id', goodsReceiptIds);
+        .in('id', goodsReceiptIds)
+        .eq('company_id', req.companyId);
       
       goodsReceipts?.forEach((gr: any) => {
         goodsReceiptsMap.set(gr.id, gr);
@@ -202,7 +216,8 @@ export const getPurchaseInvoices = async (req: Request, res: Response, next: Nex
       const { data: suppliers } = await adminClient
         .from('suppliers')
         .select('*')
-        .in('id', supplierIds);
+        .in('id', supplierIds)
+        .eq('company_id', req.companyId);
       
       suppliers?.forEach((supplier: any) => {
         suppliersMap.set(supplier.id, supplier);
@@ -243,6 +258,10 @@ export const getPurchaseInvoiceById = async (req: Request, res: Response, next: 
   try {
     const { id } = req.params;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const adminClient = supabaseAdmin || supabase;
     
     // Fetch purchase invoice from procurement schema
@@ -251,6 +270,7 @@ export const getPurchaseInvoiceById = async (req: Request, res: Response, next: 
       .from('purchase_invoices')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (error) {
@@ -264,12 +284,12 @@ export const getPurchaseInvoiceById = async (req: Request, res: Response, next: 
     // Fetch related purchase order, goods receipt, and supplier payments separately
     const [purchaseOrderResult, goodsReceiptResult, paymentsResult] = await Promise.all([
       purchaseInvoice.purchase_order_id 
-        ? adminClient.schema('procurement').from('purchase_orders').select('*').eq('id', purchaseInvoice.purchase_order_id).single()
+        ? adminClient.schema('procurement').from('purchase_orders').select('*').eq('id', purchaseInvoice.purchase_order_id).eq('company_id', req.companyId).single()
         : Promise.resolve({ data: null, error: null }),
       purchaseInvoice.goods_receipt_id
-        ? adminClient.schema('procurement').from('goods_receipts').select('*').eq('id', purchaseInvoice.goods_receipt_id).single()
+        ? adminClient.schema('procurement').from('goods_receipts').select('*').eq('id', purchaseInvoice.goods_receipt_id).eq('company_id', req.companyId).single()
         : Promise.resolve({ data: null, error: null }),
-      adminClient.schema('procurement').from('supplier_payments').select('*').eq('purchase_invoice_id', id)
+      adminClient.schema('procurement').from('supplier_payments').select('*').eq('purchase_invoice_id', id).eq('company_id', req.companyId)
     ]);
 
     const purchaseOrder = purchaseOrderResult.error ? null : purchaseOrderResult.data;
@@ -283,6 +303,7 @@ export const getPurchaseInvoiceById = async (req: Request, res: Response, next: 
         .from('suppliers')
         .select('*')
         .eq('id', purchaseOrder.supplier_id)
+        .eq('company_id', req.companyId)
         .single();
       supplier = supplierData || null;
     }
@@ -333,12 +354,17 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
     if (notes !== undefined) updateData.notes = notes;
     if (status !== undefined) updateData.status = status;
 
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
     const adminClient = supabaseAdmin || supabase;
     const { data: purchaseInvoice, error: updateError } = await adminClient
       .schema('procurement')
       .from('purchase_invoices')
       .update(updateData)
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -356,13 +382,15 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
         .schema('procurement')
         .from('purchase_invoices')
         .update({ status: 'paid' })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('company_id', req.companyId);
     } else if (purchaseInvoice.paid_amount > 0) {
       await adminClient
         .schema('procurement')
         .from('purchase_invoices')
         .update({ status: 'partial' })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('company_id', req.companyId);
     }
 
     // Fetch updated invoice with relations (reuse getPurchaseInvoiceById logic)
@@ -371,6 +399,7 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
       .from('purchase_invoices')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     res.json({
@@ -394,6 +423,10 @@ export const uploadInvoiceFile = async (req: Request, res: Response, next: NextF
       throw new ValidationError('Invoice file URL is required');
     }
 
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
     const adminClient = supabaseAdmin || supabase;
     const { data: purchaseInvoice, error } = await adminClient
       .schema('procurement')
@@ -403,6 +436,7 @@ export const uploadInvoiceFile = async (req: Request, res: Response, next: NextF
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 

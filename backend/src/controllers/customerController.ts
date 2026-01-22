@@ -28,25 +28,31 @@ export const getCustomers = async (req: Request, res: Response) => {
     const userId = req.user?.id;
     const userRole = req.user?.role;
 
-    // Build query - filter by sales_executive_id if user is a sales executive
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+
+    // Build query - filter by company_id and sales_executive_id if user is a sales executive
     let query = supabase
       .from('customers')
-      .select('*');
+      .select('*')
+      .eq('company_id', req.companyId);
 
     // If user is a sales executive, only show their customers
     if (userRole === 'sales' && userId) {
       query = query.eq('sales_executive_id', userId);
     }
-    // Admins can see all customers (no filter)
+    // Admins can see all customers for their company
 
     const { data: customers, error } = await query;
 
     if (error) throw error;
 
-    // Get all orders to calculate statistics
+    // Get all orders to calculate statistics (filtered by company_id)
     const { data: allOrders, error: ordersError } = await supabase
       .from('orders')
-      .select('id, user_id, total_amount, created_at, status');
+      .select('id, user_id, total_amount, created_at, status')
+      .eq('company_id', req.companyId);
     
     if (ordersError) {
       console.error('Error fetching orders:', ordersError);
@@ -97,6 +103,10 @@ export const getCustomers = async (req: Request, res: Response) => {
 // Get customer by ID
 export const getCustomerById = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const { id } = req.params;
 
     // First, get the customer details
@@ -104,26 +114,29 @@ export const getCustomerById = async (req: Request, res: Response) => {
       .from('customers')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
 
     if (error) throw error;
     if (!customer) throw new AppError('Customer not found', 404);
 
-    // Then separately get the order information
+    // Then separately get the order information (filtered by company_id)
     const { data: orders, error: ordersError } = await supabase
       .from('orders')
       .select('id, total_amount, status')
-      .eq('user_id', customer.user_id);
+      .eq('user_id', customer.user_id)
+      .eq('company_id', req.companyId);
     
     if (ordersError) {
       console.error('Error fetching customer orders:', ordersError);
     }
 
-    // Get credit periods information
+    // Get credit periods information (filtered by company_id)
     const { data: creditPeriods, error: creditError } = await supabase
       .from('credit_periods')
       .select('*')
       .eq('customer_id', id)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     if (creditError) {
@@ -166,6 +179,10 @@ export const getCustomerById = async (req: Request, res: Response) => {
 // Get customer by user_id (for admin to view customer details from user profile)
 export const getCustomerByUserId = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const { userId } = req.params;
 
     // First, get the profile information (this should always exist)
@@ -173,6 +190,7 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       .from('profiles')
       .select('*')
       .eq('id', userId)
+      .eq('company_id', req.companyId)
       .single();
 
     if (profileError || !profile) {
@@ -187,6 +205,7 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       .from('customers')
       .select('*')
       .eq('user_id', userId)
+      .eq('company_id', req.companyId)
       .single();
 
     // If customer doesn't exist, this is a retail customer (profile only, no customer record)
@@ -199,11 +218,12 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
         console.log(`Retail customer (profile only) - user ${userId}, fetching orders...`);
       }
       
-      // For retail customers, fetch their orders using user_id
+      // For retail customers, fetch their orders using user_id (filtered by company_id)
       const { data: retailOrders, error: retailOrdersError } = await supabase
         .from('orders')
         .select('id, total_amount, status, created_at, payment_status')
         .eq('user_id', userId)
+        .eq('company_id', req.companyId)
         .order('created_at', { ascending: false });
       
       if (retailOrdersError) {
@@ -253,17 +273,19 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
     const { data: orders, error: ordersError } = await supabase
       .from('orders')
       .select('id, total_amount, status, created_at, payment_status')
-      .eq('user_id', customer.user_id);
+      .eq('user_id', customer.user_id)
+      .eq('company_id', req.companyId);
     
     if (ordersError) {
       console.error('Error fetching customer orders:', ordersError);
     }
 
-    // Get credit periods information (complete ledger)
+    // Get credit periods information (complete ledger, filtered by company_id)
     const { data: creditPeriods, error: creditError } = await supabase
       .from('credit_periods')
       .select('*')
       .eq('customer_id', customer.id)
+      .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
     if (creditError) {
@@ -317,6 +339,10 @@ export const createCustomer = async (req: Request, res: Response) => {
   try {
     console.log('Customer creation request received. Body:', req.body);
     console.log('Authenticated user:', req.user);
+
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
     
     const { 
       name, 
@@ -344,131 +370,131 @@ export const createCustomer = async (req: Request, res: Response) => {
 
     console.log('Authenticated user ID:', sales_executive_id);
     
-    // Check if user_id was provided (means a user was created with Supabase Auth API)
+    let userId: string;
+
+    // If user_id was provided, use it; otherwise create a new user
     if (user_id) {
       console.log('Creating customer with existing user_id:', user_id);
       
-      // Debug: Check if the user exists in auth.users
-      const { data: authUser, error: authUserError } = await supabase.auth.admin.getUserById(user_id);
-      if (authUserError) {
+      // Verify the user exists
+      if (!supabaseAdmin) {
+        throw new AppError('Service role key not configured', 500);
+      }
+      const { data: authUser, error: authUserError } = await supabaseAdmin.auth.admin.getUserById(user_id);
+      if (authUserError || !authUser.user) {
         console.error('Error verifying auth user:', authUserError);
-      } else {
-        console.log('Auth user exists:', authUser);
+        throw new AppError('Invalid user_id provided', 400);
       }
       
-      // Debug: Check if profile exists
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user_id)
-        .single();
-      
-      if (profileError) {
-        console.error('Error checking profile:', profileError);
-        
-        // Create profile if it doesn't exist
-        console.log('Profile not found. Creating new profile for user.');
-        const { data: newProfile, error: createProfileError } = await supabase
-          .from('profiles')
-          .insert({
-            id: user_id,
-            email: email,
-            role: 'user' // Set role to 'user' for customers
-          })
-          .select()
-          .single();
-        
-        if (createProfileError) {
-          console.error('Error creating profile:', createProfileError);
-        } else {
-          console.log('Profile created successfully:', newProfile);
-        }
-      } else {
-        console.log('Profile exists:', profileData);
-      }
-      
-      // Create customer payload
-      const customerPayload = {
-        name,
-        email,
-        phone,
-        trn_number,
-        credit_period_days: credit_period_days || 0,
-        credit_limit: credit_limit || 0,
-        current_credit: current_credit || 0,
-        sales_executive_id,
-        user_id, // Use the provided user_id
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      
-      console.log('Customer payload:', customerPayload);
-      
-      // Create customer directly with the provided user_id
-      const { data: customer, error } = await supabase
-        .from('customers')
-        .insert(customerPayload)
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Error creating customer:', error);
-        throw new AppError(`Failed to create customer: ${error.message}`, 500);
-      }
-
-      console.log('Customer created successfully:', customer);
-      res.status(201).json(customer);
+      userId = user_id;
     } else {
-      // Fallback to the original method using the RPC function
-      // Check if the user has the correct profile
-      const { data: userProfile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', sales_executive_id)
-        .single();
-      
-      if (profileError) {
-        console.error('Error fetching user profile:', profileError);
-        
-        // Create a profile with 'sales' role if it doesn't exist
-        const { data: newProfile, error: createProfileError } = await supabase
-          .from('profiles')
-          .insert({
-            id: sales_executive_id,
-            email: req.user?.email,
-            role: 'sales'
-          })
-          .select()
-          .single();
-        
-        if (createProfileError) {
-          console.error('Error creating profile:', createProfileError);
-        } else {
-          console.log('Created new profile:', newProfile);
-        }
-      } else {
-        console.log('User profile:', userProfile);
+      // Create new user using Supabase Auth Admin API (proper way instead of RPC)
+      if (!supabaseAdmin) {
+        throw new AppError('Service role key not configured. Cannot create users.', 500);
       }
 
-      // Use the SECURITY DEFINER function to create customer with user
-      const { data: customer, error } = await supabase.rpc('create_customer_with_user', {
-        p_name: name,
-        p_email: email,
-        p_phone: phone,
-        p_trn_number: trn_number,
-        p_credit_period_days: credit_period_days || 0,
-        p_credit_limit: credit_limit || 0,
-        p_current_credit: current_credit || 0,
-        p_sales_executive_id: sales_executive_id
+      if (!email) {
+        throw new AppError('Email is required when user_id is not provided', 400);
+      }
+
+      console.log('Creating user with Supabase Auth Admin API...');
+      
+      const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: '123456', // Default password for customers
+        email_confirm: true, // Auto-confirm email so user can login immediately
+        user_metadata: {
+          name,
+          phone
+        }
       });
 
-      if (error) {
-        console.error('RPC error:', error);
-        throw new AppError('Failed to create customer', 500);
+      if (createUserError || !newUser.user) {
+        // If user already exists, get the existing user
+        if (createUserError?.message?.includes('already exists') || createUserError?.message?.includes('User already registered')) {
+          console.log('User already exists, fetching existing user...');
+          const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+          const existingUser = existingUsers?.users.find(u => u.email === email);
+          
+          if (!existingUser) {
+            throw new AppError('User exists but could not be retrieved', 500);
+          }
+          
+          userId = existingUser.id;
+          console.log('Using existing user with ID:', userId);
+        } else {
+          console.error('Error creating user:', createUserError);
+          throw new AppError(`Failed to create user: ${createUserError?.message || 'Unknown error'}`, 500);
+        }
+      } else {
+        userId = newUser.user.id;
+        console.log('User created successfully with ID:', userId);
       }
-
-      res.status(201).json(customer);
     }
+
+    // Ensure profile exists and belongs to this company
+    const { data: existingProfile, error: profileCheckError } = await supabase
+      .from('profiles')
+      .select('id, company_id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (profileCheckError) {
+      console.error('Error checking profile:', profileCheckError);
+    }
+
+    if (existingProfile && existingProfile.company_id !== req.companyId) {
+      throw new AppError('User does not belong to this company', 403);
+    }
+
+    if (!existingProfile) {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: userId,
+          email: email,
+          role: 'user', // Set role to 'user' for customers
+          company_id: req.companyId
+        });
+
+      if (profileError) {
+        console.error('Error creating profile:', profileError);
+        // Continue anyway as profile might have been created by trigger
+      }
+    }
+    
+    // Create customer payload
+    const customerPayload = {
+      name,
+      email,
+      phone,
+      trn_number,
+      credit_period_days: credit_period_days || 0,
+      credit_limit: credit_limit || 0,
+      current_credit: current_credit || 0,
+      sales_executive_id,
+      user_id: userId,
+      company_id: req.companyId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    console.log('Customer payload:', customerPayload);
+    
+    // Create customer directly with the user_id
+    const { data: customer, error } = await supabase
+      .from('customers')
+      .insert(customerPayload)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating customer:', error);
+      throw new AppError(`Failed to create customer: ${error.message}`, 500);
+    }
+
+    console.log('Customer created successfully:', customer);
+    res.status(201).json(customer);
   } catch (error) {
     console.error('Error creating customer:', error);
     if (error instanceof AppError) {
@@ -492,6 +518,10 @@ export const updateCustomer = async (req: Request, res: Response) => {
       current_credit 
     } = req.body;
 
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+
     const { data: customer, error } = await supabase
       .from('customers')
       .update({
@@ -505,6 +535,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .select()
       .single();
 
@@ -523,10 +554,15 @@ export const deleteCustomer = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+
     const { error } = await supabase
       .from('customers')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('company_id', req.companyId);
 
     if (error) throw error;
 
@@ -688,6 +724,10 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
   try {
     console.log('Customer with user creation request received. Body:', req.body);
     console.log('Authenticated user:', req.user);
+
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
     
     const { 
       name, 
@@ -766,15 +806,19 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
       console.log('User created successfully with ID:', userId);
     }
 
-    // Create or update profile
+    // Create or update profile (scoped to company)
     const { data: existingProfile, error: profileCheckError } = await supabase
       .from('profiles')
-      .select('*')
+      .select('id, company_id')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
-    if (profileCheckError && profileCheckError.code !== 'PGRST116') {
+    if (profileCheckError) {
       console.error('Error checking profile:', profileCheckError);
+    }
+
+    if (existingProfile && existingProfile.company_id !== req.companyId) {
+      throw new AppError('User does not belong to this company', 403);
     }
 
     if (!existingProfile) {
@@ -783,7 +827,8 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
         .insert({
           id: userId,
           email: email,
-          role: 'user'
+          role: 'user',
+          company_id: req.companyId
         });
 
       if (profileError) {
@@ -840,6 +885,7 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
           current_credit: current_credit || 0,
           sales_executive_id,
           user_id: userId,
+          company_id: req.companyId,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
@@ -879,6 +925,13 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
     const { id: customerId } = req.params;
     const addressData = req.body;
     
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+
     if (!customerId) {
       return res.status(400).json({
         success: false,
@@ -891,6 +944,7 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
       .from('customers')
       .select('user_id')
       .eq('id', customerId)
+      .eq('company_id', req.companyId)
       .single();
     
     if (customerError) {
@@ -911,7 +965,8 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
     // Prepare address data with the customer's user_id
     const newAddress = {
       ...addressData,
-      user_id: customer.user_id
+      user_id: customer.user_id,
+      company_id: req.companyId
     };
     
     // Create the address record
@@ -936,6 +991,7 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
         .update({ is_default: false })
         .eq('user_id', customer.user_id)
         .eq('address_type', address.address_type)
+        .eq('company_id', req.companyId)
         .neq('id', address.id);
     }
     
@@ -955,9 +1011,13 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
 // Get all customers with credit information
 export const getCustomersWithCredit = async (req: Request, res: Response) => {
   try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+    
     const sales_executive_id = req.user?.id;
 
-    // Get all customers with their credit information
+    // Get all customers with their credit information (filtered by company_id)
     const { data: customers, error } = await supabase
       .from('customers')
       .select(`
@@ -970,6 +1030,7 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
         credit_period_days
       `)
       .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId)
       .order('name');
 
     if (error) {
@@ -979,11 +1040,12 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
     // For each customer, calculate overdue credit
     const transformedCustomers = await Promise.all(
       customers.map(async (customer) => {
-        // Get all credit periods for this customer
+        // Get all credit periods for this customer (filtered by company_id)
         const { data: creditPeriods, error: creditError } = await supabase
           .from('credit_periods')
           .select('amount, end_date, start_date, period')
           .eq('customer_id', customer.id)
+          .eq('company_id', req.companyId)
           .order('end_date', { ascending: false });
 
         if (creditError) {

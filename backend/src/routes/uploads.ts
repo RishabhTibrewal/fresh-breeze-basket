@@ -206,6 +206,13 @@ router.post('/category/:categoryId', protect, adminOnly, upload.single('image'),
       });
     }
 
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Company context is required'
+      });
+    }
+
     // Validate file type
     if (!isImageFile(file.mimetype)) {
       return res.status(400).json({ 
@@ -255,7 +262,8 @@ router.post('/category/:categoryId', protect, adminOnly, upload.single('image'),
     const { error: updateError } = await supabase
       .from('categories')
       .update({ image_url: imageUrl })
-      .eq('id', categoryId);
+      .eq('id', categoryId)
+      .eq('company_id', req.companyId);
 
     if (updateError) {
       console.error('Error updating category image_url:', updateError);
@@ -288,6 +296,13 @@ router.post('/category/:categoryId', protect, adminOnly, upload.single('image'),
  */
 router.post('/product/:productId', protect, adminOnly, upload.array('images', 10), async (req: MulterRequest, res: Response) => {
   try {
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Company context is required'
+      });
+    }
+
     // Handle multer errors (file size, etc.)
     if (req.file === undefined && !req.files) {
       // Check if it's a multer error
@@ -376,6 +391,7 @@ router.post('/product/:productId', protect, adminOnly, upload.array('images', 10
           image_url: imageUrl,
           is_primary: i === 0 && isPrimary,
           display_order: i,
+          company_id: req.companyId
         })
         .select()
         .single();
@@ -448,6 +464,13 @@ router.post('/purchase-invoice', protect, upload.single('invoiceFile'), async (r
       });
     }
 
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Company context is required'
+      });
+    }
+
     if (!purchaseInvoiceId) {
       return res.status(400).json({ 
         success: false,
@@ -509,7 +532,8 @@ router.post('/purchase-invoice', protect, upload.single('invoiceFile'), async (r
     const { error: updateError } = await supabase
       .from('procurement.purchase_invoices')
       .update({ invoice_file_url: fileUrl })
-      .eq('id', purchaseInvoiceId);
+      .eq('id', purchaseInvoiceId)
+      .eq('company_id', req.companyId);
 
     if (updateError) {
       console.error('Error updating purchase invoice file URL:', updateError);

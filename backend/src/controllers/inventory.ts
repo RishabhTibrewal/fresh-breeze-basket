@@ -6,6 +6,13 @@ import { ApiError } from '../middleware/error';
 export const getInventory = async (req: Request, res: Response) => {
     try {
         const { warehouse_id } = req.query;
+
+        if (!req.companyId) {
+            return res.status(400).json({
+                success: false,
+                error: 'Company context is required'
+            });
+        }
         
         let query = supabase
             .from('warehouse_inventory')
@@ -25,6 +32,7 @@ export const getInventory = async (req: Request, res: Response) => {
                     code
                 )
             `)
+            .eq('company_id', req.companyId)
             .order('created_at', { ascending: false });
         
         if (warehouse_id) {
@@ -59,6 +67,13 @@ export const getInventoryByProductId = async (req: Request, res: Response) => {
     try {
         const { product_id } = req.params;
 
+        if (!req.companyId) {
+            return res.status(400).json({
+                success: false,
+                error: 'Company context is required'
+            });
+        }
+
         const { data, error } = await supabase
             .from('warehouse_inventory')
             .select(`
@@ -78,7 +93,8 @@ export const getInventoryByProductId = async (req: Request, res: Response) => {
                     is_active
                 )
             `)
-            .eq('product_id', product_id);
+            .eq('product_id', product_id)
+            .eq('company_id', req.companyId);
 
         if (error) {
             console.error('Supabase error fetching inventory by product ID:', error);
@@ -112,6 +128,13 @@ export const updateInventory = async (req: Request, res: Response) => {
         const { product_id } = req.params;
         const { warehouse_id, stock_count, location } = req.body;
 
+        if (!req.companyId) {
+            return res.status(400).json({
+                success: false,
+                error: 'Company context is required'
+            });
+        }
+
         if (!warehouse_id) {
             return res.status(400).json({
                 success: false,
@@ -125,6 +148,7 @@ export const updateInventory = async (req: Request, res: Response) => {
             .select('stock_count')
             .eq('warehouse_id', warehouse_id)
             .eq('product_id', product_id)
+            .eq('company_id', req.companyId)
             .maybeSingle();
 
         if (fetchError) {
@@ -148,6 +172,7 @@ export const updateInventory = async (req: Request, res: Response) => {
                 product_id,
                 stock_count: newStockCount,
                 location,
+                company_id: req.companyId,
                 updated_at: new Date().toISOString()
             }, {
                 onConflict: 'warehouse_id,product_id'
