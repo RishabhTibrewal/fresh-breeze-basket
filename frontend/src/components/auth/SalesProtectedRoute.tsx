@@ -7,16 +7,15 @@ interface SalesProtectedRouteProps {
 }
 
 const SalesProtectedRoute: React.FC<SalesProtectedRouteProps> = ({ children }) => {
-  const { user, profile, isLoading } = useAuth();
+  const { user, role, isLoading } = useAuth();
 
   useEffect(() => {
     console.log('SalesProtectedRoute Debug:', {
       user: user?.id,
-      profile,
       isLoading,
-      role: profile?.role
+      role
     });
-  }, [user, profile, isLoading]);
+  }, [user, role, isLoading]);
 
   // Show loading state while auth is being checked
   if (isLoading) {
@@ -28,13 +27,8 @@ const SalesProtectedRoute: React.FC<SalesProtectedRouteProps> = ({ children }) =
     return <Navigate to="/auth" replace />;
   }
 
-  if (!profile) {
-    console.log('No profile found for user');
-    return <div>Error: User profile not found</div>;
-  }
-
-  if (profile.role !== 'sales') {
-    console.log('User role is not sales:', profile.role);
+  if (role !== 'sales') {
+    console.log('User role is not sales:', role);
     return <Navigate to="/" replace />;
   }
 

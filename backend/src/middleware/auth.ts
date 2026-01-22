@@ -120,20 +120,17 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         throw new AuthenticationError('Invalid authentication token');
       }
 
-      let membership = await getUserMembership(user.id, req.companyId);
-      if (!membership && !req.companyId) {
-        membership = await getUserMembership(user.id);
+      if (!req.companyId) {
+        throw new AuthenticationError('Company context is required');
       }
+
+      const membership = await getUserMembership(user.id, req.companyId);
 
       if (!membership) {
-        throw new AuthenticationError('User does not belong to any company');
+        throw new AuthenticationError('User does not belong to this company');
       }
 
-      if (!req.companyId) {
-        req.companyId = membership.company_id;
-      }
-
-      if (req.companyId && membership.company_id !== req.companyId) {
+      if (membership.company_id !== req.companyId) {
         throw new AuthorizationError('User does not belong to this company');
       }
 

@@ -2,20 +2,6 @@ import { Request, Response } from 'express';
 import { supabase, createAuthClient, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
-const findAuthUserByEmail = async (email: string) => {
-  if (!supabaseAdmin) {
-    return null;
-  }
-
-  const { data, error } = await supabaseAdmin.auth.admin.listUsers();
-  if (error) {
-    console.error('Error listing auth users:', error);
-    return null;
-  }
-
-  return data?.users.find(user => user.email === email) || null;
-};
-
 const ensureMembership = async (userId: string, companyId: string, role: string) => {
   const client = supabaseAdmin || supabase;
   const { error } = await client
@@ -76,53 +62,6 @@ export const register = async (req: Request, res: Response) => {
       });
     }
     
-    const existingAuthUser = await findAuthUserByEmail(email);
-    if (existingAuthUser) {
-      const membershipError = await ensureMembership(existingAuthUser.id, req.companyId, 'user');
-      if (membershipError) {
-        console.error('Error creating membership:', membershipError);
-        return res.status(500).json({
-          success: false,
-          message: 'Failed to link user to company'
-        });
-      }
-
-      const { data: existingProfile } = await supabaseAdmin!
-        .from('profiles')
-        .select('id, company_id')
-        .eq('id', existingAuthUser.id)
-        .maybeSingle();
-
-      if (!existingProfile) {
-        await supabaseAdmin!
-          .from('profiles')
-          .insert({
-            id: existingAuthUser.id,
-            email: existingAuthUser.email,
-            first_name: first_name || null,
-            last_name: last_name || null,
-            phone: phone || null,
-            company_id: req.companyId,
-            role: 'user'
-          });
-      } else if (existingProfile.company_id !== req.companyId) {
-        // Update profile company_id for RLS compatibility (membership is primary)
-        await supabaseAdmin!
-          .from('profiles')
-          .update({ company_id: req.companyId })
-          .eq('id', existingAuthUser.id);
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'User linked to company successfully',
-        data: {
-          id: existingAuthUser.id,
-          email: existingAuthUser.email
-        }
-      });
-    }
-    
     // Register with Supabase Auth Admin API (proper way for backend)
     console.log('Attempting to create user in Supabase Auth...');
     
@@ -149,10 +88,95 @@ export const register = async (req: Request, res: Response) => {
     
     if (authError) {
       console.error('Supabase auth error:', authError);
-      if (authError.message?.includes('already registered') || authError.message?.includes('already exists')) {
+      const isEmailExists =
+        authError.code === 'email_exists' ||
+        authError.status === 422 ||
+        authError.message?.includes('already been registered') ||
+        authError.message?.includes('already registered') ||
+        authError.message?.includes('already exists');
+      if (isEmailExists) {
+        // If user already exists, link them to the company instead of failing
+        let existingUserId: string | null = null;
+
+        if (!existingUserId) {
+          const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
+            .from('profiles')
+            .select('id, company_id')
+            .eq('email', email)
+            .maybeSingle();
+
+          if (existingProfileError) {
+            console.error('Error fetching profile by email:', existingProfileError);
+          } else {
+            existingUserId = existingProfile?.id || null;
+          }
+        }
+
+        if (!existingUserId) {
+          // Verify credentials to safely link existing auth user
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email,
+            password
+          });
+
+          if (signInError || !signInData.user) {
+            return res.status(401).json({
+              success: false,
+              message: 'Account exists. Please login with the correct password to link this company.'
+            });
+          }
+
+          existingUserId = signInData.user.id;
+        }
+
+        if (existingUserId) {
+          const membershipError = await ensureMembership(existingUserId, req.companyId, 'user');
+          if (membershipError) {
+            console.error('Error creating membership for existing user:', membershipError);
+            return res.status(500).json({
+              success: false,
+              message: 'Failed to link existing user to company'
+            });
+          }
+
+          const { data: existingProfile } = await supabaseAdmin
+            .from('profiles')
+            .select('id, company_id')
+            .eq('id', existingUserId)
+            .maybeSingle();
+
+          if (!existingProfile) {
+            await supabaseAdmin
+              .from('profiles')
+              .insert({
+                id: existingUserId,
+                email,
+                first_name: first_name || null,
+                last_name: last_name || null,
+                phone: phone || null,
+                company_id: req.companyId,
+                role: 'user'
+              });
+          } else if (existingProfile.company_id !== req.companyId) {
+            await supabaseAdmin
+              .from('profiles')
+              .update({ company_id: req.companyId })
+              .eq('id', existingUserId);
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: 'User linked to company successfully',
+            data: {
+              id: existingUserId,
+              email
+            }
+          });
+        }
+
         return res.status(400).json({
           success: false,
-          message: 'Already registered, please login'
+          message: 'User already registered. Please login or contact support.'
         });
       }
       return res.status(400).json({
@@ -218,7 +242,13 @@ export const register = async (req: Request, res: Response) => {
 export const login = async (req: Request, res: Response) => {
   try {
     const { email, password, supabase_token } = req.body;
-    let activeCompanyId = req.companyId || null;
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+    const activeCompanyId = req.companyId;
     
     // Check if we're trying to login with a Supabase token (for keeping backend in sync)
     if (email && supabase_token) {
@@ -265,23 +295,16 @@ export const login = async (req: Request, res: Response) => {
           console.log('Profile found for token login:', profile);
         }
 
-        let membership = await getMembership(userData.user.id, activeCompanyId || undefined);
-        if (!membership && !activeCompanyId) {
-          membership = await getMembership(userData.user.id);
-        }
+        const membership = await getMembership(userData.user.id, activeCompanyId);
 
         if (!membership) {
           return res.status(403).json({
             success: false,
-            message: 'User does not belong to any company'
+            message: 'User does not belong to this company'
           });
         }
 
-        if (!activeCompanyId) {
-          activeCompanyId = membership.company_id;
-        }
-
-        if (activeCompanyId && membership.company_id !== activeCompanyId) {
+        if (membership.company_id !== activeCompanyId) {
           return res.status(403).json({
             success: false,
             message: 'User does not belong to this company'
@@ -362,23 +385,16 @@ export const login = async (req: Request, res: Response) => {
       console.log('Existing profile found during login:', profile);
     }
 
-    let membership = await getMembership(authData.user.id, activeCompanyId || undefined);
-    if (!membership && !activeCompanyId) {
-      membership = await getMembership(authData.user.id);
-    }
+    const membership = await getMembership(authData.user.id, activeCompanyId);
 
     if (!membership) {
       return res.status(403).json({
         success: false,
-        message: 'User does not belong to any company'
+        message: 'User does not belong to this company'
       });
     }
 
-    if (!activeCompanyId) {
-      activeCompanyId = membership.company_id;
-    }
-
-    if (activeCompanyId && membership.company_id !== activeCompanyId) {
+    if (membership.company_id !== activeCompanyId) {
       return res.status(403).json({
         success: false,
         message: 'User does not belong to this company'
@@ -420,8 +436,15 @@ export const login = async (req: Request, res: Response) => {
 export const getCurrentUser = async (req: Request, res: Response) => {
   try {
     const userId = req.user.id;
-    
-    let activeCompanyId = req.companyId || null;
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Company context is required'
+        }
+      });
+    }
+    const activeCompanyId = req.companyId;
 
     // First, verify profile exists and belongs to the company
     const { data: profileCheck, error: profileCheckError } = await supabase
@@ -435,22 +458,6 @@ export const getCurrentUser = async (req: Request, res: Response) => {
       console.log('Profile not found for user ID:', userId, 'Creating new profile...');
       
       try {
-        if (!activeCompanyId) {
-          const membership = await getMembership(userId);
-          if (membership) {
-            activeCompanyId = membership.company_id;
-          }
-        }
-
-        if (!activeCompanyId) {
-          return res.status(403).json({
-            success: false,
-            error: {
-              message: 'User does not belong to any company'
-            }
-          });
-        }
-
         // Create new profile
         const { data: newProfile, error: createError } = await supabase
           .from('profiles')
@@ -496,31 +503,20 @@ export const getCurrentUser = async (req: Request, res: Response) => {
           details: profileCheckError.message
         }
       });
-    } else if (!profileCheck?.company_id && !activeCompanyId) {
-      // allow membership-based resolution below
-    } else if (profileCheck?.company_id && activeCompanyId && profileCheck.company_id !== activeCompanyId) {
-      // allow membership-based resolution below
     }
 
-    let membership = await getMembership(userId, activeCompanyId || undefined);
-    if (!membership && !activeCompanyId) {
-      membership = await getMembership(userId);
-    }
+    const membership = await getMembership(userId, activeCompanyId);
 
     if (!membership) {
       return res.status(403).json({
         success: false,
         error: {
-          message: 'User does not belong to any company'
+          message: 'User does not belong to this company'
         }
       });
     }
 
-    if (!activeCompanyId) {
-      activeCompanyId = membership.company_id;
-    }
-
-    if (activeCompanyId && membership.company_id !== activeCompanyId) {
+    if (membership.company_id !== activeCompanyId) {
       return res.status(403).json({
         success: false,
         error: {
@@ -814,17 +810,31 @@ export const getAddressById = async (req: Request, res: Response) => {
     
     console.log(`Getting address ${id} for user ${userId}`);
     
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+
     // Create client with auth context
     const authClient = createAuthClient(token);
-    
-    const { data, error } = await authClient
+
+    const isPrivileged = req.user.role === 'admin' || req.user.role === 'sales';
+
+    let query = authClient
       .from('addresses')
       .select('*')
       .eq('id', id)
-      .eq('user_id', userId)
-      .single();
+      .eq('company_id', req.companyId);
+
+    if (!isPrivileged) {
+      query = query.eq('user_id', userId);
+    }
+
+    const { data, error } = await query.maybeSingle();
     
-    if (error) {
+    if (error && error.code !== 'PGRST116') {
       console.error('Supabase error when fetching address:', error);
       return res.status(404).json({
         success: false,
@@ -1150,6 +1160,12 @@ export const syncSession = async (req: Request, res: Response) => {
     console.log('Syncing session for user:', req.user?.id);
     
     const { userId, email, role } = req.body;
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
     
     // Check if the user making the request matches the user to sync
     if (req.user?.id !== userId) {
@@ -1163,8 +1179,15 @@ export const syncSession = async (req: Request, res: Response) => {
       });
     }
     
+    const membership = await getMembership(req.user.id, req.companyId);
+    if (!membership || membership.company_id !== req.companyId) {
+      return res.status(403).json({
+        success: false,
+        message: 'User does not belong to this company'
+      });
+    }
+
     // Update the user's session data in our backend if needed
-    // This is where you would update any session-specific state
     
     console.log('Session synced successfully for user:', userId);
     

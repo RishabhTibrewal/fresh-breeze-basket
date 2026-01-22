@@ -16,7 +16,6 @@ import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
 import {
   Pagination,
   PaginationContent,
@@ -42,32 +41,14 @@ export default function AdminOrderList() {
         });
         console.log('Fetched admin orders:', response);
         
-        // Enhance orders with user profile information
-        const enhancedOrders = await Promise.all(
-          response.data.map(async (order) => {
-            try {
-              const { data: profileData } = await supabase
-                .from('profiles')
-                .select('email, first_name, last_name')
-                .eq('id', order.user_id)
-                .single();
-
-              return {
-                ...order,
-                userProfile: profileData || null
-              };
-            } catch (error) {
-              console.error('Error fetching profile for order:', order.id, error);
-              return {
-                ...order,
-                userProfile: null
-              };
-            }
-          })
-        );
-
         return {
-          orders: enhancedOrders,
+          orders: response.data.map(order => {
+            const orderMeta = order as any;
+            return {
+              ...order,
+              userProfile: orderMeta.userProfile || orderMeta.profile || orderMeta.profiles || null
+            };
+          }),
           totalCount: response.count
         };
       } catch (error) {

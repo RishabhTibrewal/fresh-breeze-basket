@@ -8,7 +8,7 @@ import { invoicesService } from '@/api/invoices';
 import { productsService, Product } from '@/api/products';
 import { addressApi } from '@/api/addresses';
 import { warehousesService } from '@/api/warehouses';
-import { supabase } from '@/lib/supabase';
+import { customerService } from '@/api/customer';
 import { 
   Card,
   CardContent,
@@ -153,27 +153,22 @@ export default function AdminOrderDetails() {
     queryFn: () => warehousesService.getAll(true),
   });
 
-  // Fetch user profile
+  // Fetch customer/profile details via backend (avoids direct Supabase access)
   const {
-    data: userProfile,
+    data: customerDetails,
     isLoading: isLoadingProfile,
     isError: isErrorProfile,
     error: errorProfile
   } = useQuery({
-    queryKey: ['user-profile', order?.userId],
+    queryKey: ['customer-by-user', order?.userId],
     queryFn: async () => {
       if (!order?.userId) return null;
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', order.userId)
-        .single();
-      
-      if (error) throw error;
-      return data;
+      return customerService.getCustomerByUserId(order.userId);
     },
     enabled: !!order?.userId
   });
+
+  const userProfile = customerDetails?.profile ?? null;
   
   // Update order status mutation
   const updateOrderMutation = useMutation({

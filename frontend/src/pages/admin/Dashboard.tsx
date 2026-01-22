@@ -35,7 +35,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
 const AdminDashboard = () => {
-  const { isAdmin, profile, signOut, user } = useAuth();
+  const { isAdmin, profile, signOut, user, role } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -65,7 +65,7 @@ const AdminDashboard = () => {
       isAdmin,
       profileData: profile,
       userId: user?.id,
-      userRole: profile?.role,
+      userRole: role,
       isAdminFunction: typeof isAdmin === 'function' ? 'function' : 'value',
       isAdminValue: isAdmin
     });
@@ -74,7 +74,7 @@ const AdminDashboard = () => {
     setTimeout(() => {
       console.log('Delayed Admin Check:', {
         isAdmin,
-        role: profile?.role,
+        role,
         hasProfile: !!profile
       });
       
@@ -83,7 +83,7 @@ const AdminDashboard = () => {
         navigate('/', { replace: true });
       }
     }, 500);
-  }, [isAdmin, profile, navigate, user]);
+  }, [isAdmin, profile, role, navigate, user]);
 
   return (
     <SidebarProvider>
@@ -122,7 +122,7 @@ const AdminDashboard = () => {
             {/* Display admin info for debugging */}
             <div className="px-4 py-2 text-sm text-muted-foreground">
               <p>User: {user?.email}</p>
-              <p>Role: {profile?.role || 'Unknown'}</p>
+              <p>Role: {role || 'Unknown'}</p>
               <p>Admin: {isAdmin ? 'Yes' : 'No'}</p>
               <p>Profile ID: {profile?.id || 'Not loaded'}</p>
             </div>

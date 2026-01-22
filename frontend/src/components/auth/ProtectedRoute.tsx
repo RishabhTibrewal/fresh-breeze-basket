@@ -13,7 +13,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   requireAdmin = false,
   children 
 }) => {
-  const { user, isAdmin, isLoading, profile } = useAuth();
+  const { user, isAdmin, isLoading, role } = useAuth();
   const location = useLocation();
 
   // Add additional logging for debugging
@@ -22,11 +22,10 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       isAuthenticated: !!user,
       isAdmin, 
       requireAdmin,
-      profile,
-      isLoading,
-      userRole: profile?.role
+      role,
+      isLoading
     });
-  }, [user, isAdmin, requireAdmin, profile, isLoading]);
+  }, [user, isAdmin, requireAdmin, role, isLoading]);
 
   if (isLoading) {
     return <div className="flex justify-center items-center h-screen">Loading...</div>;
@@ -40,7 +39,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   if (requireAdmin && !isAdmin) {
     console.log('Access denied: User is not an admin', { 
       isAdmin, 
-      role: profile?.role,
+      role,
       uid: user.id 
     });
     toast.error('You do not have permission to access this page');

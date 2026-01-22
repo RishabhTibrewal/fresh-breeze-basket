@@ -25,7 +25,7 @@ const SalesLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const handleSignOut = async () => {
     try {
       await signOut();
-      navigate('/login');
+      navigate('/auth');
     } catch (error) {
       console.error('Error signing out:', error);
     }

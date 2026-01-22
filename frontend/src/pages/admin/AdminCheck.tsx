@@ -15,7 +15,7 @@ const AdminCheck = () => {
   const [adminCheck, setAdminCheck] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { user, profile, isAdmin } = useAuth();
+  const { user, profile, isAdmin, role } = useAuth();
 
   const checkAdminStatus = async () => {
     setLoading(true);
@@ -56,8 +56,8 @@ const AdminCheck = () => {
               <div>Profile ID:</div>
               <div className="font-mono text-sm bg-gray-100 p-1 rounded">{profile?.id || 'N/A'}</div>
               
-              <div>Profile Role:</div>
-              <div className="font-mono text-sm bg-gray-100 p-1 rounded">{profile?.role || 'N/A'}</div>
+              <div>Role (Membership):</div>
+              <div className="font-mono text-sm bg-gray-100 p-1 rounded">{role || 'N/A'}</div>
               
               <div>Is Admin (Context):</div>
               <div className="font-mono text-sm bg-gray-100 p-1 rounded">{isAdmin ? 'Yes' : 'No'}</div>

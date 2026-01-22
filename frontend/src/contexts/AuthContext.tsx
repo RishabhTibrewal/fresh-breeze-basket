@@ -19,6 +19,7 @@ type AuthContextType = {
   session: Session | null;
   user: User | null;
   profile: any | null;
+  role: string | null;
   isAdmin: boolean;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
@@ -33,32 +34,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any | null>(null);
+  const [role, setRole] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const navigate = useNavigate();
 
+  const clearLocalSession = useCallback(async () => {
+    // Clear any active session refresh interval
+    if (window._sessionRefreshInterval) {
+      clearInterval(window._sessionRefreshInterval);
+      window._sessionRefreshInterval = null;
+    }
+
+    // Reset refresh state
+    window._isRefreshingSession = false;
+    window._lastRefreshAttempt = 0;
+    window._refreshBackoffMs = 0;
+
+    // Explicitly remove all tokens
+    localStorage.removeItem('supabase_token');
+    localStorage.removeItem('token');
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('currentCustomerId');
+
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+    setIsAdmin(false);
+    setRole(null);
+  }, []);
+
   // Function to ensure backend session is in sync with Supabase session
-  const syncBackendSession = useCallback(async (currentSession: Session | null) => {
+  const syncBackendSession = useCallback(async (currentSession: Session | null, force = false) => {
     if (!currentSession || !currentSession.user) {
       console.log('No session to sync with backend');
-      return;
+      return true;
     }
 
     // Check if we already attempted a sync recently to prevent infinite loops
-    const lastSyncAttempt = localStorage.getItem('last_backend_sync_attempt');
-    const now = Date.now();
-    
-    if (lastSyncAttempt) {
-      const timeSinceLastSync = now - parseInt(lastSyncAttempt);
-      // If we attempted a sync in the last 10 seconds, don't try again
-      if (timeSinceLastSync < 10000) { // 10 seconds cooldown
-        console.log('Skipping backend sync - too soon since last attempt');
-        return;
+    if (!force) {
+      const lastSyncAttempt = localStorage.getItem('last_backend_sync_attempt');
+      const now = Date.now();
+      
+      if (lastSyncAttempt) {
+        const timeSinceLastSync = now - parseInt(lastSyncAttempt);
+        // If we attempted a sync in the last 10 seconds, don't try again
+        if (timeSinceLastSync < 10000) { // 10 seconds cooldown
+          console.log('Skipping backend sync - too soon since last attempt');
+          return true;
+        }
       }
+      
+      // Record this sync attempt
+      localStorage.setItem('last_backend_sync_attempt', now.toString());
     }
-    
-    // Record this sync attempt
-    localStorage.setItem('last_backend_sync_attempt', now.toString());
 
     try {
       // Get the user's profile from Supabase first
@@ -70,24 +99,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (profileError) {
         console.error('Error fetching profile during sync:', profileError);
-        return;
+        await supabase.auth.signOut();
+        await clearLocalSession();
+        toast.error('Failed to load your profile. Please sign in again.');
+        navigate('/auth', { replace: true });
+        return false;
       }
 
+      const storedRole = localStorage.getItem('userRole');
+      const effectiveRole = storedRole || profile?.role || null;
+
       // If user has a role, sync with backend
-      if (profile?.role) {
-        console.log('Syncing backend session for user with role:', profile.role);
+      if (effectiveRole) {
+        console.log('Syncing backend session for user with role:', effectiveRole);
         await apiClient.post('/auth/sync-session', {
           userId: currentSession.user.id,
           email: currentSession.user.email,
-          role: profile.role
+          role: effectiveRole
         });
       } else {
         console.log('No role found for user, skipping backend sync');
+        return false;
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error syncing backend session:', error);
+      const status = error?.response?.status;
+      const message = error?.response?.data?.message || error?.message;
+
+      if (status === 401 || status === 403) {
+        console.warn('Backend rejected session, signing out:', message);
+        await supabase.auth.signOut();
+        await clearLocalSession();
+        toast.error(message || 'Session is not valid for this company.');
+        navigate('/auth', { replace: true });
+        return false;
+      }
+      return true;
     }
-  }, []);
+    return true;
+  }, [clearLocalSession, navigate]);
 
   // Session refresh function with rate limit handling
   const refreshSessionSafely = useCallback(async () => {
@@ -165,80 +215,86 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, currentSession) => {
         console.log('Auth state changed:', event, currentSession?.user?.id);
-        
-        // Clear any existing refresh interval before creating a new one
-        if (window._sessionRefreshInterval) {
-          clearInterval(window._sessionRefreshInterval);
-          window._sessionRefreshInterval = null;
-        }
+        void (async () => {
+          // Clear any existing refresh interval before creating a new one
+          if (window._sessionRefreshInterval) {
+            clearInterval(window._sessionRefreshInterval);
+            window._sessionRefreshInterval = null;
+          }
 
-        setSession(currentSession);
-        setUser(currentSession?.user ?? null);
-        
-        // Store or remove token based on session state
-        if (currentSession?.access_token) {
-          localStorage.setItem('supabase_token', currentSession.access_token);
-          console.log('Token stored in localStorage');
-          
-          // Reset backoff when we get a new session
-          window._refreshBackoffMs = 0;
-          
-          // Set a session refresh interval to prevent automatic logout
-          // Use a longer interval (15 minutes) to reduce rate limit issues
-          const refreshIntervalId = setInterval(() => {
-            refreshSessionSafely();
-          }, 15 * 60 * 1000); // Refresh every 15 minutes
-          
-          // Store the interval ID so we can clear it later
-          window._sessionRefreshInterval = refreshIntervalId;
-        } else {
-          localStorage.removeItem('supabase_token');
-          console.log('Token removed from localStorage');
-          
-          // Reset refresh state
-          window._isRefreshingSession = false;
-          window._lastRefreshAttempt = 0;
-          window._refreshBackoffMs = 0;
-        }
-        
-        // Clear profile state if user is signed out
-        if (!currentSession?.user) {
-          setProfile(null);
-          setIsAdmin(false);
-          setIsLoading(false);
-        } else {
+          // If user is signed out, clear local state immediately
+          if (!currentSession?.user) {
+            localStorage.removeItem('supabase_token');
+            console.log('Token removed from localStorage');
+
+            window._isRefreshingSession = false;
+            window._lastRefreshAttempt = 0;
+            window._refreshBackoffMs = 0;
+
+            setSession(null);
+            setUser(null);
+            setProfile(null);
+            setIsAdmin(false);
+        setRole(null);
+            setIsLoading(false);
+            return;
+          }
+
+          // Verify backend membership before accepting the session
+          const isValid = await syncBackendSession(currentSession, true);
+          if (!isValid) {
+            setIsLoading(false);
+            return;
+          }
+
+          setSession(currentSession);
+          setUser(currentSession.user);
+
+          if (currentSession.access_token) {
+            localStorage.setItem('supabase_token', currentSession.access_token);
+            console.log('Token stored in localStorage');
+
+            window._refreshBackoffMs = 0;
+            const refreshIntervalId = setInterval(() => {
+              refreshSessionSafely();
+            }, 15 * 60 * 1000);
+            window._sessionRefreshInterval = refreshIntervalId;
+          }
+
           // When user logs in, fetch their profile
           setTimeout(() => {
             fetchUserProfile(currentSession.user.id);
           }, 0);
-          
-          // Sync backend session whenever auth state changes
-          syncBackendSession(currentSession);
-        }
+        })();
       }
     );
 
     // Check for existing session
-    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+    supabase.auth.getSession().then(async ({ data: { session: currentSession } }) => {
       console.log('Current session:', currentSession?.user?.id);
+
+      if (!currentSession?.user) {
+        setSession(null);
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
+
+      const isValid = await syncBackendSession(currentSession, true);
+      if (!isValid) {
+        setIsLoading(false);
+        return;
+      }
+
       setSession(currentSession);
-      setUser(currentSession?.user ?? null);
-      
-      // Store token if session exists
-      if (currentSession?.access_token) {
+      setUser(currentSession.user);
+
+      if (currentSession.access_token) {
         localStorage.setItem('supabase_token', currentSession.access_token);
         console.log('Existing token stored in localStorage');
       }
-      
-      // After setting user from session, fetch profile
-      if (currentSession?.user) {
-        fetchUserProfile(currentSession.user.id);
-        
-        // Sync backend session on app load if user is already logged in
-        syncBackendSession(currentSession);
-      } else {
-        setIsLoading(false);
-      }
+
+      fetchUserProfile(currentSession.user.id);
     });
 
     return () => {
@@ -283,16 +339,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Don't set profile to null if there was an error fetching
         // This prevents UI flickering and potential auth loops
       } else if (profileData) {
-        console.log('Profile data retrieved:', profileData);
-        setProfile(profileData);
+        const storedRole = localStorage.getItem('userRole');
+        const effectiveRole = storedRole || profileData.role;
+        console.log('Profile data retrieved:', profileData, 'effectiveRole:', effectiveRole);
+        setProfile({ ...profileData, role: effectiveRole });
         
-        // Check if user is admin based on profile role
-        const userIsAdmin = profileData.role === 'admin';
-        console.log('User admin status from profile:', userIsAdmin);
+        const userIsAdmin = effectiveRole === 'admin';
+        console.log('User admin status from role:', userIsAdmin);
         setIsAdmin(userIsAdmin);
+        setRole(effectiveRole || null);
         
-        // Store the role in localStorage for API components to access
-        localStorage.setItem('userRole', profileData.role);
+        // Store the effective role in localStorage for API components to access
+        if (effectiveRole) {
+          localStorage.setItem('userRole', effectiveRole);
+        }
       }
       
       setIsLoading(false);
@@ -315,11 +375,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // If Supabase login successful, also call backend login
       try {
-        await apiClient.post('/auth/login', { email, password });
+        const { data: loginData } = await apiClient.post('/auth/login', { email, password });
+        const roleFromBackend = loginData?.data?.user?.role;
+        if (roleFromBackend) {
+          localStorage.setItem('userRole', roleFromBackend);
+          setProfile(prev => (prev ? { ...prev, role: roleFromBackend } : prev));
+          setIsAdmin(roleFromBackend === 'admin');
+          setRole(roleFromBackend);
+        }
         // We don't store the backend token since we're using Supabase's token
-      } catch (backendError) {
-        // Log backend error but don't throw since Supabase auth succeeded
+      } catch (backendError: any) {
+        const message = backendError?.response?.data?.message || 'Login failed for this company.';
         console.error('Backend login failed:', backendError);
+        await supabase.auth.signOut();
+        await clearLocalSession();
+        toast.error(message);
+        throw backendError;
       }
 
       // Explicitly store the Supabase token
@@ -372,6 +443,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Cache the token
             if (signInData.session?.access_token) {
               localStorage.setItem('supabase_token', signInData.session.access_token);
+            }
+            try {
+              const { data: loginData } = await apiClient.post('/auth/login', { email, password });
+              const roleFromBackend = loginData?.data?.user?.role;
+              if (roleFromBackend) {
+                localStorage.setItem('userRole', roleFromBackend);
+                setProfile(prev => (prev ? { ...prev, role: roleFromBackend } : prev));
+                setIsAdmin(roleFromBackend === 'admin');
+                setRole(roleFromBackend);
+              }
+            } catch (backendError: any) {
+              const message = backendError?.response?.data?.message || 'Login failed for this company.';
+              console.error('Backend login failed after registration:', backendError);
+              await supabase.auth.signOut();
+              await clearLocalSession();
+              toast.error(message);
+              return;
             }
             toast.success('Registration successful! You have been signed in.');
           }
@@ -433,6 +521,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       setProfile(null);
       setIsAdmin(false);
+      setRole(null);
       
       toast.success('Successfully signed out!');
       
@@ -458,6 +547,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     session,
     user,
     profile,
+    role,
     isAdmin,
     isLoading,
     signIn,

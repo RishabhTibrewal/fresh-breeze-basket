@@ -184,14 +184,21 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
     }
     
     const { userId } = req.params;
+    const adminClient = supabaseAdmin || supabase;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
 
     // First, get the profile information (this should always exist)
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile, error: profileError } = await adminClient
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .eq('company_id', req.companyId)
-      .single();
+      .maybeSingle();
 
     if (profileError || !profile) {
       return res.status(404).json({
@@ -200,8 +207,56 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       });
     }
 
+    // Verify the user belongs to the current company using memberships
+    let hasCompanyAccess = false;
+    const { data: membership, error: membershipError } = await adminClient
+      .from('company_memberships')
+      .select('company_id, is_active')
+      .eq('user_id', userId)
+      .eq('company_id', req.companyId)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (membershipError) {
+      console.error('Error checking customer membership:', membershipError);
+    }
+
+    hasCompanyAccess = !!membership;
+
+    // Fallback: allow access if the user has a customer record in this company
+    if (!hasCompanyAccess) {
+      const { data: customerAccess } = await adminClient
+        .from('customers')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('company_id', req.companyId)
+        .maybeSingle();
+
+      hasCompanyAccess = !!customerAccess;
+    }
+
+    // Fallback: allow access if the user has orders in this company (retail users)
+    if (!hasCompanyAccess) {
+      const { data: orderAccess } = await adminClient
+        .from('orders')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('company_id', req.companyId)
+        .limit(1)
+        .maybeSingle();
+
+      hasCompanyAccess = !!orderAccess;
+    }
+
+    if (!hasCompanyAccess) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found in this company'
+      });
+    }
+
     // Then, try to get the customer details by user_id (may not exist)
-    const { data: customer, error: customerError } = await supabase
+    const { data: customer, error: customerError } = await adminClient
       .from('customers')
       .select('*')
       .eq('user_id', userId)
@@ -219,7 +274,7 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       }
       
       // For retail customers, fetch their orders using user_id (filtered by company_id)
-      const { data: retailOrders, error: retailOrdersError } = await supabase
+      const { data: retailOrders, error: retailOrdersError } = await adminClient
         .from('orders')
         .select('id, total_amount, status, created_at, payment_status')
         .eq('user_id', userId)
@@ -270,7 +325,7 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
     }
 
     // Get order information (using user_id from customer)
-    const { data: orders, error: ordersError } = await supabase
+    const { data: orders, error: ordersError } = await adminClient
       .from('orders')
       .select('id, total_amount, status, created_at, payment_status')
       .eq('user_id', customer.user_id)
@@ -281,7 +336,7 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
     }
 
     // Get credit periods information (complete ledger, filtered by company_id)
-    const { data: creditPeriods, error: creditError } = await supabase
+    const { data: creditPeriods, error: creditError } = await adminClient
       .from('credit_periods')
       .select('*')
       .eq('customer_id', customer.id)
@@ -808,17 +863,20 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
     });
 
     if (createUserError) {
-      // If user already exists, get the existing user
-      if (createUserError.message?.includes('already exists') || createUserError.message?.includes('User already registered')) {
-        console.log('User already exists, fetching existing user...');
-        const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
-        const existingUser = existingUsers?.users.find(u => u.email === email);
-        
-        if (!existingUser) {
-          throw new AppError('User exists but could not be retrieved', 500);
+      // If user already exists, verify password and link to company
+      if (createUserError.code === 'email_exists' || createUserError.message?.includes('already exists')) {
+        console.log('User already exists, verifying password...');
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        });
+
+        if (signInError || !signInData?.user) {
+          console.error('Existing user password verification failed:', signInError);
+          throw new AppError('User already exists. Please use the correct password or a different email.', 400);
         }
-        
-        userId = existingUser.id;
+
+        userId = signInData.user.id;
         console.log('Using existing user with ID:', userId);
       } else {
         console.error('Error creating user:', createUserError);
@@ -833,8 +891,10 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
       console.log('User created successfully with ID:', userId);
     }
 
+    const adminClient = supabaseAdmin || supabase;
+
     // Create or update profile (scoped to company)
-    const { data: existingProfile, error: profileCheckError } = await supabase
+    const { data: existingProfile, error: profileCheckError } = await adminClient
       .from('profiles')
       .select('id, company_id')
       .eq('id', userId)
@@ -845,7 +905,7 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
     }
 
     if (existingProfile && existingProfile.company_id !== req.companyId) {
-      const { error: profileUpdateError } = await supabase
+      const { error: profileUpdateError } = await adminClient
         .from('profiles')
         .update({ company_id: req.companyId })
         .eq('id', userId);
@@ -856,7 +916,7 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
     }
 
     if (!existingProfile) {
-      const { error: profileError } = await supabase
+      const { error: profileError } = await adminClient
         .from('profiles')
         .insert({
           id: userId,
@@ -888,17 +948,18 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
     }
 
     // Create or update customer
-    const { data: existingCustomer, error: customerCheckError } = await supabase
+    const { data: existingCustomer, error: customerCheckError } = await adminClient
       .from('customers')
       .select('*')
       .eq('user_id', userId)
-      .single();
+      .eq('company_id', req.companyId)
+      .maybeSingle();
 
     let customer;
     
     if (existingCustomer) {
       // Update existing customer
-      const { data: updatedCustomer, error: updateError } = await supabase
+      const { data: updatedCustomer, error: updateError } = await adminClient
         .from('customers')
         .update({
           name,
@@ -923,7 +984,7 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
       customer = updatedCustomer;
     } else {
       // Create new customer
-      const { data: newCustomer, error: customerError } = await supabase
+      const { data: newCustomer, error: customerError } = await adminClient
         .from('customers')
         .insert({
           name,

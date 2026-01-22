@@ -152,23 +152,14 @@ export const addressApi = {
         } else if (response.data) {
           return response.data;
         }
-      } catch (error) {
-        console.log('Backend API address fetch failed, falling back to Supabase:', error);
+        return null;
+      } catch (error: any) {
+        if (error?.response?.status === 404) {
+          return null;
+        }
+        console.log('Backend API address fetch failed:', error);
+        return null;
       }
-      
-      // If backend fails, try directly from Supabase
-      const { data, error } = await supabase
-        .from('addresses')
-        .select('*')
-        .eq('id', id)
-        .single();
-      
-      if (error) {
-        console.error('Error fetching address from Supabase:', error);
-        throw error;
-      }
-      
-      return data;
     } catch (error) {
       console.error(`Error fetching address with ID ${id}:`, error);
       throw error;

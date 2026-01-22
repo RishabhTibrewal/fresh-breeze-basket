@@ -35,7 +35,10 @@ export const getOrders = async (req: Request, res: Response) => {
       .select('*', { count: 'exact', head: true })
       .eq('company_id', req.companyId);
     
-    let query = supabase.from('orders').select('*, order_items(*, products(*))').eq('company_id', req.companyId);
+    let query = supabase
+      .from('orders')
+      .select('*, order_items(*, products(*))')
+      .eq('company_id', req.companyId);
     
     // Apply filters
     if (status) {
@@ -67,12 +70,36 @@ export const getOrders = async (req: Request, res: Response) => {
       throw new ApiError(400, error.message);
     }
     
-    console.log(`Successfully fetched ${data?.length || 0} orders out of ${totalCount || 0} total orders`);
+    const orders = data || [];
+    let enrichedOrders = orders;
+
+    if (orders.length > 0) {
+      const userIds = Array.from(new Set(orders.map(order => order.user_id).filter(Boolean)));
+      if (userIds.length > 0) {
+        const adminClient = supabaseAdmin || supabase;
+        const { data: profiles, error: profilesError } = await adminClient
+          .from('profiles')
+          .select('id, email, first_name, last_name')
+          .in('id', userIds);
+
+        if (profilesError) {
+          console.error('Error fetching order profiles:', profilesError);
+        } else {
+          const profileMap = new Map(profiles?.map(profile => [profile.id, profile]) || []);
+          enrichedOrders = orders.map(order => ({
+            ...order,
+            profiles: order.user_id ? profileMap.get(order.user_id) || null : null
+          }));
+        }
+      }
+    }
+
+    console.log(`Successfully fetched ${orders.length || 0} orders out of ${totalCount || 0} total orders`);
     
     res.status(200).json({
       success: true,
       count: totalCount || 0,
-      data
+      data: enrichedOrders
     });
   } catch (error) {
     console.error('Error in getOrders:', error);
