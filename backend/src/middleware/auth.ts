@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { createAuthClient, verifyUserToken } from '../config/supabase';
-import { AuthenticationError, AuthorizationError } from './error';
+import { AuthenticationError, AuthorizationError, ApiError } from './error';
 import { supabase, supabaseAdmin } from '../config/supabase';
+import { SupabaseJwtVerificationError, verifySupabaseJwt } from '../utils/supabaseJwt';
 
 // Simple in-memory rate limiting
 const rateLimit = new Map<string, { count: number; resetTime: number }>();
@@ -77,6 +77,13 @@ export const invalidateRoleCache = (userId: string): void => {
   console.log(`Role cache invalidated for user ${userId}`);
 };
 
+const rateLimitedAuthPaths = new Set([
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/reset-password'
+]);
+
 const checkRateLimit = (ip: string): boolean => {
   const now = Date.now();
   const userLimit = rateLimit.get(ip);
@@ -94,37 +101,44 @@ const checkRateLimit = (ip: string): boolean => {
   return true;
 };
 
+export const rateLimitAuth = (req: Request, res: Response, next: NextFunction) => {
+  if (!rateLimitedAuthPaths.has(req.path)) {
+    return next();
+  }
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({
+      success: false,
+      error: {
+        message: 'Too many requests. Please try again later.',
+        code: 429
+      }
+    });
+  }
+  next();
+};
+
+const getTokenFromRequest = (req: Request) => req.headers.authorization?.split(' ')[1];
+
 export const protect = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Check rate limit
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    if (!checkRateLimit(ip)) {
-      throw new AuthenticationError('Too many requests. Please try again later.');
-    }
-
     // Get token from header
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = getTokenFromRequest(req);
     
     if (!token) {
       throw new AuthenticationError('Authentication token is required');
     }
 
-    console.log('Attempting to verify token:', token.substring(0, 20) + '...');
-    
     try {
-      // Verify the token with Supabase
-      const user = await verifyUserToken(token);
-      
-      if (!user) {
-        console.error('No user returned from token verification');
-        throw new AuthenticationError('Invalid authentication token');
-      }
+      console.log('Verifying JWT token (first 20 chars):', token.substring(0, 20) + '...');
+      const payload = await verifySupabaseJwt(token);
+      console.log('JWT verified successfully for user:', payload.sub);
 
       if (!req.companyId) {
         throw new AuthenticationError('Company context is required');
       }
 
-      const membership = await getUserMembership(user.id, req.companyId);
+      const membership = await getUserMembership(payload.sub, req.companyId);
 
       if (!membership) {
         throw new AuthenticationError('User does not belong to this company');
@@ -134,38 +148,26 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         throw new AuthorizationError('User does not belong to this company');
       }
 
-      // Keep profile company_id in sync with active company for legacy access paths
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('company_id')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (profile && profile.company_id !== req.companyId) {
-        const profileClient = supabaseAdmin || createAuthClient(token);
-        const { error: profileUpdateError } = await profileClient
-          .from('profiles')
-          .update({ company_id: req.companyId })
-          .eq('id', user.id);
-
-        if (profileUpdateError) {
-          console.warn('Failed to sync profile company_id:', profileUpdateError);
-        }
-      }
-
-      const userRole = await getUserRole(user.id, req.companyId);
+      const userRole = await getUserRole(payload.sub, req.companyId);
 
       // Add user info to request
       req.user = {
-        id: user.id,
-        email: user.email || '',
+        id: payload.sub,
+        email: payload.email || '',
         role: userRole, // Use the fetched/cached role
         company_id: req.companyId
       };
 
-      console.log('User authenticated successfully:', { id: user.id, email: user.email, role: userRole });
       next();
     } catch (authError) {
+      if (authError instanceof SupabaseJwtVerificationError) {
+        if (authError.kind === 'unavailable') {
+          console.error('JWKS verification unavailable:', authError);
+          throw new ApiError(503, 'Auth verification unavailable');
+        }
+        console.error('JWT verification failed:', authError.message, authError);
+        throw new AuthenticationError('Invalid authentication token');
+      }
       console.error('Auth error:', authError);
       throw new AuthenticationError('Invalid authentication token');
     }
@@ -201,18 +203,26 @@ export const adminOnly = async (req: Request, res: Response, next: NextFunction)
 
 export const isAuthenticated = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = getTokenFromRequest(req);
     if (!token) {
       return res.status(401).json({ error: 'No token provided' });
     }
 
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) {
+    try {
+      const payload = await verifySupabaseJwt(token);
+      req.user = {
+        id: payload.sub,
+        email: payload.email || '',
+        role: 'user',
+        company_id: req.companyId
+      };
+      next();
+    } catch (authError) {
+      if (authError instanceof SupabaseJwtVerificationError && authError.kind === 'unavailable') {
+        return res.status(503).json({ error: 'Auth verification unavailable' });
+      }
       return res.status(401).json({ error: 'Invalid token' });
     }
-
-    req.user = user;
-    next();
   } catch (error) {
     res.status(500).json({ error: 'Authentication failed' });
   }
@@ -252,7 +262,7 @@ export const isSalesExecutive = async (req: Request, res: Response, next: NextFu
     let userRole = req.user.role;
 
     if (!userRole) {
-      userRole = await getUserRole(req.user.id);
+      userRole = await getUserRole(req.user.id, req.companyId);
       req.user.role = userRole;
     }
 

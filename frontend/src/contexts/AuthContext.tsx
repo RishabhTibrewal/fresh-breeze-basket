@@ -90,6 +90,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
+      const accessToken = currentSession.access_token;
+      if (!accessToken) {
+        console.warn('Missing access token for backend sync');
+        return false;
+      }
+
+      // Ensure token is available for API client and immediate requests
+      localStorage.setItem('supabase_token', accessToken);
+
       // Get the user's profile from Supabase first
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
@@ -112,11 +121,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // If user has a role, sync with backend
       if (effectiveRole) {
         console.log('Syncing backend session for user with role:', effectiveRole);
-        await apiClient.post('/auth/sync-session', {
-          userId: currentSession.user.id,
-          email: currentSession.user.email,
-          role: effectiveRole
-        });
+        await apiClient.post(
+          '/auth/sync-session',
+          {
+            userId: currentSession.user.id,
+            email: currentSession.user.email,
+            role: effectiveRole
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`
+            }
+          }
+        );
       } else {
         console.log('No role found for user, skipping backend sync');
         return false;
@@ -280,21 +297,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
-      const isValid = await syncBackendSession(currentSession, true);
-      if (!isValid) {
-        setIsLoading(false);
-        return;
-      }
+      // Do NOT sync here — onAuthStateChange will handle it
 
       setSession(currentSession);
       setUser(currentSession.user);
 
       if (currentSession.access_token) {
         localStorage.setItem('supabase_token', currentSession.access_token);
-        console.log('Existing token stored in localStorage');
       }
 
       fetchUserProfile(currentSession.user.id);
+
     });
 
     return () => {

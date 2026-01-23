@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabase, createAuthClient, supabaseAdmin } from '../config/supabase';
+import { SupabaseJwtVerificationError, verifySupabaseJwt } from '../utils/supabaseJwt';
 import { ApiError } from '../middleware/error';
 
 const ensureMembership = async (userId: string, companyId: string, role: string) => {
@@ -207,17 +208,23 @@ export const register = async (req: Request, res: Response) => {
 
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
-      .insert(profilePayload);
+      .upsert(profilePayload, { onConflict: 'id' });
 
     if (profileError) {
-      console.error('Error updating profile:', profileError);
-      // Don't fail the request, profile might have been created by trigger
-      // But log it for debugging
+      console.error('Error upserting profile:', profileError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create user profile'
+      });
     }
 
     const membershipError = await ensureMembership(authData.user.id, req.companyId, 'user');
     if (membershipError) {
       console.error('Error creating membership:', membershipError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create company membership'
+      });
     }
 
     // Return success after user is created in Supabase Auth
@@ -255,21 +262,11 @@ export const login = async (req: Request, res: Response) => {
       try {
         console.log('Attempting to login with Supabase token for email:', email);
         
-        // Verify the Supabase token by calling the Supabase API
-        const authClient = createAuthClient(supabase_token);
-        const { data: userData, error: userError } = await authClient.auth.getUser();
-        
-        if (userError || !userData.user) {
-          console.error('Error validating Supabase token:', userError);
-          return res.status(401).json({
-            success: false,
-            message: 'Invalid Supabase token'
-          });
-        }
+        const payload = await verifySupabaseJwt(supabase_token);
         
         // Verify that the email matches the token
-        if (userData.user.email !== email) {
-          console.error('Email mismatch:', { tokenEmail: userData.user.email, requestEmail: email });
+        if (payload.email !== email) {
+          console.error('Email mismatch:', { tokenEmail: payload.email, requestEmail: email });
           return res.status(401).json({
             success: false,
             message: 'Email does not match token'
@@ -281,11 +278,11 @@ export const login = async (req: Request, res: Response) => {
         const { data: existingProfile, error: profileError } = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', userData.user.id)
+          .eq('id', payload.sub)
           .single();
         
         if (profileError) {
-          console.error('Profile not found for valid token user:', userData.user.id);
+          console.error('Profile not found for valid token user:', payload.sub);
           return res.status(500).json({
             success: false,
             message: 'User profile is missing. Please contact support.'
@@ -295,7 +292,7 @@ export const login = async (req: Request, res: Response) => {
           console.log('Profile found for token login:', profile);
         }
 
-        const membership = await getMembership(userData.user.id, activeCompanyId);
+        const membership = await getMembership(payload.sub, activeCompanyId);
 
         if (!membership) {
           return res.status(403).json({
@@ -335,6 +332,13 @@ export const login = async (req: Request, res: Response) => {
           }
         });
       } catch (tokenError) {
+        if (tokenError instanceof SupabaseJwtVerificationError && tokenError.kind === 'unavailable') {
+          console.error('JWKS verification unavailable during token login:', tokenError);
+          return res.status(503).json({
+            success: false,
+            message: 'Auth verification unavailable'
+          });
+        }
         console.error('Error during token validation:', tokenError);
         return res.status(401).json({
           success: false,

@@ -1,0 +1,125 @@
+import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose';
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+
+if (!SUPABASE_URL) {
+  throw new Error('Missing SUPABASE_URL');
+}
+
+const normalizedSupabaseUrl = SUPABASE_URL.replace(/\/$/, '');
+const JWKS_URL = new URL(`${normalizedSupabaseUrl}/auth/v1/.well-known/jwks.json`);
+const jwks = createRemoteJWKSet(JWKS_URL);
+
+const decodeJwtPayload = (token: string) => {
+  const parts = token.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+  try {
+    const payloadJson = Buffer.from(parts[1], 'base64url').toString('utf-8');
+    return JSON.parse(payloadJson) as Record<string, unknown>;
+  } catch (error) {
+    console.warn('Failed to decode JWT payload for diagnostics:', error);
+    return null;
+  }
+};
+
+export type SupabaseJwtPayload = JWTPayload & {
+  sub: string;
+  email: string;
+};
+
+export class SupabaseJwtVerificationError extends Error {
+  kind: 'invalid' | 'unavailable';
+
+  constructor(kind: 'invalid' | 'unavailable', message: string) {
+    super(message);
+    this.name = 'SupabaseJwtVerificationError';
+    this.kind = kind;
+  }
+}
+
+const getErrorName = (error: unknown) => (error instanceof Error ? error.name : undefined);
+
+const isInvalidTokenError = (error: unknown) => {
+  const name = getErrorName(error);
+  return (
+    name === 'JWTExpired' ||
+    name === 'JWTClaimValidationFailed' ||
+    name === 'JWTInvalid' ||
+    name === 'JWSSignatureVerificationFailed' ||
+    name === 'JWKSNoMatchingKey'
+  );
+};
+
+const isJwksUnavailableError = (error: unknown) => {
+  if (error instanceof TypeError) {
+    return true;
+  }
+
+  const name = getErrorName(error);
+  return name === 'JWKSError' || name === 'JWKSInvalid' || name === 'JWKSTimeout';
+};
+
+export async function verifySupabaseJwt(token: string): Promise<SupabaseJwtPayload> {
+  try {
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: `${normalizedSupabaseUrl}/auth/v1`,
+      audience: 'authenticated'
+    });
+
+    if (!payload.sub || !payload.email) {
+      throw new SupabaseJwtVerificationError(
+        'invalid',
+        'Token is missing required subject or email'
+      );
+    }
+
+    return payload as SupabaseJwtPayload;
+  } catch (error) {
+    if (error instanceof SupabaseJwtVerificationError) {
+      throw error;
+    }
+
+    if (isInvalidTokenError(error)) {
+      const decoded = decodeJwtPayload(token);
+      if (decoded) {
+        console.warn('JWT verification failed with claims:', {
+          iss: decoded.iss,
+          aud: decoded.aud,
+          sub: decoded.sub,
+          email: decoded.email,
+          exp: decoded.exp
+        });
+      }
+      throw new SupabaseJwtVerificationError('invalid', 'Invalid or expired token');
+    }
+
+    if (isJwksUnavailableError(error)) {
+      throw new SupabaseJwtVerificationError('unavailable', 'JWKS unavailable');
+    }
+
+    // Log the actual error for debugging
+    console.error('JWT verification error (unhandled):', {
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined
+    });
+    
+    // Always decode and log claims for debugging
+    const decoded = decodeJwtPayload(token);
+    if (decoded) {
+      console.warn('JWT claims from token:', {
+        iss: decoded.iss,
+        aud: decoded.aud,
+        sub: decoded.sub,
+        email: decoded.email,
+        exp: decoded.exp,
+        expectedIssuer: `${normalizedSupabaseUrl}/auth/v1`,
+        expectedAudience: 'authenticated'
+      });
+    }
+
+    throw new SupabaseJwtVerificationError('invalid', 'Token verification failed');
+  }
+}

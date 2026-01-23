@@ -3,6 +3,9 @@ import { supabase } from '../config/supabase';
 
 const BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN || 'gofreshco.com';
 const DEFAULT_COMPANY_SLUG = process.env.DEFAULT_COMPANY_SLUG || 'default';
+const TENANT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+const tenantCache = new Map<string, { companyId: string; companySlug: string; expiresAt: number }>();
 
 const extractSubdomain = (host: string): string | null => {
   const cleanHost = host.split(':')[0].toLowerCase();
@@ -42,54 +45,45 @@ export const resolveTenant = async (req: Request, res: Response, next: NextFunct
       subdomain = headerSubdomain.toLowerCase().trim();
       console.log(`[Tenant] ✅ Using subdomain from X-Tenant-Subdomain header: ${subdomain}`);
     } else {
-      // Priority 2: Try to extract from Origin/Referer header (for CORS scenarios)
-      const origin = req.headers.origin || req.headers.referer;
-      if (origin) {
-        try {
-          const originUrl = new URL(origin);
-          const originHostname = originUrl.hostname;
-          // Extract subdomain from origin (e.g., "gulffresh" from "gulffresh.gofreshco.com")
-          if (originHostname.includes('.') && !originHostname.startsWith('localhost')) {
-            const parts = originHostname.split('.');
-            const isRootDomain = parts.length === 2 && originHostname.endsWith(BASE_DOMAIN);
-
-            if (originHostname === `www.${BASE_DOMAIN}` || isRootDomain) {
-              subdomain = DEFAULT_COMPANY_SLUG;
-              console.log(`[Tenant] ✅ Using default tenant for Origin header: ${originHostname}`);
-            } else if (parts.length > 2) {
-              subdomain = parts[0].toLowerCase();
-              console.log(`[Tenant] ✅ Extracted subdomain from Origin header: ${subdomain} (from ${originHostname})`);
-            }
-          }
-        } catch (e) {
-          console.warn(`[Tenant] Failed to parse origin: ${origin}`, e);
-        }
+      // Priority 2: Fallback to extracting from Host header
+      const host = req.headers.host;
+      if (!host) {
+        console.error(`[Tenant] ❌ Missing host header and X-Tenant-Subdomain header`);
+        console.error(`[Tenant] Headers:`, {
+          host: req.headers.host,
+          origin: req.headers.origin,
+          referer: req.headers.referer,
+          'x-tenant-subdomain': req.headers['x-tenant-subdomain']
+        });
+        return res.status(400).json({ success: false, error: 'Missing host header or tenant subdomain' });
       }
-      
-      // Priority 3: Fallback to extracting from Host header
+
+      subdomain = extractSubdomain(host);
       if (!subdomain) {
-        const host = req.headers.host;
-        if (!host) {
-          console.error(`[Tenant] ❌ Missing host header, origin header, and X-Tenant-Subdomain header`);
-          console.error(`[Tenant] Headers:`, {
-            host: req.headers.host,
-            origin: req.headers.origin,
-            referer: req.headers.referer,
-            'x-tenant-subdomain': req.headers['x-tenant-subdomain']
-          });
-          return res.status(400).json({ success: false, error: 'Missing host header or tenant subdomain' });
-        }
-
-        subdomain = extractSubdomain(host);
-        if (!subdomain) {
-          console.error(`[Tenant] ❌ Invalid tenant host: ${host}`);
-          return res.status(400).json({ success: false, error: 'Invalid tenant host' });
-        }
-        console.log(`[Tenant] ✅ Extracted subdomain: ${subdomain} from host: ${host}`);
+        console.error(`[Tenant] ❌ Invalid tenant host: ${host}`);
+        return res.status(400).json({ success: false, error: 'Invalid tenant host' });
       }
+      console.log(`[Tenant] ✅ Extracted subdomain: ${subdomain} from host: ${host}`);
+    }
+
+    const origin = req.headers.origin || req.headers.referer;
+    if (origin) {
+      console.log(`[Tenant] Origin header received: ${origin}`);
     }
 
     console.log(`[Tenant] Resolving company for subdomain: ${subdomain}`);
+
+    if (!subdomain) {
+      return res.status(400).json({ success: false, error: 'Tenant subdomain is required' });
+    }
+
+    const cachedTenant = tenantCache.get(subdomain);
+    if (cachedTenant && cachedTenant.expiresAt > Date.now()) {
+      req.companyId = cachedTenant.companyId;
+      req.companySlug = cachedTenant.companySlug;
+      console.log(`[Tenant] ✅ Using cached company for subdomain: ${subdomain}`);
+      return next();
+    }
 
     const { data: company, error } = await supabase
       .from('companies')
@@ -104,6 +98,11 @@ export const resolveTenant = async (req: Request, res: Response, next: NextFunct
 
     req.companyId = company.id;
     req.companySlug = company.slug;
+    tenantCache.set(subdomain, {
+      companyId: company.id,
+      companySlug: company.slug,
+      expiresAt: Date.now() + TENANT_CACHE_TTL
+    });
     console.log(`[Tenant] ✅ Resolved company: ${company.slug} (${company.id})`);
     return next();
   } catch (err) {

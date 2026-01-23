@@ -14,11 +14,12 @@ import {
   updateRole,
   syncSession
 } from '../controllers/auth';
-import { protect } from '../middleware/auth';
+import { protect, rateLimitAuth } from '../middleware/auth';
 
 const router = express.Router();
 
 // Public routes
+router.use(rateLimitAuth);
 router.post('/register', register);
 router.post('/login', login);
 

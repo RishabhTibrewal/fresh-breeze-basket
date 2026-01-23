@@ -428,6 +428,8 @@ export const createCustomer = async (req: Request, res: Response) => {
     let userId: string;
 
     // If user_id was provided, use it; otherwise create a new user
+    let resolvedEmail = email || null;
+
     if (user_id) {
       console.log('Creating customer with existing user_id:', user_id);
       
@@ -442,6 +444,7 @@ export const createCustomer = async (req: Request, res: Response) => {
       }
       
       userId = user_id;
+      resolvedEmail = resolvedEmail || authUser.user.email || null;
     } else {
       // Create new user using Supabase Auth Admin API (proper way instead of RPC)
       if (!supabaseAdmin) {
@@ -489,8 +492,14 @@ export const createCustomer = async (req: Request, res: Response) => {
       }
     }
 
+    const adminClient = supabaseAdmin || supabase;
+
+    if (!resolvedEmail) {
+      throw new AppError('Email is required to create a customer profile', 400);
+    }
+
     // Ensure profile exists and belongs to this company
-    const { data: existingProfile, error: profileCheckError } = await supabase
+    const { data: existingProfile, error: profileCheckError } = await adminClient
       .from('profiles')
       .select('id, company_id')
       .eq('id', userId)
@@ -501,7 +510,7 @@ export const createCustomer = async (req: Request, res: Response) => {
     }
 
     if (existingProfile && existingProfile.company_id !== req.companyId) {
-      const { error: profileUpdateError } = await supabase
+      const { error: profileUpdateError } = await adminClient
         .from('profiles')
         .update({ company_id: req.companyId })
         .eq('id', userId);
@@ -512,11 +521,11 @@ export const createCustomer = async (req: Request, res: Response) => {
     }
 
     if (!existingProfile) {
-      const { error: profileError } = await supabase
+      const { error: profileError } = await adminClient
         .from('profiles')
         .insert({
           id: userId,
-          email: email,
+          email: resolvedEmail,
           role: 'user', // Set role to 'user' for customers
           company_id: req.companyId
         });
@@ -527,8 +536,7 @@ export const createCustomer = async (req: Request, res: Response) => {
       }
     }
     
-    const membershipClient = supabaseAdmin || supabase;
-    const { error: membershipError } = await membershipClient
+    const { error: membershipError } = await adminClient
       .from('company_memberships')
       .upsert({
         user_id: userId,
@@ -541,6 +549,7 @@ export const createCustomer = async (req: Request, res: Response) => {
 
     if (membershipError) {
       console.error('Error creating company membership:', membershipError);
+      throw new AppError('Failed to create company membership', 500);
     }
 
     // Create customer payload
@@ -945,6 +954,7 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
 
     if (membershipError) {
       console.error('Error creating company membership:', membershipError);
+      throw new AppError('Failed to create company membership', 500);
     }
 
     // Create or update customer
