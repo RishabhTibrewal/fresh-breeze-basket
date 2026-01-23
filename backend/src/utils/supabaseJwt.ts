@@ -1,13 +1,16 @@
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_JWKS_URL = process.env.SUPABASE_JWKS_URL;
 
-if (!SUPABASE_URL) {
-  throw new Error('Missing SUPABASE_URL');
+if (!SUPABASE_URL && !SUPABASE_JWKS_URL) {
+  throw new Error('Missing SUPABASE_URL or SUPABASE_JWKS_URL');
 }
 
-const normalizedSupabaseUrl = SUPABASE_URL.replace(/\/$/, '');
-const JWKS_URL = new URL(`${normalizedSupabaseUrl}/auth/v1/.well-known/jwks.json`);
+const normalizedSupabaseUrl = SUPABASE_URL?.replace(/\/$/, '');
+const JWKS_URL = SUPABASE_JWKS_URL
+  ? new URL(SUPABASE_JWKS_URL)
+  : new URL(`${normalizedSupabaseUrl}/auth/v1/.well-known/jwks.json`);
 const jwks = createRemoteJWKSet(JWKS_URL);
 
 const decodeJwtPayload = (token: string) => {
@@ -64,7 +67,7 @@ const isJwksUnavailableError = (error: unknown) => {
 export async function verifySupabaseJwt(token: string): Promise<SupabaseJwtPayload> {
   try {
     const { payload } = await jwtVerify(token, jwks, {
-      issuer: `${normalizedSupabaseUrl}/auth/v1`,
+      issuer: normalizedSupabaseUrl ? `${normalizedSupabaseUrl}/auth/v1` : undefined,
       audience: 'authenticated'
     });
 
