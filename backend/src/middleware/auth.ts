@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyUserToken } from '../config/supabase';
+import { createAuthClient, verifyUserToken } from '../config/supabase';
 import { AuthenticationError, AuthorizationError } from './error';
 import { supabase, supabaseAdmin } from '../config/supabase';
 
@@ -142,10 +142,15 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         .maybeSingle();
 
       if (profile && profile.company_id !== req.companyId) {
-        await supabase
+        const profileClient = supabaseAdmin || createAuthClient(token);
+        const { error: profileUpdateError } = await profileClient
           .from('profiles')
           .update({ company_id: req.companyId })
           .eq('id', user.id);
+
+        if (profileUpdateError) {
+          console.warn('Failed to sync profile company_id:', profileUpdateError);
+        }
       }
 
       const userRole = await getUserRole(user.id, req.companyId);
