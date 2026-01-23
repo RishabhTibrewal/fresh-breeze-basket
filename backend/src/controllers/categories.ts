@@ -1,6 +1,14 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { createAuthClient, supabase } from '../config/supabase';
 import { ApiError } from '../middleware/error';
+
+const getAuthClient = (req: Request) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+    throw new ApiError(401, 'Authentication token is required');
+  }
+  return createAuthClient(token);
+};
 
 // Get all categories
 export const getCategories = async (req: Request, res: Response) => {
@@ -102,6 +110,8 @@ export const createCategory = async (req: Request, res: Response) => {
     if (!req.companyId) {
       throw new ApiError(400, 'Company context is required');
     }
+
+    const authClient = getAuthClient(req);
     
     // Validate required fields
     if (!name) {
@@ -111,7 +121,7 @@ export const createCategory = async (req: Request, res: Response) => {
     // Generate a slug if not provided
     const categorySlug = slug || name.toLowerCase().replace(/\s+/g, '-');
     
-    const { data, error } = await supabase
+    const { data, error } = await authClient
       .from('categories')
       .insert({
         name,
@@ -167,9 +177,11 @@ export const updateCategory = async (req: Request, res: Response) => {
     if (!req.companyId) {
       throw new ApiError(400, 'Company context is required');
     }
+
+    const authClient = getAuthClient(req);
     
     // Check if category exists
-    const { data: existingCategory, error: fetchError } = await supabase
+    const { data: existingCategory, error: fetchError } = await authClient
       .from('categories')
       .select('*')
       .eq('id', id)
@@ -185,7 +197,7 @@ export const updateCategory = async (req: Request, res: Response) => {
     }
     
     // Update category
-    const { data, error } = await supabase
+    const { data, error } = await authClient
       .from('categories')
       .update({
         name: name || existingCategory.name,
@@ -242,9 +254,11 @@ export const deleteCategory = async (req: Request, res: Response) => {
     if (!req.companyId) {
       throw new ApiError(400, 'Company context is required');
     }
+
+    const authClient = getAuthClient(req);
     
     // Check if category exists
-    const { data: existingCategory, error: fetchError } = await supabase
+    const { data: existingCategory, error: fetchError } = await authClient
       .from('categories')
       .select('*')
       .eq('id', id)
@@ -260,7 +274,7 @@ export const deleteCategory = async (req: Request, res: Response) => {
     }
     
     // Delete category
-    const { error } = await supabase
+    const { error } = await authClient
       .from('categories')
       .delete()
       .eq('id', id)
