@@ -271,28 +271,38 @@ export const getSupplierPayments = async (req: Request, res: Response, next: Nex
     const suppliersMap = new Map();
 
     if (invoiceIds.length > 0) {
-      const { data: invoices } = await supabase
+      const { data: invoices, error: invoicesError } = await supabase
         .schema('procurement')
         .from('purchase_invoices')
         .select('*')
         .in('id', invoiceIds)
         .eq('company_id', req.companyId);
       
-      invoices?.forEach((inv: any) => {
-        invoicesMap.set(inv.id, inv);
-      });
+      if (invoicesError) {
+        console.error('Error fetching purchase invoices:', invoicesError);
+        // Continue without invoices if there's an error
+      } else {
+        invoices?.forEach((inv: any) => {
+          invoicesMap.set(inv.id, inv);
+        });
+      }
     }
 
     if (supplierIds.length > 0) {
-      const { data: suppliers } = await supabase
+      const { data: suppliers, error: suppliersError } = await supabase
         .from('suppliers')
         .select('*')
         .in('id', supplierIds)
         .eq('company_id', req.companyId);
       
-      suppliers?.forEach((supplier: any) => {
-        suppliersMap.set(supplier.id, supplier);
-      });
+      if (suppliersError) {
+        console.error('Error fetching suppliers:', suppliersError);
+        // Continue without suppliers if there's an error
+      } else {
+        suppliers?.forEach((supplier: any) => {
+          suppliersMap.set(supplier.id, supplier);
+        });
+      }
     }
 
     // Enrich payments with related data

@@ -493,7 +493,9 @@ export const getCurrentUser = async (req: Request, res: Response) => {
     const activeCompanyId = req.companyId;
 
     // First, verify profile exists and belongs to the company
-    const { data: profileCheck, error: profileCheckError } = await supabase
+    // Use admin client to bypass RLS when checking/creating profiles
+    const adminClient = supabaseAdmin || supabase;
+    const { data: profileCheck, error: profileCheckError } = await adminClient
       .from('profiles')
       .select('company_id')
       .eq('id', userId)
@@ -504,8 +506,8 @@ export const getCurrentUser = async (req: Request, res: Response) => {
       console.log('Profile not found for user ID:', userId, 'Creating new profile...');
       
       try {
-        // Create new profile
-        const { data: newProfile, error: createError } = await supabase
+        // Create new profile using admin client to bypass RLS
+        const { data: newProfile, error: createError } = await adminClient
           .from('profiles')
           .insert({
             id: userId,

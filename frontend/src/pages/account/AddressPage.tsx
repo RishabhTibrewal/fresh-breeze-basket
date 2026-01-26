@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import AddressForm from './AddressForm';
 import { Address } from '@/types/database';
+import { addressApi } from '@/api/addresses';
 
 export default function AddressPage() {
   const { user } = useAuth();
@@ -20,7 +21,7 @@ export default function AddressPage() {
       if (!user) return;
       try {
         setIsAddressLoading(true);
-        const data = await (await import('@/api/addresses')).addressApi.getAddresses();
+        const data = await addressApi.getAddresses();
         setAddresses(data || []);
       } catch (error: any) {
         toast.error(error.message || 'Failed to load addresses');
@@ -52,7 +53,7 @@ export default function AddressPage() {
 
   const handleDelete = async (addressId: string) => {
     try {
-      await (await import('@/api/addresses')).addressApi.deleteAddress(addressId);
+      await addressApi.deleteAddress(addressId);
       setAddresses((prev) => prev.filter((a) => a.id !== addressId));
       toast.success('Address deleted');
     } catch (error: any) {

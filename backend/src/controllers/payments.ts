@@ -75,6 +75,9 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
 // Get payment by ID
 export const getPaymentById = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
     const { id } = req.params;
     const userId = req.user.id;
 
@@ -123,6 +126,9 @@ export const getPaymentById = async (req: Request, res: Response) => {
 // Get payment history for user
 export const getPaymentHistory = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
     const userId = req.user.id;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
@@ -468,6 +474,9 @@ const handlePaymentFailure = async (paymentIntent: any) => {
 // Link payment to order after order creation
 export const linkPaymentToOrder = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
     const { payment_intent_id, order_id } = req.body;
     const userId = req.user.id;
 

@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
 import { supabase } from '../config/supabase';
 import { hasAnyRole } from '../utils/roles';
+import { ApiError } from '../middleware/error';
 
 interface AuthenticatedRequest extends Request {
   user: {
     id: string;
+    email: string;
     role?: string;
     roles?: string[];
     company_id?: string;
@@ -14,6 +16,9 @@ interface AuthenticatedRequest extends Request {
 
 export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
     const { id } = req.params;
     const { status, tracking_number, estimated_delivery, notes } = req.body;
     const userId = req.user.id;

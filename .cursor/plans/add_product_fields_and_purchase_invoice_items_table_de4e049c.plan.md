@@ -28,9 +28,7 @@ Add constraints:
 
 ### 2. Add Fields to Purchase Order Items Table
 
-**File:** `backend/src/db/migrations/20260126_add_fields_to_po_items.sql` (new)
-
-Add columns to `procurement.purchase_order_items`:
+**File:** `backend/src/db/migrations/20260126_add_fields_to_po_items.sql` (new)Add columns to `procurement.purchase_order_items`:
 
 - `unit VARCHAR(50)` - Unit of measurement from product at time of PO creation
 - `product_code VARCHAR(100)` - Product code from product at time of PO creation
@@ -39,9 +37,7 @@ Add columns to `procurement.purchase_order_items`:
 
 ### 3. Add Fields to Goods Receipt Items Table
 
-**File:** `backend/src/db/migrations/20260126_add_fields_to_grn_items.sql` (new)
-
-Add columns to `procurement.goods_receipt_items`:
+**File:** `backend/src/db/migrations/20260126_add_fields_to_grn_items.sql` (new)Add columns to `procurement.goods_receipt_items`:
 
 - `unit VARCHAR(50)` - Unit of measurement from product at time of GRN creation
 - `product_code VARCHAR(100)` - Product code from product at time of GRN creation
@@ -96,30 +92,26 @@ Add:
 
 ### 7. Update Purchase Order Controllers
 
-**File:** `backend/src/controllers/purchaseOrders.ts`
-
-**Changes:**
+**File:** `backend/src/controllers/purchaseOrders.ts`**Changes:**
 
 - **`createPurchaseOrder`**: When creating PO items, fetch product details and store:
-  - `unit` from product's `unit_type`
-  - `product_code` from product
-  - `hsn_code` from product
-  - `tax_percentage` from product
+- `unit` from product's `unit_type`
+- `product_code` from product
+- `hsn_code` from product
+- `tax_percentage` from product
 - **`updatePurchaseOrder`**: When updating PO items, fetch and store product details (unit, product_code, hsn_code, tax_percentage)
 - **`getPurchaseOrderById`**: No changes needed (fields will be included automatically)
 - **`getPurchaseOrders`**: No changes needed (fields will be included automatically)
 
 ### 8. Update Goods Receipt Controllers
 
-**File:** `backend/src/controllers/goodsReceipts.ts`
-
-**Changes:**
+**File:** `backend/src/controllers/goodsReceipts.ts`**Changes:**
 
 - **`createGoodsReceipt`**: When creating GRN items, fetch product details and store:
-  - `unit` from product's `unit_type`
-  - `product_code` from product
-  - `hsn_code` from product
-  - `tax_percentage` from product
+- `unit` from product's `unit_type`
+- `product_code` from product
+- `hsn_code` from product
+- `tax_percentage` from product
 - **`updateGoodsReceipt`**: When updating GRN items, fetch and store product details (unit, product_code, hsn_code, tax_percentage)
 - **`completeGoodsReceipt`**: No changes needed (fields already stored)
 - **`getGoodsReceiptById`**: No changes needed (fields will be included automatically)
@@ -130,17 +122,17 @@ Add:
 **File:** `backend/src/controllers/purchaseInvoices.ts`**Changes:**
 
 - **`createInvoiceFromGRN`**: After creating invoice, copy items from `goods_receipt_items` to `purchase_invoice_items`
-  - For each GRN item, fetch product details (including tax, HSN code, product code, unit_type)
-  - Store unit from product's `unit_type` field
-  - Calculate tax amount per line: `(quantity * unit_price) * (tax_percentage / 100)`
-  - Calculate line_total: `(quantity * unit_price) + tax_amount - discount_amount`
-  - Insert into `purchase_invoice_items`
+- For each GRN item, fetch product details (including tax, HSN code, product code, unit_type)
+- Store unit from product's `unit_type` field
+- Calculate tax amount per line: `(quantity * unit_price) * (tax_percentage / 100)`
+- Calculate line_total: `(quantity * unit_price) + tax_amount - discount_amount`
+- Insert into `purchase_invoice_items`
 - **`createPurchaseInvoice`**: Accept `items` array in request body, create invoice items
-  - Validate items array
-  - For each item, fetch product details (including unit_type)
-  - Store unit from product's `unit_type` field
-  - Calculate tax and totals per line
-  - Insert invoice and items
+- Validate items array
+- For each item, fetch product details (including unit_type)
+- Store unit from product's `unit_type` field
+- Calculate tax and totals per line
+- Insert invoice and items
 - **`updatePurchaseInvoice`**: Support updating invoice items
 - If `items` provided, delete existing items and insert new ones
 - Recalculate invoice totals from items
@@ -184,9 +176,7 @@ Add:
 
 ### 14. Update Purchase Order Types
 
-**File:** `frontend/src/api/purchaseOrders.ts`
-
-Update `PurchaseOrderItem` interface to include:
+**File:** `frontend/src/api/purchaseOrders.ts`Update `PurchaseOrderItem` interface to include:
 
 - `unit?: string`
 - `product_code?: string`
@@ -195,9 +185,7 @@ Update `PurchaseOrderItem` interface to include:
 
 ### 15. Update Goods Receipt Types
 
-**File:** `frontend/src/api/goodsReceipts.ts`
-
-Update `GoodsReceiptItem` interface to include:
+**File:** `frontend/src/api/goodsReceipts.ts`Update `GoodsReceiptItem` interface to include:
 
 - `unit?: string`
 - `product_code?: string`
@@ -264,12 +252,12 @@ Update `PurchaseInvoice` interface to include:
 **File:** `frontend/src/pages/admin/CreatePurchaseInvoice.tsx`**Changes:**
 
 - When creating from GRN, show items table with:
-  - Product name, code, HSN code
-  - Quantity, Unit (e.g., "kg", "piece")
-  - Unit price
-  - Tax percentage (from product)
-  - Tax amount (calculated)
-  - Line total
+- Product name, code, HSN code
+- Quantity, Unit (e.g., "kg", "piece")
+- Unit price
+- Tax percentage (from product)
+- Tax amount (calculated)
+- Line total
 - Allow editing quantities, prices, discounts per line
 - Show total tax and total amount summary
 - In edit mode, show existing invoice items in editable table
@@ -279,11 +267,11 @@ Update `PurchaseInvoice` interface to include:
 **File:** `frontend/src/pages/admin/PurchaseInvoiceDetail.tsx`**Changes:**
 
 - Display invoice items table showing:
-  - Product code, HSN code, Product name
-  - Quantity, Unit (e.g., "kg", "piece"), Unit price
-  - Tax %, Tax amount
-  - Discount
-  - Line total
+- Product code, HSN code, Product name
+- Quantity, Unit (e.g., "kg", "piece"), Unit price
+- Tax %, Tax amount
+- Discount
+- Line total
 - Show subtotal, total tax, total discount, grand total
 - Format HSN code and product code prominently
 
@@ -302,20 +290,20 @@ Update `PurchaseInvoice` interface to include:
 **File:** `backend/src/db/migrations/20260126_backfill_po_items_fields.sql` (new)
 
 - For existing purchase_order_items, fetch product details and populate:
-  - `unit` from product's `unit_type`
-  - `product_code` from product
-  - `hsn_code` from product
-  - `tax_percentage` from product (or 0 if not available)
+- `unit` from product's `unit_type`
+- `product_code` from product
+- `hsn_code` from product
+- `tax_percentage` from product (or 0 if not available)
 
 ### 23. Migrate Existing GRN Items Data
 
 **File:** `backend/src/db/migrations/20260126_backfill_grn_items_fields.sql` (new)
 
 - For existing goods_receipt_items, fetch product details and populate:
-  - `unit` from product's `unit_type`
-  - `product_code` from product
-  - `hsn_code` from product
-  - `tax_percentage` from product (or 0 if not available)
+- `unit` from product's `unit_type`
+- `product_code` from product
+- `hsn_code` from product
+- `tax_percentage` from product (or 0 if not available)
 
 ### 24. Migrate Existing Invoice Data (Optional)
 
@@ -344,4 +332,3 @@ Update `PurchaseInvoice` interface to include:
 - Tax percentage stored as decimal (e.g., 5.00 for 5%)
 - Invoice items are copied from GRN items (not referenced) for data integrity
 - HSN code, product code, unit, and tax_percentage are stored in PO items, GRN items, and invoice items to preserve historical values even if product details change later
-- This ensures consistent data structure across the entire procurement workflow (PO → GRN → Invoice)

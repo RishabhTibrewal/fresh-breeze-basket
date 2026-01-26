@@ -9,6 +9,9 @@ import { hasAnyRole } from '../utils/roles';
 // Get all orders (admin only)
 export const getOrders = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
     const { status, from_date, to_date, limit, page } = req.query;
     const userId = req.user.id;
     
@@ -121,6 +124,9 @@ export const getOrders = async (req: Request, res: Response) => {
 // Get user's orders
 export const getUserOrders = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
     const userId = req.user.id;
     
     if (!req.companyId) {
@@ -153,6 +159,9 @@ export const getUserOrders = async (req: Request, res: Response) => {
 // Get order by ID (admin or order owner)
 export const getOrderById = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
     const { id } = req.params;
     const userId = req.user.id;
     
@@ -313,6 +322,9 @@ export const createOrder = async (req: Request, res: Response) => {
       partial_payment_amount,
       payment_intent_id
     } = req.body;
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
     const userId = req.user.id;
 
     console.log('createOrder for user ID:', userId);
@@ -713,6 +725,9 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       payment_method,
       partial_payment_amount
     } = req.body;
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
     const userId = req.user.id;
     
     // Check roles using new role system
@@ -1101,6 +1116,9 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
 // Cancel order (user, admin, or sales executive)
 export const cancelOrder = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
     const { id } = req.params; // Order ID from URL
     const userId = req.user.id; // Currently logged-in user
     const userRole = req.user.role; // Role from token (e.g., 'user', 'admin', 'sales')

@@ -6,7 +6,6 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { warehousesService, Warehouse } from '@/api/warehouses';
 import { adminService, UserProfile } from '@/api/admin';
-import { warehouseManagersService } from '@/api/warehouseManagers';
 import {
   Form,
   FormControl,
@@ -82,7 +81,10 @@ export default function WarehouseForm({ warehouse, onSuccess, onCancel }: Wareho
   // Fetch existing warehouse managers if editing
   const { data: existingManagers } = useQuery({
     queryKey: ['warehouse-managers', warehouse?.id],
-    queryFn: () => warehouseManagersService.getByWarehouse(warehouse!.id),
+    queryFn: async () => {
+      const { warehouseManagersService } = await import('@/api/warehouseManagers');
+      return warehouseManagersService.getByWarehouse(warehouse!.id);
+    },
     enabled: !!warehouse?.id,
   });
 
@@ -123,6 +125,7 @@ export default function WarehouseForm({ warehouse, onSuccess, onCancel }: Wareho
       // Assign warehouse managers if any selected (filter out empty strings)
       const validManagerIds = warehouse_manager_ids?.filter(id => id && id.trim() !== '') || [];
       if (validManagerIds.length > 0) {
+        const { warehouseManagersService } = await import('@/api/warehouseManagers');
         await Promise.all(
           validManagerIds.map(userId =>
             warehouseManagersService.assign({
@@ -161,6 +164,9 @@ export default function WarehouseForm({ warehouse, onSuccess, onCancel }: Wareho
         // Find managers to add and remove
         const toAdd = validManagerIds.filter(id => !currentManagerIds.includes(id));
         const toRemove = currentManagerIds.filter(id => !validManagerIds.includes(id));
+        
+        // Dynamically import warehouse managers service
+        const { warehouseManagersService } = await import('@/api/warehouseManagers');
         
         // Add new managers
         await Promise.all(

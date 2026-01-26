@@ -138,7 +138,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const storedRolesJson = localStorage.getItem('userRoles');
       const storedRoles = storedRolesJson ? JSON.parse(storedRolesJson) : null;
       const storedRole = localStorage.getItem('userRole');
-      const effectiveRoles = storedRoles || (storedRole ? [storedRole] : (profile?.roles || (profile?.role ? [profile.role] : null)));
+      // Profile type only has 'role' (singular), not 'roles' (plural)
+      const effectiveRoles = storedRoles || (storedRole ? [storedRole] : (profile?.role ? [profile.role] : null));
 
       // If user has roles, sync with backend
       if (effectiveRoles && effectiveRoles.length > 0) {
@@ -372,10 +373,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Fetch user profile from backend API to get roles array
       try {
-        const { data: userData, error: userError } = await apiClient.get<{ success: boolean; data: any }>('/auth/me');
+        const response = await apiClient.get<{ success: boolean; data: any }>('/auth/me');
+        const userData = response.data;
         
-        if (userError || !userData?.success) {
-          console.error('Error fetching user from backend:', userError);
+        if (!userData?.success) {
+          console.error('Error fetching user from backend: Invalid response');
           // Fallback to Supabase profile
           const { data: profileData, error: profileError } = await supabase
             .from('profiles')
@@ -386,10 +388,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (profileError) {
             console.error('Error fetching user profile:', profileError);
           } else if (profileData) {
-            const effectiveRole = profileData.role || 'user';
+            // Cast to string to allow all role types (sales, accounts, warehouse_manager, etc.)
+            const effectiveRole = (profileData.role as string) || 'user';
             const userRoles = [effectiveRole];
             setProfile({ ...profileData, role: effectiveRole, roles: userRoles });
-            setIsAdmin(effectiveRole === 'admin');
+            setIsAdmin(effectiveRole === 'admin' || effectiveRole === 'accounts');
             setIsSales(effectiveRole === 'sales');
             setIsAccounts(effectiveRole === 'accounts');
             setRole(effectiveRole);
@@ -445,7 +448,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (profileError) {
           console.error('Error fetching user profile:', profileError);
         } else if (profileData) {
-          const effectiveRole = profileData.role || 'user';
+          // Cast to string to allow all role types (sales, accounts, warehouse_manager, etc.)
+          const effectiveRole = (profileData.role as string) || 'user';
           const userRoles = [effectiveRole];
           setProfile({ ...profileData, role: effectiveRole, roles: userRoles });
           setIsAdmin(effectiveRole === 'admin' || effectiveRole === 'accounts');
@@ -480,6 +484,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const { data: loginData } = await apiClient.post('/auth/login', { email, password });
         const userProfile = loginData?.data?.user;
+        const userId = data?.user?.id || userProfile?.id;
         if (userProfile) {
           const userRoles = userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
           const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
@@ -495,15 +500,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           
           // Fetch warehouses if user is warehouse manager
           if (userRoles.includes('warehouse_manager') || userRoles.includes('admin')) {
-            try {
-              const { warehouseManagersService } = await import('@/api/warehouseManagers');
-              const warehouseAssignments = await warehouseManagersService.getByUser(userId);
-              const warehouseIds = warehouseAssignments
-                .map((wm: any) => wm.warehouses?.id || wm.warehouse_id)
-                .filter(Boolean);
-              setWarehouses(warehouseIds);
-            } catch (error) {
-              console.error('Error fetching user warehouses:', error);
+            if (userId) {
+              try {
+                const { warehouseManagersService } = await import('@/api/warehouseManagers');
+                const warehouseAssignments = await warehouseManagersService.getByUser(userId);
+                const warehouseIds = warehouseAssignments
+                  .map((wm: any) => wm.warehouses?.id || wm.warehouse_id)
+                  .filter(Boolean);
+                setWarehouses(warehouseIds);
+              } catch (error) {
+                console.error('Error fetching user warehouses:', error);
+                setWarehouses([]);
+              }
+            } else {
+              console.warn('Cannot fetch warehouses: userId not available');
+              setWarehouses([]);
             }
           } else {
             setWarehouses([]);
@@ -633,19 +644,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window._lastRefreshAttempt = 0;
       window._refreshBackoffMs = 0;
       
-      // Then log out from Supabase
-      const { error } = await supabase.auth.signOut();
-      
-      if (error) {
-        toast.error(error.message);
-        throw error;
+      // Then log out from Supabase (handle gracefully if session is already missing)
+      try {
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+          // Don't throw if session is already missing - that's fine, we're logging out anyway
+          if (error.message?.includes('Auth session missing') || error.message?.includes('session')) {
+            console.log('Supabase session already cleared, continuing with logout');
+          } else {
+            console.error('Supabase signOut error:', error);
+            // Don't throw - continue with cleanup
+          }
+        }
+      } catch (supabaseError: any) {
+        // Ignore "Auth session missing" errors - session may already be cleared
+        if (supabaseError?.message?.includes('Auth session missing') || supabaseError?.message?.includes('session')) {
+          console.log('Supabase session already cleared, continuing with logout');
+        } else {
+          console.error('Supabase signOut exception:', supabaseError);
+        }
+        // Don't throw - continue with cleanup
       }
       
-      // Explicitly remove all tokens
+      // Explicitly remove all tokens and session data
       localStorage.removeItem('supabase_token');
       localStorage.removeItem('token'); // Remove backend token if exists
       localStorage.removeItem('userRole'); // Remove cached user role
       localStorage.removeItem('currentCustomerId'); // Remove any stored customer ID
+      localStorage.removeItem('last_profile_fetch'); // Remove profile fetch cache
+      // Clear all Supabase-related localStorage items
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('sb-') || key.includes('supabase')) {
+          localStorage.removeItem(key);
+        }
+      });
       console.log('All tokens removed after sign out');
       
       // Reset all state before navigation
@@ -668,7 +700,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }, 0);
     } catch (error) {
       console.error('Error signing out:', error);
-      throw error;
+      // Even if there's an error, clear local state and navigate to ensure logout completes
+      try {
+        localStorage.clear();
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setIsAdmin(false);
+        setIsSales(false);
+        setIsAccounts(false);
+        setIsWarehouseManager(false);
+        setWarehouses([]);
+        setRole(null);
+        setRoles([]);
+        navigate('/auth', { replace: true });
+      } catch (cleanupError) {
+        console.error('Error during cleanup:', cleanupError);
+      }
+      // Don't throw - logout should always succeed in clearing local state
     }
   };
 

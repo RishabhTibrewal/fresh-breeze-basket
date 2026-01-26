@@ -268,7 +268,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             origin: '',
             best_before: '',
             badge: '',
-            additional_images: []
+            additional_images: [],
+            product_code: item.products.product_code || null,
+            hsn_code: item.products.hsn_code || null,
+            tax: item.products.tax || null
           }, 
           quantity,
           cartItemId: item.id
