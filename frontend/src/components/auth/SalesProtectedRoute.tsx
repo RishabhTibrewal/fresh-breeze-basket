@@ -7,15 +7,16 @@ interface SalesProtectedRouteProps {
 }
 
 const SalesProtectedRoute: React.FC<SalesProtectedRouteProps> = ({ children }) => {
-  const { user, role, isLoading } = useAuth();
+  const { user, isSales, isAdmin, isLoading, hasAnyRole } = useAuth();
 
   useEffect(() => {
     console.log('SalesProtectedRoute Debug:', {
       user: user?.id,
       isLoading,
-      role
+      isSales,
+      isAdmin
     });
-  }, [user, role, isLoading]);
+  }, [user, isSales, isAdmin, isLoading]);
 
   // Show loading state while auth is being checked
   if (isLoading) {
@@ -27,8 +28,9 @@ const SalesProtectedRoute: React.FC<SalesProtectedRouteProps> = ({ children }) =
     return <Navigate to="/auth" replace />;
   }
 
-  if (role !== 'sales') {
-    console.log('User role is not sales:', role);
+  // Check if user has sales role or admin role (admin override)
+  if (!hasAnyRole(['sales', 'admin'])) {
+    console.log('User does not have sales or admin role');
     return <Navigate to="/" replace />;
   }
 

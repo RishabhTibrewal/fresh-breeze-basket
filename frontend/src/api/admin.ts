@@ -7,7 +7,8 @@ export interface UserProfile {
   last_name: string | null;
   phone: string | null;
   avatar_url: string | null;
-  role: 'user' | 'admin' | 'sales';
+  role: 'user' | 'admin' | 'sales' | 'accounts'; // Backward compatibility - primary role
+  roles?: string[]; // New: array of roles
   created_at: string;
   updated_at: string;
 }
@@ -202,8 +203,29 @@ export const adminService = {
     return data;
   },
 
-  // Update user role
-  async updateUserRole(userId: string, role: 'user' | 'admin' | 'sales'): Promise<{ success: boolean; data: UserProfile; message: string }> {
+  // Get all available roles
+  async getAllRoles(): Promise<{ success: boolean; data: Array<{ id: string; name: string; description: string | null }> }> {
+    const { data } = await apiClient.get<{ success: boolean; data: Array<{ id: string; name: string; description: string | null }> }>('/admin/roles');
+    return data;
+  },
+
+  // Get user roles
+  async getUserRoles(userId: string): Promise<{ success: boolean; data: { userId: string; companyId: string; roles: string[] } }> {
+    const { data } = await apiClient.get<{ success: boolean; data: { userId: string; companyId: string; roles: string[] } }>(`/admin/users/${userId}/roles`);
+    return data;
+  },
+
+  // Update user roles (new: accepts roles array)
+  async updateUserRoles(userId: string, roles: string[]): Promise<{ success: boolean; data: { userId: string; companyId: string; roles: string[] }; message: string }> {
+    const { data } = await apiClient.put<{ success: boolean; data: { userId: string; companyId: string; roles: string[] }; message: string }>(
+      `/admin/users/${userId}/roles`,
+      { roles }
+    );
+    return data;
+  },
+
+  // Update user role (legacy: single role - kept for backward compatibility)
+  async updateUserRole(userId: string, role: 'user' | 'admin' | 'sales' | 'accounts'): Promise<{ success: boolean; data: UserProfile; message: string }> {
     const { data } = await apiClient.put<{ success: boolean; data: UserProfile; message: string }>(
       `/admin/users/${userId}/role`,
       { role }

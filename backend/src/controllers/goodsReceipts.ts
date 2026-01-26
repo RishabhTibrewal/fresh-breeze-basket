@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase';
-import { ApiError, ValidationError } from '../middleware/error';
+import { ApiError, ValidationError, AuthorizationError } from '../middleware/error';
 import { updateWarehouseStock } from '../utils/warehouseInventory';
+import { hasAnyRole, hasWarehouseAccess } from '../utils/roles';
 
 /**
  * Generate GRN number (e.g., GRN-2024-001)
@@ -84,22 +85,131 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
       throw new ApiError(404, 'Purchase order not found');
     }
 
+    // Validate warehouse access for warehouse managers
+    const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
+    if (!isAdmin) {
+      const hasAccess = await hasWarehouseAccess(userId, req.companyId, warehouse_id);
+      if (!hasAccess) {
+        throw new AuthorizationError('You do not have access to manage this warehouse');
+      }
+    }
+
     // Generate GRN number
     const grn_number = await generateGRNNumber(req.companyId);
 
-    // Calculate total received amount
+    // Fetch PO items to validate quantities
+    const { data: poItems, error: poItemsError } = await adminClient
+      .schema('procurement')
+      .from('purchase_order_items')
+      .select('id, quantity, received_quantity')
+      .eq('purchase_order_id', purchase_order_id)
+      .eq('company_id', req.companyId);
+
+    if (poItemsError) {
+      console.error('Error fetching PO items:', poItemsError);
+      throw new ApiError(500, 'Failed to fetch purchase order items');
+    }
+
+    const poItemsMap = new Map(poItems?.map((item: any) => [item.id, item]) || []);
+
+    // Fetch all existing GRNs for this PO (completed and pending) to calculate total received
+    const { data: existingGRNs, error: grnsError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipts')
+      .select('id, status')
+      .eq('purchase_order_id', purchase_order_id)
+      .eq('company_id', req.companyId)
+      .in('status', ['pending', 'inspected', 'completed']);
+
+    const existingGRNIds = existingGRNs?.map((grn: any) => grn.id) || [];
+    const completedGRNIds = existingGRNs?.filter((grn: any) => grn.status === 'completed').map((grn: any) => grn.id) || [];
+    const pendingGRNIds = existingGRNIds.filter((id: string) => !completedGRNIds.includes(id));
+    
+    let existingReceivedQuantities = new Map<string, number>();
+
+    if (existingGRNIds.length > 0) {
+      // For completed GRNs, use quantity_accepted (what was actually received and updated PO)
+      if (completedGRNIds.length > 0) {
+        const { data: completedGRNItems } = await adminClient
+          .schema('procurement')
+          .from('goods_receipt_items')
+          .select('purchase_order_item_id, quantity_accepted')
+          .in('goods_receipt_id', completedGRNIds)
+          .eq('company_id', req.companyId);
+
+        completedGRNItems?.forEach((grnItem: any) => {
+          const currentTotal = existingReceivedQuantities.get(grnItem.purchase_order_item_id) || 0;
+          existingReceivedQuantities.set(
+            grnItem.purchase_order_item_id,
+            currentTotal + (grnItem.quantity_accepted || 0)
+          );
+        });
+      }
+
+      // For pending/inspected GRNs, use quantity_received (what's planned to be received)
+      if (pendingGRNIds.length > 0) {
+        const { data: pendingGRNItems } = await adminClient
+          .schema('procurement')
+          .from('goods_receipt_items')
+          .select('purchase_order_item_id, quantity_received')
+          .in('goods_receipt_id', pendingGRNIds)
+          .eq('company_id', req.companyId);
+
+        pendingGRNItems?.forEach((grnItem: any) => {
+          const currentTotal = existingReceivedQuantities.get(grnItem.purchase_order_item_id) || 0;
+          existingReceivedQuantities.set(
+            grnItem.purchase_order_item_id,
+            currentTotal + (grnItem.quantity_received || 0)
+          );
+        });
+      }
+    }
+
+    // Calculate total received amount and validate quantities
     let total_received_amount = 0;
     for (const item of items) {
-      if (!item.purchase_order_item_id || !item.quantity_received || !item.unit_price) {
-        throw new ValidationError('Each item must have purchase_order_item_id, quantity_received, and unit_price');
+      if (!item.purchase_order_item_id) {
+        throw new ValidationError('Each item must have purchase_order_item_id');
       }
+      
+      if (item.quantity_received === undefined || item.quantity_received === null) {
+        throw new ValidationError('Each item must have quantity_received');
+      }
+      
+      if (item.quantity_received <= 0) {
+        throw new ValidationError('Each item must have quantity_received greater than 0');
+      }
+      
+      if (item.unit_price === undefined || item.unit_price === null || item.unit_price < 0) {
+        throw new ValidationError('Each item must have a valid unit_price (greater than or equal to 0)');
+      }
+
+      const poItem = poItemsMap.get(item.purchase_order_item_id);
+      if (!poItem) {
+        throw new ValidationError(`Purchase order item ${item.purchase_order_item_id} not found`);
+      }
+
+      const orderedQuantity = poItem.quantity || 0;
+      const alreadyReceived = existingReceivedQuantities.get(item.purchase_order_item_id) || 0;
+      const newReceived = item.quantity_received || 0;
+      const totalAfterThisGRN = alreadyReceived + newReceived;
+
+      if (totalAfterThisGRN > orderedQuantity) {
+        const available = orderedQuantity - alreadyReceived;
+        throw new ValidationError(
+          `Cannot receive ${newReceived} units for item ${item.purchase_order_item_id}. ` +
+          `Only ${available} units available (ordered: ${orderedQuantity}, already received: ${alreadyReceived})`
+        );
+      }
+
       const line_total = item.quantity_received * item.unit_price;
       total_received_amount += line_total;
     }
 
     // Create goods receipt
-    const { data: goodsReceipt, error: grnError } = await supabase
-      .from('procurement.goods_receipts')
+    const { data: goodsReceipt, error: grnError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipts')
       .insert({
         purchase_order_id,
         grn_number,
@@ -120,20 +230,46 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
       throw new ApiError(500, `Failed to create goods receipt: ${grnError.message}`);
     }
 
-    // Create goods receipt items
-    const receiptItems = items.map((item: any) => ({
-      goods_receipt_id: goodsReceipt.id,
-      purchase_order_item_id: item.purchase_order_item_id,
-      product_id: item.product_id,
-      quantity_received: item.quantity_received,
-      quantity_accepted: item.quantity_accepted || item.quantity_received,
-      quantity_rejected: item.quantity_rejected || 0,
-      unit_price: item.unit_price,
-      batch_number: item.batch_number,
-      expiry_date: item.expiry_date,
-      condition_notes: item.condition_notes,
-      company_id: req.companyId
-    }));
+    // Fetch product details for all items
+    const productIds = items.map((item: any) => item.product_id).filter(Boolean);
+    let productsMap = new Map();
+    
+    if (productIds.length > 0) {
+      const { data: products, error: productsError } = await adminClient
+        .from('products')
+        .select('id, unit_type, product_code, hsn_code, tax')
+        .in('id', productIds)
+        .eq('company_id', req.companyId);
+
+      if (productsError) {
+        console.error('Error fetching products:', productsError);
+        throw new ApiError(500, 'Failed to fetch product details');
+      }
+
+      productsMap = new Map(products?.map((p: any) => [p.id, p]) || []);
+    }
+
+    // Create goods receipt items with product details
+    const receiptItems = items.map((item: any) => {
+      const product = productsMap.get(item.product_id);
+      return {
+        goods_receipt_id: goodsReceipt.id,
+        purchase_order_item_id: item.purchase_order_item_id,
+        product_id: item.product_id,
+        quantity_received: item.quantity_received,
+        quantity_accepted: item.quantity_accepted || item.quantity_received,
+        quantity_rejected: item.quantity_rejected || 0,
+        unit_price: item.unit_price,
+        batch_number: item.batch_number,
+        expiry_date: item.expiry_date,
+        condition_notes: item.condition_notes,
+        unit: product?.unit_type || 'piece',
+        product_code: product?.product_code || '',
+        hsn_code: product?.hsn_code || '',
+        tax_percentage: product?.tax || 0,
+        company_id: req.companyId
+      };
+    });
 
     const { data: createdItems, error: itemsError } = await adminClient
       .schema('procurement')
@@ -150,6 +286,20 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
         .eq('id', goodsReceipt.id)
         .eq('company_id', req.companyId);
       throw new ApiError(500, `Failed to create goods receipt items: ${itemsError.message}`);
+    }
+
+    // Auto-update PO status to 'ordered' if PO is approved (GRN can only be created for approved/ordered/partially_received POs)
+    // This ensures PO status reflects that goods have been ordered from supplier
+    if (purchaseOrder.status === 'approved') {
+      await adminClient
+        .schema('procurement')
+        .from('purchase_orders')
+        .update({
+          status: 'ordered',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', purchase_order_id)
+        .eq('company_id', req.companyId);
     }
 
     // Return the created goods receipt with items
@@ -385,8 +535,10 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
     if (status !== undefined) updateData.status = status;
     if (inspected_by !== undefined) updateData.inspected_by = inspected_by;
 
-    const { data: goodsReceipt, error: updateError } = await supabase
-      .from('procurement.goods_receipts')
+    const adminClient = supabaseAdmin || supabase;
+    const { data: goodsReceipt, error: updateError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipts')
       .update(updateData)
       .eq('id', id)
       .eq('company_id', req.companyId)
@@ -403,29 +555,57 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
 
     // Update items if provided
     if (items && Array.isArray(items)) {
-      await supabase
-        .from('procurement.goods_receipt_items')
+      await adminClient
+        .schema('procurement')
+        .from('goods_receipt_items')
         .delete()
         .eq('goods_receipt_id', id)
         .eq('company_id', req.companyId);
 
       if (items.length > 0) {
-        const receiptItems = items.map((item: any) => ({
-          goods_receipt_id: id,
-          purchase_order_item_id: item.purchase_order_item_id,
-          product_id: item.product_id,
-          quantity_received: item.quantity_received,
-          quantity_accepted: item.quantity_accepted || item.quantity_received,
-          quantity_rejected: item.quantity_rejected || 0,
-          unit_price: item.unit_price,
-          batch_number: item.batch_number,
-          expiry_date: item.expiry_date,
-          condition_notes: item.condition_notes,
-          company_id: req.companyId
-        }));
+        // Fetch product details for all items
+        const productIds = items.map((item: any) => item.product_id).filter(Boolean);
+        let productsMap = new Map();
+        
+        if (productIds.length > 0) {
+          const { data: products, error: productsError } = await adminClient
+            .from('products')
+            .select('id, unit_type, product_code, hsn_code, tax')
+            .in('id', productIds)
+            .eq('company_id', req.companyId);
 
-        const { error: itemsError } = await supabase
-          .from('procurement.goods_receipt_items')
+          if (productsError) {
+            console.error('Error fetching products:', productsError);
+            throw new ApiError(500, 'Failed to fetch product details');
+          }
+
+          productsMap = new Map(products?.map((p: any) => [p.id, p]) || []);
+        }
+
+        const receiptItems = items.map((item: any) => {
+          const product = productsMap.get(item.product_id);
+          return {
+            goods_receipt_id: id,
+            purchase_order_item_id: item.purchase_order_item_id,
+            product_id: item.product_id,
+            quantity_received: item.quantity_received,
+            quantity_accepted: item.quantity_accepted || item.quantity_received,
+            quantity_rejected: item.quantity_rejected || 0,
+            unit_price: item.unit_price,
+            batch_number: item.batch_number,
+            expiry_date: item.expiry_date,
+            condition_notes: item.condition_notes,
+            unit: product?.unit_type || 'piece',
+            product_code: product?.product_code || '',
+            hsn_code: product?.hsn_code || '',
+            tax_percentage: product?.tax || 0,
+            company_id: req.companyId
+          };
+        });
+
+        const { error: itemsError } = await adminClient
+          .schema('procurement')
+          .from('goods_receipt_items')
           .insert(receiptItems);
 
         if (itemsError) {
@@ -439,16 +619,18 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
           total_received_amount += item.quantity_received * item.unit_price;
         }
 
-        await supabase
-          .from('procurement.goods_receipts')
+        await adminClient
+          .schema('procurement')
+          .from('goods_receipts')
           .update({ total_received_amount })
           .eq('id', id)
           .eq('company_id', req.companyId);
       }
     }
 
-    const { data: completeGRN, error: fetchError } = await supabase
-      .from('procurement.goods_receipts')
+    const { data: completeGRN, error: fetchError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipts')
       .select(`
         *,
         procurement.purchase_orders (*),
@@ -493,8 +675,10 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
     }
 
     // Get goods receipt
-    const { data: goodsReceipt, error: grnError } = await supabase
-      .from('procurement.goods_receipts')
+    const adminClient = supabaseAdmin || supabase;
+    const { data: goodsReceipt, error: grnError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipts')
       .select('*')
       .eq('id', id)
       .eq('company_id', req.companyId)
@@ -504,11 +688,108 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
       throw new ApiError(404, 'Goods receipt not found');
     }
 
+    // Fetch PO items to calculate remaining quantities
+    const { data: poItems } = await adminClient
+      .schema('procurement')
+      .from('purchase_order_items')
+      .select('id, quantity, received_quantity')
+      .eq('purchase_order_id', goodsReceipt.purchase_order_id)
+      .eq('company_id', req.companyId);
+
+    const poItemsMap = new Map(poItems?.map((item: any) => [item.id, item]) || []);
+
+    // Calculate what the received quantities will be after completing this GRN
+    const quantitiesToAdd = new Map<string, number>();
+    
+    for (const item of items) {
+      const { purchase_order_item_id, quantity_accepted } = item;
+      if (purchase_order_item_id && quantity_accepted > 0) {
+        const current = quantitiesToAdd.get(purchase_order_item_id) || 0;
+        quantitiesToAdd.set(purchase_order_item_id, current + quantity_accepted);
+      }
+    }
+
+    // Before updating PO items, check and adjust pending GRNs if needed
+    if (goodsReceipt.purchase_order_id) {
+      // Fetch all pending GRNs for this PO (excluding the one being completed)
+      const { data: pendingGRNs } = await adminClient
+        .schema('procurement')
+        .from('goods_receipts')
+        .select('id')
+        .eq('purchase_order_id', goodsReceipt.purchase_order_id)
+        .eq('company_id', req.companyId)
+        .in('status', ['pending', 'inspected'])
+        .neq('id', id);
+
+      if (pendingGRNs && pendingGRNs.length > 0) {
+        const pendingGRNIds = pendingGRNs.map((grn: any) => grn.id);
+        
+        // Fetch all items from pending GRNs
+        const { data: pendingGRNItems } = await adminClient
+          .schema('procurement')
+          .from('goods_receipt_items')
+          .select('id, goods_receipt_id, purchase_order_item_id, quantity_received')
+          .in('goods_receipt_id', pendingGRNIds)
+          .eq('company_id', req.companyId);
+
+        // For each PO item, calculate remaining quantity after this GRN completion and adjust pending GRN items
+        for (const [poItemId, poItem] of poItemsMap.entries()) {
+          const orderedQuantity = poItem.quantity || 0;
+          const currentReceived = poItem.received_quantity || 0;
+          const quantityToAdd = quantitiesToAdd.get(poItemId) || 0;
+          const totalReceivedAfterThisGRN = currentReceived + quantityToAdd;
+          const remainingQuantity = Math.max(0, orderedQuantity - totalReceivedAfterThisGRN);
+
+          // Find all pending GRN items for this PO item
+          const pendingItemsForPOItem = pendingGRNItems?.filter(
+            (grnItem: any) => grnItem.purchase_order_item_id === poItemId
+          ) || [];
+
+          // Calculate total quantity in pending GRNs for this PO item
+          const totalPendingQuantity = pendingItemsForPOItem.reduce(
+            (sum: number, item: any) => sum + (item.quantity_received || 0),
+            0
+          );
+
+          // If pending GRNs exceed remaining quantity, adjust them to fit within remaining quantity
+          if (totalPendingQuantity > remainingQuantity && remainingQuantity >= 0) {
+            // Update each pending GRN item proportionally to fit within remaining quantity
+            for (const pendingItem of pendingItemsForPOItem) {
+              const currentQuantity = pendingItem.quantity_received || 0;
+              if (currentQuantity > 0 && totalPendingQuantity > 0) {
+                // Calculate proportional reduction
+                const ratio = remainingQuantity / totalPendingQuantity;
+                const adjustedQuantity = Math.floor(currentQuantity * ratio);
+                
+                // Only update if the quantity changed
+                if (adjustedQuantity !== currentQuantity) {
+                  await adminClient
+                    .schema('procurement')
+                    .from('goods_receipt_items')
+                    .update({ quantity_received: adjustedQuantity })
+                    .eq('id', pendingItem.id)
+                    .eq('company_id', req.companyId);
+                }
+              } else if (remainingQuantity === 0) {
+                // If no remaining quantity, set pending items to 0
+                await adminClient
+                  .schema('procurement')
+                  .from('goods_receipt_items')
+                  .update({ quantity_received: 0 })
+                  .eq('id', pendingItem.id)
+                  .eq('company_id', req.companyId);
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Update items and warehouse inventory
     for (const item of items) {
-      const { product_id, quantity_accepted, warehouse_id } = item;
+      const { product_id, quantity_accepted, warehouse_id, purchase_order_item_id } = item;
 
-      if (!product_id || !quantity_accepted || !warehouse_id) {
+      if (!product_id || !quantity_accepted || !warehouse_id || !purchase_order_item_id) {
         continue; // Skip invalid items
       }
 
@@ -528,26 +809,29 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
       }
 
       // Update received quantity in purchase order item
-      const { data: poiData } = await supabase
-        .from('procurement.purchase_order_items')
+      const { data: poiData } = await adminClient
+        .schema('procurement')
+        .from('purchase_order_items')
         .select('received_quantity')
-        .eq('id', item.purchase_order_item_id)
+        .eq('id', purchase_order_item_id)
         .eq('company_id', req.companyId)
         .single();
 
       if (poiData) {
         const newReceivedQuantity = (poiData.received_quantity || 0) + quantity_accepted;
-        await supabase
-          .from('procurement.purchase_order_items')
+        await adminClient
+          .schema('procurement')
+          .from('purchase_order_items')
           .update({ received_quantity: newReceivedQuantity })
-          .eq('id', item.purchase_order_item_id)
+          .eq('id', purchase_order_item_id)
           .eq('company_id', req.companyId);
       }
     }
 
     // Update GRN status to completed
-    const { data: updatedGRN, error: updateError } = await supabase
-      .from('procurement.goods_receipts')
+    const { data: updatedGRN, error: updateError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipts')
       .update({
         status: 'completed',
         updated_at: new Date().toISOString()
@@ -560,6 +844,42 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
     if (updateError) {
       console.error('Error updating GRN status:', updateError);
       throw new ApiError(500, 'Failed to update GRN status');
+    }
+
+    // Auto-update PO status based on received quantities
+    if (goodsReceipt.purchase_order_id) {
+      const { data: poItems } = await adminClient
+        .schema('procurement')
+        .from('purchase_order_items')
+        .select('quantity, received_quantity')
+        .eq('purchase_order_id', goodsReceipt.purchase_order_id)
+        .eq('company_id', req.companyId);
+
+      if (poItems && poItems.length > 0) {
+        const allFullyReceived = poItems.every((item: any) => 
+          item.received_quantity >= item.quantity
+        );
+        const anyPartiallyReceived = poItems.some((item: any) => 
+          item.received_quantity > 0 && item.received_quantity < item.quantity
+        );
+
+        let newPOStatus = 'ordered';
+        if (allFullyReceived) {
+          newPOStatus = 'received';
+        } else if (anyPartiallyReceived) {
+          newPOStatus = 'partially_received';
+        }
+
+        await adminClient
+          .schema('procurement')
+          .from('purchase_orders')
+          .update({
+            status: newPOStatus,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', goodsReceipt.purchase_order_id)
+          .eq('company_id', req.companyId);
+      }
     }
 
     res.json({
@@ -583,8 +903,10 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
       throw new ApiError(400, 'Company context is required');
     }
 
-    const { data: goodsReceipt, error: grnError } = await supabase
-      .from('procurement.goods_receipts')
+    const adminClient = supabaseAdmin || supabase;
+    const { data: goodsReceipt, error: grnError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipts')
       .select('*')
       .eq('id', id)
       .eq('company_id', req.companyId)
@@ -595,8 +917,9 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
     }
 
     // Fetch goods receipt items separately to avoid type issues
-    const { data: items, error: itemsError } = await supabase
-      .from('procurement.goods_receipt_items')
+    const { data: items, error: itemsError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipt_items')
       .select('*')
       .eq('goods_receipt_id', id)
       .eq('company_id', req.companyId);
@@ -606,8 +929,104 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
       throw new ApiError(500, 'Failed to fetch goods receipt items');
     }
 
-    // Update warehouse inventory for all accepted items
+    // Fetch PO items to calculate remaining quantities
+    const { data: poItems } = await adminClient
+      .schema('procurement')
+      .from('purchase_order_items')
+      .select('id, quantity, received_quantity')
+      .eq('purchase_order_id', goodsReceipt.purchase_order_id)
+      .eq('company_id', req.companyId);
+
+    const poItemsMap = new Map(poItems?.map((item: any) => [item.id, item]) || []);
+
+    // Calculate what the received quantities will be after completing this GRN
     const itemsList = items || [];
+    const quantitiesToAdd = new Map<string, number>();
+    
+    for (const item of itemsList) {
+      if (item.quantity_accepted > 0) {
+        const current = quantitiesToAdd.get(item.purchase_order_item_id) || 0;
+        quantitiesToAdd.set(item.purchase_order_item_id, current + item.quantity_accepted);
+      }
+    }
+
+    // Before updating PO items, check and adjust pending GRNs if needed
+    if (goodsReceipt.purchase_order_id) {
+      // Fetch all pending GRNs for this PO (excluding the one being completed)
+      const { data: pendingGRNs } = await adminClient
+        .schema('procurement')
+        .from('goods_receipts')
+        .select('id')
+        .eq('purchase_order_id', goodsReceipt.purchase_order_id)
+        .eq('company_id', req.companyId)
+        .in('status', ['pending', 'inspected'])
+        .neq('id', id);
+
+      if (pendingGRNs && pendingGRNs.length > 0) {
+        const pendingGRNIds = pendingGRNs.map((grn: any) => grn.id);
+        
+        // Fetch all items from pending GRNs
+        const { data: pendingGRNItems } = await adminClient
+          .schema('procurement')
+          .from('goods_receipt_items')
+          .select('id, goods_receipt_id, purchase_order_item_id, quantity_received')
+          .in('goods_receipt_id', pendingGRNIds)
+          .eq('company_id', req.companyId);
+
+        // For each PO item, calculate remaining quantity after this GRN completion and adjust pending GRN items
+        for (const [poItemId, poItem] of poItemsMap.entries()) {
+          const orderedQuantity = poItem.quantity || 0;
+          const currentReceived = poItem.received_quantity || 0;
+          const quantityToAdd = quantitiesToAdd.get(poItemId) || 0;
+          const totalReceivedAfterThisGRN = currentReceived + quantityToAdd;
+          const remainingQuantity = Math.max(0, orderedQuantity - totalReceivedAfterThisGRN);
+
+          // Find all pending GRN items for this PO item
+          const pendingItemsForPOItem = pendingGRNItems?.filter(
+            (grnItem: any) => grnItem.purchase_order_item_id === poItemId
+          ) || [];
+
+          // Calculate total quantity in pending GRNs for this PO item
+          const totalPendingQuantity = pendingItemsForPOItem.reduce(
+            (sum: number, item: any) => sum + (item.quantity_received || 0),
+            0
+          );
+
+          // If pending GRNs exceed remaining quantity, adjust them to fit within remaining quantity
+          if (totalPendingQuantity > remainingQuantity && remainingQuantity >= 0) {
+            // Update each pending GRN item proportionally to fit within remaining quantity
+            for (const pendingItem of pendingItemsForPOItem) {
+              const currentQuantity = pendingItem.quantity_received || 0;
+              if (currentQuantity > 0 && totalPendingQuantity > 0) {
+                // Calculate proportional reduction
+                const ratio = remainingQuantity / totalPendingQuantity;
+                const adjustedQuantity = Math.floor(currentQuantity * ratio);
+                
+                // Only update if the quantity changed
+                if (adjustedQuantity !== currentQuantity) {
+                  await adminClient
+                    .schema('procurement')
+                    .from('goods_receipt_items')
+                    .update({ quantity_received: adjustedQuantity })
+                    .eq('id', pendingItem.id)
+                    .eq('company_id', req.companyId);
+                }
+              } else if (remainingQuantity === 0) {
+                // If no remaining quantity, set pending items to 0
+                await adminClient
+                  .schema('procurement')
+                  .from('goods_receipt_items')
+                  .update({ quantity_received: 0 })
+                  .eq('id', pendingItem.id)
+                  .eq('company_id', req.companyId);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Update warehouse inventory for all accepted items and update PO received quantities
     for (const item of itemsList) {
       if (item.quantity_accepted > 0) {
         try {
@@ -624,8 +1043,9 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
         }
 
         // Update received quantity in purchase order item
-        const { data: poiData } = await supabase
-          .from('procurement.purchase_order_items')
+        const { data: poiData } = await adminClient
+          .schema('procurement')
+          .from('purchase_order_items')
           .select('received_quantity')
           .eq('id', item.purchase_order_item_id)
           .eq('company_id', req.companyId)
@@ -633,8 +1053,10 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
 
         if (poiData) {
           const newReceivedQuantity = (poiData.received_quantity || 0) + item.quantity_accepted;
-          await supabase
-            .from('procurement.purchase_order_items')
+          
+          await adminClient
+            .schema('procurement')
+            .from('purchase_order_items')
             .update({ received_quantity: newReceivedQuantity })
             .eq('id', item.purchase_order_item_id)
             .eq('company_id', req.companyId);
@@ -643,8 +1065,9 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
     }
 
     // Update GRN status
-    const { data: updatedGRN, error: updateError } = await supabase
-      .from('procurement.goods_receipts')
+    const { data: updatedGRN, error: updateError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipts')
       .update({
         status: 'completed',
         updated_at: new Date().toISOString()
@@ -657,6 +1080,42 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
     if (updateError) {
       console.error('Error completing GRN:', updateError);
       throw new ApiError(500, 'Failed to complete goods receipt');
+    }
+
+    // Auto-update PO status based on received quantities
+    if (goodsReceipt.purchase_order_id) {
+      const { data: poItems } = await adminClient
+        .schema('procurement')
+        .from('purchase_order_items')
+        .select('quantity, received_quantity')
+        .eq('purchase_order_id', goodsReceipt.purchase_order_id)
+        .eq('company_id', req.companyId);
+
+      if (poItems && poItems.length > 0) {
+        const allFullyReceived = poItems.every((item: any) => 
+          item.received_quantity >= item.quantity
+        );
+        const anyPartiallyReceived = poItems.some((item: any) => 
+          item.received_quantity > 0 && item.received_quantity < item.quantity
+        );
+
+        let newPOStatus = 'ordered';
+        if (allFullyReceived) {
+          newPOStatus = 'received';
+        } else if (anyPartiallyReceived) {
+          newPOStatus = 'partially_received';
+        }
+
+        await adminClient
+          .schema('procurement')
+          .from('purchase_orders')
+          .update({
+            status: newPOStatus,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', goodsReceipt.purchase_order_id)
+          .eq('company_id', req.companyId);
+      }
     }
 
     res.json({

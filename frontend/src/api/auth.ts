@@ -13,7 +13,8 @@ export interface UserProfile {
   id: string;
   email: string;
   name: string;
-  role: string;
+  role: string; // Backward compatibility - primary role
+  roles?: string[]; // New: array of roles
   phone?: string;
   address?: string;
   city?: string;
@@ -32,7 +33,8 @@ export interface UpdateProfileData {
 }
 
 export interface UpdateRoleData {
-  role: 'user' | 'admin' | 'sales';
+  role: 'user' | 'admin' | 'sales' | 'accounts'; // Legacy: single role
+  roles?: string[]; // New: array of roles
 }
 
 export interface AuthResponse {

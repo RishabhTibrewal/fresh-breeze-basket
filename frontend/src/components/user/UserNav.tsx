@@ -13,7 +13,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { LogOut, User, ShoppingBag, Settings, LayoutDashboard } from 'lucide-react';
 
 export function UserNav() {
-  const { user, profile, signOut, isAdmin, role } = useAuth();
+  const { user, profile, signOut, isAdmin, isSales, isAccounts, hasAnyRole } = useAuth();
   
   const initials = profile?.first_name && profile?.last_name 
     ? `${profile.first_name[0]}${profile.last_name[0]}`.toUpperCase()
@@ -79,11 +79,19 @@ export function UserNav() {
             </Link>
           </DropdownMenuItem>
         )}
-        {role === 'sales' && (
+        {hasAnyRole(['sales', 'admin']) && (
           <DropdownMenuItem asChild>
             <Link to="/sales" className="flex items-center">
               <LayoutDashboard className="mr-2 h-4 w-4" />
               <span>Sales Dashboard</span>
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {hasAnyRole(['accounts', 'admin']) && (
+          <DropdownMenuItem asChild>
+            <Link to="/accounts" className="flex items-center">
+              <LayoutDashboard className="mr-2 h-4 w-4" />
+              <span>Accounts Dashboard</span>
             </Link>
           </DropdownMenuItem>
         )}

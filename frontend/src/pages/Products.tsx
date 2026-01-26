@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Filter, SlidersHorizontal, Search, X } from 'lucide-react';
 import { productsService } from '@/api/products';
 import { categoriesService } from '@/api/categories';
+import { warehousesService } from '@/api/warehouses';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import ProductCard from '@/components/products/ProductCard';
@@ -96,6 +97,17 @@ export default function Products() {
   const { data: products, isLoading: isLoadingProducts, error: productsError } = useQuery({
     queryKey: ['products'],
     queryFn: productsService.getAll,
+  });
+
+  // Fetch bulk stock data for all products to avoid individual API calls
+  const { data: bulkStockData = {} } = useQuery({
+    queryKey: ['bulk-product-stock', products?.map(p => p.id).join(',')],
+    queryFn: () => {
+      if (!products || products.length === 0) return {};
+      return warehousesService.getBulkProductStock(products.map(p => p.id));
+    },
+    enabled: !!products && products.length > 0,
+    staleTime: 30000, // Cache for 30 seconds
   });
 
   // Set max price based on the highest product price
@@ -405,7 +417,11 @@ export default function Products() {
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
                     {sortedProducts.map((product) => (
-                      <ProductCard key={product.id} product={product} />
+                      <ProductCard 
+                        key={product.id} 
+                        product={product}
+                        bulkStockData={bulkStockData[product.id] as { warehouses: any[], total_stock: number } | undefined}
+                      />
                     ))}
                   </div>
                 </>

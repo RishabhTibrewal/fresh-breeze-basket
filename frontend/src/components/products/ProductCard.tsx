@@ -9,18 +9,22 @@ import { toast } from '@/hooks/use-toast';
 
 interface ProductCardProps {
   product: Product;
+  bulkStockData?: { warehouses: any[], total_stock: number };
 }
 
-const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
+const ProductCard: React.FC<ProductCardProps> = ({ product, bulkStockData }) => {
   const { state: cartState, addToCart, updateQuantity } = useCart();
   
   const cartItem = cartState.items.find(item => item.id === product.id);
   const quantityInCart = cartItem ? cartItem.quantity : 0;
 
+  // Use ONLY warehouse inventory stock - no fallback to product.stock_count
+  const actualStock = bulkStockData?.total_stock ?? 0;
+
   const handleInitialAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (product.stock_count > 0) {
+    if (actualStock > 0) {
       addToCart(product, 1);
       toast({ title: "Added to Cart", description: `1 x ${product.name} added.` });
     } else {
@@ -46,8 +50,8 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     e.preventDefault();
     e.stopPropagation();
     if (cartItem && product) {
-      if (cartItem.quantity + 1 > product.stock_count) {
-        toast({ title: "Not Enough Stock", description: `Only ${product.stock_count} items available.`, variant: "destructive" });
+      if (cartItem.quantity + 1 > actualStock) {
+        toast({ title: "Not Enough Stock", description: `Only ${actualStock} items available.`, variant: "destructive" });
         return;
       }
       updateQuantity(product.id, cartItem.quantity + 1);
@@ -96,7 +100,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             )}
           </div>
           
-          {product.stock_count > 0 ? (
+          {actualStock > 0 ? (
             quantityInCart === 0 ? (
               <div className="flex space-x-1.5">
                 <button 
@@ -124,7 +128,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
                   <button 
                     onClick={handleIncreaseQuantity}
                     className="w-8 h-8 flex items-center justify-center hover:bg-gray-50 border-l text-primary disabled:text-gray-400"
-                    disabled={quantityInCart >= product.stock_count}
+                    disabled={quantityInCart >= actualStock}
                   >
                     <Plus className="h-3 w-3" />
                   </button>

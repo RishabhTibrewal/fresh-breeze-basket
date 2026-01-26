@@ -10,8 +10,10 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { adminService, DashboardStats } from '@/api/admin';
+import { warehousesService } from '@/api/warehouses';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCurrency } from '@/lib/utils';
+import { useQuery } from '@tanstack/react-query';
 
 const AdminHome = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -35,6 +37,35 @@ const AdminHome = () => {
 
     fetchDashboardStats();
   }, []);
+
+  // Fetch bulk stock data for low inventory items
+  const productIdsForStock = stats?.low_inventory?.map(item => item.id) || [];
+  const { data: lowInventoryStockData = {}, isLoading: isLoadingStock, error: stockError } = useQuery({
+    queryKey: ['bulk-product-stock-low-inventory', productIdsForStock.join(',')],
+    queryFn: async () => {
+      if (!stats?.low_inventory || stats.low_inventory.length === 0) return {};
+      const productIds = stats.low_inventory.map(item => item.id);
+      if (productIds.length === 0) return {};
+      try {
+        const result = await warehousesService.getBulkProductStock(productIds);
+        console.log('Bulk stock data fetched:', result);
+        return result;
+      } catch (error) {
+        console.error('Error fetching bulk stock:', error);
+        return {};
+      }
+    },
+    enabled: !loading && productIdsForStock.length > 0,
+    staleTime: 30000, // Cache for 30 seconds
+  });
+
+  // Debug logging
+  useEffect(() => {
+    if (stats?.low_inventory && lowInventoryStockData) {
+      console.log('Low inventory items:', stats.low_inventory.map(item => ({ id: item.id, name: item.name })));
+      console.log('Stock data:', lowInventoryStockData);
+    }
+  }, [stats?.low_inventory, lowInventoryStockData]);
 
   // Format customer name helper
   const formatCustomerName = (order: any) => {
@@ -227,18 +258,37 @@ const AdminHome = () => {
               </div>
             ) : stats?.low_inventory && stats.low_inventory.length > 0 ? (
               <div className="space-y-4">
-                {stats.low_inventory.map((item, i) => (
-                  <div key={i} className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0">
-                    <div>
-                      <div className="font-medium">{item.name}</div>
-                      <div className="text-sm text-muted-foreground">{item.categories?.name || 'Uncategorized'}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-medium">{item.stock_count} units</div>
-                      <div className="text-sm text-red-500">Low Stock</div>
-                    </div>
-                  </div>
-                ))}
+                {isLoadingStock ? (
+                  <div className="text-center py-4 text-muted-foreground text-sm">Loading stock data...</div>
+                ) : stockError ? (
+                  <div className="text-center py-4 text-red-500 text-sm">Error loading stock data</div>
+                ) : (
+                  stats.low_inventory.map((item, i) => {
+                    // Use ONLY warehouse inventory stock - no fallback to product.stock_count
+                    const stockData = lowInventoryStockData[item.id] as { warehouses: any[], total_stock: number } | undefined;
+                    const actualStock = stockData?.total_stock ?? 0;
+                    
+                    // Debug: Log if stock is 0 but we expect it to have stock
+                    if (actualStock === 0 && stockData === undefined) {
+                      console.warn(`Product ${item.name} (${item.id}) has no warehouse inventory data`);
+                    }
+                    
+                    return (
+                      <div key={i} className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0">
+                        <div>
+                          <div className="font-medium">{item.name}</div>
+                          <div className="text-sm text-muted-foreground">{item.categories?.name || 'Uncategorized'}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-medium">{actualStock} units</div>
+                          <div className={`text-sm ${actualStock === 0 ? 'text-red-500' : actualStock <= 5 ? 'text-orange-500' : 'text-green-500'}`}>
+                            {actualStock === 0 ? 'Out of Stock' : actualStock <= 5 ? 'Low Stock' : 'In Stock'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             ) : (
               <div className="text-center py-6 text-muted-foreground">

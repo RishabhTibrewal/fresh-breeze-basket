@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { ApiError } from '../middleware/error';
 import { stripeClient } from '../config';
 import { scheduleOrderProcessing } from '../utils/orderScheduler';
+import { hasAnyRole } from '../utils/roles';
 
 // Get all orders (admin only)
 export const getOrders = async (req: Request, res: Response) => {
@@ -14,9 +15,9 @@ export const getOrders = async (req: Request, res: Response) => {
     // Log to help with debugging
     console.log('getOrders for user ID:', userId);
     
-    // Use role from middleware (already resolved from memberships)
-    // Note: This endpoint is protected by adminOnly middleware, so req.user.role should be 'admin'
-    const isAdmin = req.user.role === 'admin';
+    // Check if user has admin role using new role system
+    // Note: This endpoint is protected by adminOnly middleware, but double-check here
+    const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
     
     if (!isAdmin) {
       console.error('Non-admin user attempting to access all orders');
@@ -161,9 +162,9 @@ export const getOrderById = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Company context is required' });
     }
     
-    // Use role from middleware (already resolved from memberships)
-    const isAdmin = req.user.role === 'admin';
-    const isSales = req.user.role === 'sales';
+    // Check roles using new role system
+    const isAdmin = await hasAnyRole(req.user.id, req.companyId, ['admin']);
+    const isSales = await hasAnyRole(req.user.id, req.companyId, ['sales']);
     
     console.log('User admin status:', isAdmin, 'User sales status:', isSales);
     
@@ -714,9 +715,9 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     } = req.body;
     const userId = req.user.id;
     
-    // Use role from middleware (already resolved from memberships)
-    const isAdmin = req.user.role === 'admin';
-    const isSales = req.user.role === 'sales';
+    // Check roles using new role system
+    const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
+    const isSales = await hasAnyRole(userId, req.companyId, ['sales']);
     
     // Only allow admins and sales executives to update orders
     if (!isAdmin && !isSales) {

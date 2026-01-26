@@ -62,6 +62,11 @@ const formSchema = z.object({
   best_before: z.string().optional(),
   is_featured: z.boolean().default(false),
   is_active: z.boolean().default(true),
+  product_code: z.string().optional().nullable(),
+  hsn_code: z.string().optional().nullable(),
+  tax: z.string().optional().nullable().refine((val) => !val || (!isNaN(parseFloat(val)) && parseFloat(val) >= 0 && parseFloat(val) <= 100), {
+    message: "Tax must be a valid number between 0 and 100",
+  }),
 });
 
 type FormSchema = z.infer<typeof formSchema>;
@@ -191,6 +196,9 @@ export default function ProductForm() {
         best_before: product.best_before || "",
         is_featured: product.is_featured,
         is_active: product.is_active,
+        product_code: product.product_code || "",
+        hsn_code: product.hsn_code || "",
+        tax: product.tax?.toString() || "",
       });
       setImageUrl(product.image_url);
       setAdditionalImages(product.additional_images || []);
@@ -247,7 +255,10 @@ export default function ProductForm() {
         best_before: data.best_before || null,
         is_featured: Boolean(data.is_featured),
         is_active: Boolean(data.is_active),
-        slug
+        slug,
+        product_code: data.product_code || null,
+        hsn_code: data.hsn_code || null,
+        tax: data.tax || null,
       };
 
       console.log("Sending product data to API:", productData);
@@ -297,7 +308,10 @@ export default function ProductForm() {
             best_before: productData.best_before,
             is_featured: productData.is_featured,
             is_active: productData.is_active,
-            slug: productData.slug
+            slug: productData.slug,
+            product_code: productData.product_code,
+            hsn_code: productData.hsn_code,
+            tax: productData.tax
           });
           
           // Update form and state with the real URL
@@ -610,6 +624,67 @@ export default function ProductForm() {
                             ))}
                           </SelectContent>
                         </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="product_code"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Product Code</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="e.g. PROD-001" />
+                        </FormControl>
+                        <FormDescription>
+                          Unique product code/SKU
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="hsn_code"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>HSN Code</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="e.g. 12345678" />
+                        </FormControl>
+                        <FormDescription>
+                          Harmonized System of Nomenclature code
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="tax"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tax (%)</FormLabel>
+                        <FormControl>
+                          <Input 
+                            {...field} 
+                            type="number" 
+                            step="0.01" 
+                            min="0"
+                            max="100"
+                            placeholder="e.g. 5.00"
+                            onChange={(e) => field.onChange(e.target.value)}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Tax percentage (0-100)
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}

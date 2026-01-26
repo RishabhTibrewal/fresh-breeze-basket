@@ -5,17 +5,22 @@ import {
   getSupplierPaymentById,
   updateSupplierPayment
 } from '../controllers/supplierPayments';
-import { protect, adminOnly } from '../middleware/auth';
+import { protect, requireAccounts, adminOnly } from '../middleware/auth';
+import {
+  validatePaymentAmount,
+  validatePaymentAmountUpdate,
+  validatePaymentStatusTransition
+} from '../middleware/procurementValidation';
 
 const router = express.Router();
 
 // All routes require authentication
 router.use(protect);
 
-// Admin only routes
-router.post('/', adminOnly, createSupplierPayment);
+// Accounts or admin can create/update payments
+router.post('/', requireAccounts, validatePaymentAmount, createSupplierPayment);
 router.get('/', getSupplierPayments);
 router.get('/:id', getSupplierPaymentById);
-router.put('/:id', adminOnly, updateSupplierPayment);
+router.put('/:id', requireAccounts, validatePaymentAmountUpdate, validatePaymentStatusTransition, updateSupplierPayment);
 
 export default router;

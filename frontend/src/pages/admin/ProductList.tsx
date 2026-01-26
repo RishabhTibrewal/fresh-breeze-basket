@@ -158,25 +158,32 @@ export default function ProductList() {
                   <TableCell>
                     <WarehouseStockDisplay
                       productId={product.id}
-                      totalStock={product.stock_count}
                       compact={true}
                       bulkStockData={bulkStockData[product.id] as { warehouses: any[], total_stock: number } | undefined}
                     />
                   </TableCell>
                   <TableCell>
-                    <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      (product.stock_count || 0) > 10 
-                        ? 'bg-green-100 text-green-800' 
-                        : (product.stock_count || 0) > 0 
-                          ? 'bg-yellow-100 text-yellow-800' 
-                          : 'bg-red-100 text-red-800'
-                    }`}>
-                      {(product.stock_count || 0) > 10 
-                        ? 'In Stock' 
-                        : (product.stock_count || 0) > 0 
-                          ? 'Low Stock' 
-                          : 'Out of Stock'}
-                    </div>
+                    {(() => {
+                      // Use ONLY warehouse inventory stock - no fallback to product.stock_count
+                      const stockData = bulkStockData[product.id] as { warehouses: any[], total_stock: number } | undefined;
+                      const actualStock = stockData?.total_stock ?? 0;
+                      
+                      return (
+                        <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          actualStock > 10 
+                            ? 'bg-green-100 text-green-800' 
+                            : actualStock > 0 
+                              ? 'bg-yellow-100 text-yellow-800' 
+                              : 'bg-red-100 text-red-800'
+                        }`}>
+                          {actualStock > 10 
+                            ? 'In Stock' 
+                            : actualStock > 0 
+                              ? 'Low Stock' 
+                              : 'Out of Stock'}
+                        </div>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">

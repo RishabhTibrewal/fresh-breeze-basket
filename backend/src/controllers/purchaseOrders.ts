@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase';
-import { ApiError, ValidationError } from '../middleware/error';
+import { ApiError, ValidationError, AuthorizationError } from '../middleware/error';
+import { hasAnyRole, hasWarehouseAccess } from '../utils/roles';
 
 // Helper function to query procurement schema tables using Supabase schema() method
 // Note: Requires procurement schema to be exposed in Supabase Dashboard → Settings → API → Exposed Schemas
@@ -178,6 +179,15 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
       throw new ValidationError('Company context is required');
     }
 
+    // Validate warehouse access for warehouse managers
+    const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
+    if (!isAdmin) {
+      const hasAccess = await hasWarehouseAccess(userId, req.companyId, warehouse_id);
+      if (!hasAccess) {
+        throw new AuthorizationError('You do not have access to manage this warehouse');
+      }
+    }
+
     // Generate PO number
     const po_number = await generatePONumber(req.companyId);
 
@@ -218,15 +228,37 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
 
     const po = Array.isArray(purchaseOrderResult) ? purchaseOrderResult[0] : purchaseOrderResult as any;
 
-    // Create purchase order items
-    const orderItems = items.map((item: any) => ({
-      purchase_order_id: po.id,
-      product_id: item.product_id,
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-      line_total: item.quantity * item.unit_price,
-      company_id: req.companyId
-    }));
+    // Fetch product details for all items
+    const productIds = items.map((item: any) => item.product_id);
+    const { data: products, error: productsError } = await adminClient
+      .from('products')
+      .select('id, unit_type, product_code, hsn_code, tax')
+      .in('id', productIds)
+      .eq('company_id', req.companyId);
+
+    if (productsError) {
+      console.error('Error fetching products:', productsError);
+      throw new ApiError(500, 'Failed to fetch product details');
+    }
+
+    const productsMap = new Map(products?.map((p: any) => [p.id, p]) || []);
+
+    // Create purchase order items with product details
+    const orderItems = items.map((item: any) => {
+      const product = productsMap.get(item.product_id);
+      return {
+        purchase_order_id: po.id,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        line_total: item.quantity * item.unit_price,
+        unit: product?.unit_type || 'piece',
+        product_code: product?.product_code || '',
+        hsn_code: product?.hsn_code || '',
+        tax_percentage: product?.tax || 0,
+        company_id: req.companyId
+      };
+    });
 
     try {
       const createdItems = await queryProcurementTable('purchase_order_items', 'insert', {
@@ -308,9 +340,11 @@ export const getPurchaseOrders = async (req: Request, res: Response, next: NextF
     // Fetch related suppliers and warehouses separately (they're in public schema)
     const supplierIds = [...new Set(purchaseOrders?.map((po: any) => po.supplier_id).filter(Boolean) || [])];
     const warehouseIds = [...new Set(purchaseOrders?.map((po: any) => po.warehouse_id).filter(Boolean) || [])];
+    const poIds = purchaseOrders?.map((po: any) => po.id) || [];
 
     const suppliersMap = new Map();
     const warehousesMap = new Map();
+    const itemsMap = new Map();
 
     if (supplierIds.length > 0) {
       const { data: suppliers } = await adminClient
@@ -336,11 +370,30 @@ export const getPurchaseOrders = async (req: Request, res: Response, next: NextF
       });
     }
 
+    // Fetch purchase order items for progress calculation
+    if (poIds.length > 0) {
+      const { data: items } = await adminClient
+        .schema('procurement')
+        .from('purchase_order_items')
+        .select('*')
+        .in('purchase_order_id', poIds)
+        .eq('company_id', req.companyId);
+      
+      // Group items by purchase_order_id
+      items?.forEach((item: any) => {
+        if (!itemsMap.has(item.purchase_order_id)) {
+          itemsMap.set(item.purchase_order_id, []);
+        }
+        itemsMap.get(item.purchase_order_id).push(item);
+      });
+    }
+
     // Join the data
     const enrichedOrders = (purchaseOrders || []).map((po: any) => ({
       ...po,
       suppliers: po.supplier_id ? suppliersMap.get(po.supplier_id) : null,
-      warehouses: po.warehouse_id ? warehousesMap.get(po.warehouse_id) : null
+      warehouses: po.warehouse_id ? warehousesMap.get(po.warehouse_id) : null,
+      purchase_order_items: itemsMap.get(po.id) || []
     }));
 
     res.json({
@@ -500,14 +553,36 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
 
       // Insert new items
       if (items.length > 0) {
-        const orderItems = items.map((item: any) => ({
-          purchase_order_id: id,
-          product_id: item.product_id,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          line_total: item.quantity * item.unit_price,
-          company_id: req.companyId
-        }));
+        // Fetch product details for all items
+        const productIds = items.map((item: any) => item.product_id);
+        const { data: products, error: productsError } = await adminClient
+          .from('products')
+          .select('id, unit_type, product_code, hsn_code, tax')
+          .in('id', productIds)
+          .eq('company_id', req.companyId);
+
+        if (productsError) {
+          console.error('Error fetching products:', productsError);
+          throw new ApiError(500, 'Failed to fetch product details');
+        }
+
+        const productsMap = new Map(products?.map((p: any) => [p.id, p]) || []);
+
+        const orderItems = items.map((item: any) => {
+          const product = productsMap.get(item.product_id);
+          return {
+            purchase_order_id: id,
+            product_id: item.product_id,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            line_total: item.quantity * item.unit_price,
+            unit: product?.unit_type || 'piece',
+            product_code: product?.product_code || '',
+            hsn_code: product?.hsn_code || '',
+            tax_percentage: product?.tax || 0,
+            company_id: req.companyId
+          };
+        });
 
         const { error: itemsError } = await adminClient
           .schema('procurement')
@@ -593,6 +668,68 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
 };
 
 /**
+ * Submit purchase order for approval (draft -> pending)
+ */
+export const submitPurchaseOrder = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.companyId) {
+      throw new ValidationError('Company context is required');
+    }
+
+    const adminClient = supabaseAdmin || supabase;
+    
+    // First, check current status
+    const { data: currentPO, error: fetchError } = await adminClient
+      .schema('procurement')
+      .from('purchase_orders')
+      .select('status')
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        throw new ApiError(404, 'Purchase order not found');
+      }
+      console.error('Error fetching purchase order:', fetchError);
+      throw new ApiError(500, 'Failed to fetch purchase order');
+    }
+
+    if (currentPO.status !== 'draft') {
+      throw new ValidationError(`Cannot submit purchase order. Current status is '${currentPO.status}'. Only draft purchase orders can be submitted.`);
+    }
+
+    // Update status to pending
+    const { data: purchaseOrder, error } = await adminClient
+      .schema('procurement')
+      .from('purchase_orders')
+      .update({
+        status: 'pending',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error submitting purchase order:', error);
+      throw new ApiError(500, 'Failed to submit purchase order');
+    }
+
+    res.json({
+      success: true,
+      message: 'Purchase order submitted for approval successfully',
+      data: purchaseOrder
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Approve purchase order
  */
 export const approvePurchaseOrder = async (req: Request, res: Response, next: NextFunction) => {
@@ -609,6 +746,42 @@ export const approvePurchaseOrder = async (req: Request, res: Response, next: Ne
     }
 
     const adminClient = supabaseAdmin || supabase;
+    
+    // First, check current status to prevent re-approval
+    const { data: currentPO, error: fetchError } = await adminClient
+      .schema('procurement')
+      .from('purchase_orders')
+      .select('status, approved_by, approved_at')
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        throw new ApiError(404, 'Purchase order not found');
+      }
+      console.error('Error fetching purchase order:', fetchError);
+      throw new ApiError(500, 'Failed to fetch purchase order');
+    }
+
+    // Prevent re-approval - check if already approved
+    if (currentPO.status === 'approved' || currentPO.status === 'ordered' || 
+        currentPO.status === 'partially_received' || currentPO.status === 'received') {
+      throw new ValidationError(
+        `Purchase order has already been approved. Current status is '${currentPO.status}'. ` +
+        (currentPO.approved_by ? `It was approved on ${currentPO.approved_at ? new Date(currentPO.approved_at).toLocaleDateString() : 'previously'}.` : '')
+      );
+    }
+
+    // Only allow approval from 'pending' or 'draft' status
+    if (currentPO.status !== 'pending' && currentPO.status !== 'draft') {
+      throw new ValidationError(
+        `Cannot approve purchase order with status '${currentPO.status}'. ` +
+        `Only purchase orders with status 'pending' or 'draft' can be approved.`
+      );
+    }
+
+    // Update status to approved
     const { data: purchaseOrder, error } = await adminClient
       .schema('procurement')
       .from('purchase_orders')
@@ -624,9 +797,6 @@ export const approvePurchaseOrder = async (req: Request, res: Response, next: Ne
       .single();
 
     if (error) {
-      if (error.code === 'PGRST116') {
-        throw new ApiError(404, 'Purchase order not found');
-      }
       console.error('Error approving purchase order:', error);
       throw new ApiError(500, 'Failed to approve purchase order');
     }

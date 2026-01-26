@@ -2,6 +2,23 @@
  * TypeScript interfaces for database models
  */
 
+export interface Role {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserRole {
+  id: string;
+  user_id: string;
+  company_id: string;
+  role_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -9,7 +26,8 @@ export interface User {
   last_name: string | null;
   phone: string | null;
   avatar_url: string | null;
-  role: 'user' | 'admin' | 'sales';
+  role: 'user' | 'admin' | 'sales'; // Deprecated: kept for backward compatibility
+  roles?: string[]; // New: array of role names
   created_at: string;
   updated_at: string;
 }
@@ -174,6 +192,16 @@ export interface Database {
         Insert: Omit<creditPeriods, 'id' | 'created_at'>;
         Update: Partial<Omit<creditPeriods, 'id'>>;
       };
+      roles: {
+        Row: Role;
+        Insert: Omit<Role, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<Role, 'id'>>;
+      };
+      user_roles: {
+        Row: UserRole;
+        Insert: Omit<UserRole, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<UserRole, 'id'>>;
+      };
     };
     Views: {
       [_ in never]: never;
@@ -182,6 +210,22 @@ export interface Database {
       is_admin: {
         Args: { user_id: string };
         Returns: boolean;
+      };
+      has_role: {
+        Args: { p_user_id: string; p_role_name: string; p_company_id?: string | null };
+        Returns: boolean;
+      };
+      has_any_role: {
+        Args: { p_user_id: string; p_role_names: string[]; p_company_id?: string | null };
+        Returns: boolean;
+      };
+      has_all_roles: {
+        Args: { p_user_id: string; p_role_names: string[]; p_company_id?: string | null };
+        Returns: boolean;
+      };
+      get_user_roles: {
+        Args: { p_user_id: string; p_company_id?: string | null };
+        Returns: string[];
       };
       update_stock: {
         Args: { p_id: string; quantity: number };

@@ -1,11 +1,15 @@
 import { Request, Response } from 'express';
 import { supabase } from '../config/supabase';
+import { hasAnyRole } from '../utils/roles';
 
 interface AuthenticatedRequest extends Request {
   user: {
     id: string;
-    role: string;
+    role?: string;
+    roles?: string[];
+    company_id?: string;
   };
+  companyId?: string;
 }
 
 export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response) => {
@@ -18,9 +22,9 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ error: 'Company context is required' });
     }
     
-    // Use role from middleware (already resolved from memberships)
-    const isAdmin = req.user.role === 'admin';
-    const isSales = req.user.role === 'sales';
+    // Check roles using new role system
+    const isAdmin = await hasAnyRole(req.user.id, req.companyId, ['admin']);
+    const isSales = await hasAnyRole(req.user.id, req.companyId, ['sales']);
     
     // Get the order to check permissions
     const { data: order, error: orderError } = await supabase

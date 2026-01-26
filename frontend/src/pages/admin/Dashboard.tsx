@@ -14,7 +14,8 @@ import {
   FileText,
   Building2,
   Receipt,
-  ReceiptText
+  ReceiptText,
+  CreditCard
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { 
@@ -35,7 +36,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
 const AdminDashboard = () => {
-  const { isAdmin, profile, signOut, user, role } = useAuth();
+  const { isAdmin, isAccounts, profile, signOut, user, role } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -78,7 +79,7 @@ const AdminDashboard = () => {
         hasProfile: !!profile
       });
       
-      if (!isAdmin) {
+      if (!isAdmin && !isAccounts) {
         toast.error('You do not have administrator privileges');
         navigate('/', { replace: true });
       }
@@ -120,12 +121,12 @@ const AdminDashboard = () => {
           </SidebarHeader>
           <SidebarContent>
             {/* Display admin info for debugging */}
-            <div className="px-4 py-2 text-sm text-muted-foreground">
+            {/* <div className="px-4 py-2 text-sm text-muted-foreground">
               <p>User: {user?.email}</p>
               <p>Role: {role || 'Unknown'}</p>
               <p>Admin: {isAdmin ? 'Yes' : 'No'}</p>
               <p>Profile ID: {profile?.id || 'Not loaded'}</p>
-            </div>
+            </div> */}
             
             <SidebarGroup>
               <SidebarGroupLabel>General</SidebarGroupLabel>
@@ -223,6 +224,14 @@ const AdminDashboard = () => {
                       <Link to="/admin/purchase-invoices">
                         <ReceiptText className="h-4 w-4" />
                         <span>Purchase Invoices</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip="Supplier Payments">
+                      <Link to="/admin/supplier-payments">
+                        <CreditCard className="h-4 w-4" />
+                        <span>Supplier Payments</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

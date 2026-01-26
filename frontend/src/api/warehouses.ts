@@ -54,6 +54,7 @@ export interface CreateWarehouseInput {
   contact_phone?: string;
   contact_email?: string;
   is_active?: boolean;
+  warehouse_manager_ids?: string[];
 }
 
 export interface UpdateWarehouseInput extends Partial<CreateWarehouseInput> {}

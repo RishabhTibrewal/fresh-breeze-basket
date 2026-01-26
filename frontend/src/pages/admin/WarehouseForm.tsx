@@ -1,10 +1,12 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { warehousesService, Warehouse } from '@/api/warehouses';
+import { adminService, UserProfile } from '@/api/admin';
+import { warehouseManagersService } from '@/api/warehouseManagers';
 import {
   Form,
   FormControl,
@@ -17,6 +19,15 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Plus, Trash2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 const warehouseSchema = z.object({
   name: z.string().min(1, 'Warehouse name is required'),
@@ -30,6 +41,7 @@ const warehouseSchema = z.object({
   contact_phone: z.string().optional(),
   contact_email: z.string().email().optional().or(z.literal('')),
   is_active: z.boolean().default(true),
+  warehouse_manager_ids: z.array(z.string().optional()).default(['']),
 });
 
 type WarehouseFormValues = z.infer<typeof warehouseSchema>;
@@ -41,6 +53,8 @@ interface WarehouseFormProps {
 }
 
 export default function WarehouseForm({ warehouse, onSuccess, onCancel }: WarehouseFormProps) {
+  const [managerPopoverOpen, setManagerPopoverOpen] = useState<{ [key: number]: boolean }>({});
+  
   const form = useForm<WarehouseFormValues>({
     resolver: zodResolver(warehouseSchema),
     defaultValues: {
@@ -55,7 +69,21 @@ export default function WarehouseForm({ warehouse, onSuccess, onCancel }: Wareho
       contact_phone: '',
       contact_email: '',
       is_active: true,
+      warehouse_manager_ids: [''],
     },
+  });
+
+  // Fetch all users to select warehouse managers from
+  const { data: usersData } = useQuery({
+    queryKey: ['admin-users-all'],
+    queryFn: () => adminService.getUsers(1, 1000), // Get all users
+  });
+
+  // Fetch existing warehouse managers if editing
+  const { data: existingManagers } = useQuery({
+    queryKey: ['warehouse-managers', warehouse?.id],
+    queryFn: () => warehouseManagersService.getByWarehouse(warehouse!.id),
+    enabled: !!warehouse?.id,
   });
 
   useEffect(() => {
@@ -72,12 +100,41 @@ export default function WarehouseForm({ warehouse, onSuccess, onCancel }: Wareho
         contact_phone: warehouse.contact_phone ?? '',
         contact_email: warehouse.contact_email ?? '',
         is_active: warehouse.is_active ?? true,
+        warehouse_manager_ids: [''],
       });
     }
   }, [warehouse, form]);
 
+  // Set existing managers when editing
+  useEffect(() => {
+    if (warehouse && existingManagers && existingManagers.length > 0) {
+      const managerIds = existingManagers.map(m => m.user_id);
+      form.setValue('warehouse_manager_ids', managerIds);
+    } else if (warehouse && (!existingManagers || existingManagers.length === 0)) {
+      form.setValue('warehouse_manager_ids', ['']);
+    }
+  }, [warehouse, existingManagers, form]);
+
   const createMutation = useMutation({
-    mutationFn: (data: WarehouseFormValues) => warehousesService.create(data as any),
+    mutationFn: async (data: WarehouseFormValues) => {
+      const { warehouse_manager_ids, ...warehouseData } = data;
+      const createdWarehouse = await warehousesService.create(warehouseData as any);
+      
+      // Assign warehouse managers if any selected (filter out empty strings)
+      const validManagerIds = warehouse_manager_ids?.filter(id => id && id.trim() !== '') || [];
+      if (validManagerIds.length > 0) {
+        await Promise.all(
+          validManagerIds.map(userId =>
+            warehouseManagersService.assign({
+              user_id: userId,
+              warehouse_id: createdWarehouse.id,
+            })
+          )
+        );
+      }
+      
+      return createdWarehouse;
+    },
     onSuccess: () => {
       toast.success('Warehouse created successfully');
       onSuccess();
@@ -88,8 +145,43 @@ export default function WarehouseForm({ warehouse, onSuccess, onCancel }: Wareho
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: WarehouseFormValues) => 
-      warehousesService.update(warehouse!.id, data),
+    mutationFn: async (data: WarehouseFormValues) => {
+      const { warehouse_manager_ids, ...warehouseData } = data;
+      await warehousesService.update(warehouse!.id, warehouseData);
+      
+      // Update warehouse manager assignments
+      if (warehouse_manager_ids !== undefined) {
+        // Get current assignments
+        const currentManagers = existingManagers || [];
+        const currentManagerIds = currentManagers.map(m => m.user_id);
+        
+        // Filter out empty strings from selected managers
+        const validManagerIds = warehouse_manager_ids.filter(id => id && id.trim() !== '');
+        
+        // Find managers to add and remove
+        const toAdd = validManagerIds.filter(id => !currentManagerIds.includes(id));
+        const toRemove = currentManagerIds.filter(id => !validManagerIds.includes(id));
+        
+        // Add new managers
+        await Promise.all(
+          toAdd.map(userId =>
+            warehouseManagersService.assign({
+              user_id: userId,
+              warehouse_id: warehouse!.id,
+            })
+          )
+        );
+        
+        // Remove managers
+        await Promise.all(
+          toRemove.map(userId =>
+            warehouseManagersService.remove(userId, warehouse!.id)
+          )
+        );
+      }
+      
+      return warehouse;
+    },
     onSuccess: () => {
       toast.success('Warehouse updated successfully');
       onSuccess();
@@ -257,6 +349,113 @@ export default function WarehouseForm({ warehouse, onSuccess, onCancel }: Wareho
             )}
           />
         </div>
+
+        <FormField
+          control={form.control}
+          name="warehouse_manager_ids"
+          render={({ field }) => {
+            const managerIds = field.value || [''];
+            const allUsers = usersData?.data?.users || [];
+            // Filter users who have warehouse_manager role or admin role (admins can also manage warehouses)
+            const availableManagers = allUsers.filter((user: UserProfile) => {
+              const userRoles = user.roles || (user.role ? [user.role] : []);
+              return userRoles.includes('warehouse_manager') || userRoles.includes('admin');
+            });
+
+            const addManagerDropdown = () => {
+              field.onChange([...managerIds, '']);
+            };
+
+            const removeManagerDropdown = (index: number) => {
+              const newIds = managerIds.filter((_, i) => i !== index);
+              // Ensure at least one empty dropdown remains
+              if (newIds.length === 0) {
+                field.onChange(['']);
+              } else {
+                field.onChange(newIds);
+              }
+            };
+
+            const updateManagerSelection = (index: number, userId: string) => {
+              const newIds = [...managerIds];
+              newIds[index] = userId;
+              field.onChange(newIds);
+            };
+
+            const getSelectedManager = (userId: string | undefined) => {
+              if (!userId) return null;
+              return availableManagers.find((user: UserProfile) => user.id === userId);
+            };
+
+            return (
+              <FormItem className="flex flex-col">
+                <FormLabel>Warehouse Managers</FormLabel>
+                <div className="space-y-3">
+                  {managerIds.map((managerId, index) => {
+                    const selectedManager = getSelectedManager(managerId);
+
+                    return (
+                      <div key={index} className="flex gap-2 items-start">
+                        <FormControl>
+                          <Select
+                            value={managerId || ''}
+                            onValueChange={(value) => {
+                              updateManagerSelection(index, value);
+                            }}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select warehouse manager..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableManagers.map((user: UserProfile) => {
+                                const displayName = user.first_name || user.last_name
+                                  ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
+                                  : user.email;
+                                
+                                return (
+                                  <SelectItem key={user.id} value={user.id}>
+                                    <div className="flex flex-col">
+                                      <span>{displayName}</span>
+                                      <span className="text-xs text-muted-foreground">{user.email}</span>
+                                    </div>
+                                  </SelectItem>
+                                );
+                              })}
+                            </SelectContent>
+                          </Select>
+                        </FormControl>
+                        {managerIds.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => removeManagerDropdown(index)}
+                            className="shrink-0"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addManagerDropdown}
+                    className="w-full"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Warehouse Manager
+                  </Button>
+                </div>
+                <FormDescription>
+                  Click the "+" button to add more warehouse managers
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            );
+          }}
+        />
 
         <FormField
           control={form.control}

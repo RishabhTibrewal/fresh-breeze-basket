@@ -18,9 +18,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Eye } from "lucide-react";
+import { Plus, Search, Eye, DollarSign, CheckCircle, Clock, XCircle } from "lucide-react";
 import { supplierPaymentsService } from '@/api/supplierPayments';
 import { suppliersService } from '@/api/suppliers';
+import { useAuth } from '@/contexts/AuthContext';
+import { StatusBadge } from '@/components/procurement/StatusBadge';
 import {
   Select,
   SelectContent,
@@ -33,6 +35,7 @@ export default function SupplierPayments() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const invoiceId = searchParams.get('invoice');
+  const { isAdmin, isAccounts } = useAuth();
   
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -55,22 +58,30 @@ export default function SupplierPayments() {
     queryFn: () => suppliersService.getAll({ is_active: true }),
   });
 
-  const getStatusBadgeVariant = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return 'default';
-      case 'processing':
-        return 'secondary';
-      case 'completed':
-        return 'default';
-      case 'failed':
-        return 'destructive';
-      case 'cancelled':
-        return 'destructive';
-      default:
-        return 'secondary';
+  // Calculate summary statistics
+  const totalAmount = payments.reduce((sum, p: any) => sum + (p.amount || 0), 0);
+  const completedAmount = payments
+    .filter((p: any) => p.status === 'completed')
+    .reduce((sum, p: any) => sum + (p.amount || 0), 0);
+  const pendingAmount = payments
+    .filter((p: any) => p.status === 'pending' || p.status === 'processing')
+    .reduce((sum, p: any) => sum + (p.amount || 0), 0);
+  const failedAmount = payments
+    .filter((p: any) => p.status === 'failed' || p.status === 'cancelled')
+    .reduce((sum, p: any) => sum + (p.amount || 0), 0);
+
+  // Filter payments by search query
+  const filteredPayments = payments.filter((payment: any) => {
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      return (
+        payment.payment_number?.toLowerCase().includes(query) ||
+        payment.suppliers?.name?.toLowerCase().includes(query) ||
+        payment.purchase_invoices?.invoice_number?.toLowerCase().includes(query)
+      );
     }
-  };
+    return true;
+  });
 
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
@@ -81,10 +92,62 @@ export default function SupplierPayments() {
             Manage supplier payments and transactions
           </p>
         </div>
-        <Button onClick={() => navigate('/admin/supplier-payments/new' + (invoiceId ? `?invoice=${invoiceId}` : ''))}>
-          <Plus className="h-4 w-4 mr-2" />
-          Record Payment
-        </Button>
+        {(isAdmin || isAccounts) && (
+          <Button onClick={() => navigate('/admin/supplier-payments/new' + (invoiceId ? `?invoice=${invoiceId}` : ''))}>
+            <Plus className="h-4 w-4 mr-2" />
+            Record Payment
+          </Button>
+        )}
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Payments</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">₹{totalAmount.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">{payments.length} payments</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Completed</CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">₹{completedAmount.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">
+              {payments.filter((p: any) => p.status === 'completed').length} payments
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Pending/Processing</CardTitle>
+            <Clock className="h-4 w-4 text-yellow-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-600">₹{pendingAmount.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">
+              {payments.filter((p: any) => p.status === 'pending' || p.status === 'processing').length} payments
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Failed/Cancelled</CardTitle>
+            <XCircle className="h-4 w-4 text-red-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">₹{failedAmount.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">
+              {payments.filter((p: any) => p.status === 'failed' || p.status === 'cancelled').length} payments
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Filters */}
@@ -146,14 +209,14 @@ export default function SupplierPayments() {
       {/* Payments Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Payments ({payments.length})</CardTitle>
+          <CardTitle>Payments ({filteredPayments.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8">Loading payments...</div>
-          ) : payments.length === 0 ? (
+          ) : filteredPayments.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              No payments found
+              {searchQuery ? 'No payments match your search criteria' : 'No payments found'}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -171,26 +234,35 @@ export default function SupplierPayments() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {payments.map((payment: any) => (
+                  {filteredPayments.map((payment: any) => (
                     <TableRow key={payment.id}>
                       <TableCell className="font-medium">{payment.payment_number}</TableCell>
                       <TableCell>
                         {payment.suppliers?.name || 'N/A'}
                       </TableCell>
                       <TableCell>
-                        {payment.purchase_invoices?.invoice_number || 'N/A'}
+                        {payment.purchase_invoices?.invoice_number ? (
+                          <button
+                            onClick={() => navigate(`/admin/purchase-invoices/${payment.purchase_invoice_id}`)}
+                            className="text-primary hover:underline"
+                          >
+                            {payment.purchase_invoices.invoice_number}
+                          </button>
+                        ) : (
+                          'N/A'
+                        )}
                       </TableCell>
                       <TableCell>
                         {new Date(payment.payment_date).toLocaleDateString()}
                       </TableCell>
-                      <TableCell>{payment.payment_method}</TableCell>
+                      <TableCell className="capitalize">
+                        {payment.payment_method?.replace('_', ' ') || 'N/A'}
+                      </TableCell>
                       <TableCell className="font-medium">
                         ₹{payment.amount.toFixed(2)}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getStatusBadgeVariant(payment.status)}>
-                          {payment.status.toUpperCase()}
-                        </Badge>
+                        <StatusBadge status={payment.status} />
                       </TableCell>
                       <TableCell>
                         <Button

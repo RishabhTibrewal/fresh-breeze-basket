@@ -7,19 +7,26 @@ import {
   receiveGoods,
   completeGoodsReceipt
 } from '../controllers/goodsReceipts';
-import { protect, adminOnly } from '../middleware/auth';
+import { protect, requireWarehouseManager, requireAccountsOrAdmin, adminOnly } from '../middleware/auth';
+import {
+  validateGRNCreation,
+  validateGRNStatusTransition,
+  validateGRNQuantities
+} from '../middleware/procurementValidation';
 
 const router = express.Router();
 
 // All routes require authentication
 router.use(protect);
 
-// Admin only routes
-router.post('/', adminOnly, createGoodsReceipt);
+// Warehouse manager or admin can create GRN
+router.post('/', requireWarehouseManager, validateGRNCreation, validateGRNQuantities, createGoodsReceipt);
 router.get('/', getGoodsReceipts);
 router.get('/:id', getGoodsReceiptById);
-router.put('/:id', adminOnly, updateGoodsReceipt);
-router.post('/:id/receive', adminOnly, receiveGoods);
-router.post('/:id/complete', adminOnly, completeGoodsReceipt);
+// Only admin can update
+router.put('/:id', adminOnly, validateGRNStatusTransition, updateGoodsReceipt);
+router.post('/:id/receive', adminOnly, validateGRNStatusTransition, receiveGoods);
+// Accounts or admin can complete/approve GRN
+router.post('/:id/complete', requireAccountsOrAdmin, validateGRNStatusTransition, completeGoodsReceipt);
 
 export default router;

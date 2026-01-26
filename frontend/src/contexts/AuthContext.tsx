@@ -19,13 +19,22 @@ type AuthContextType = {
   session: Session | null;
   user: User | null;
   profile: any | null;
-  role: string | null;
+  role: string | null; // Backward compatibility - primary role
+  roles: string[]; // New: array of roles
   isAdmin: boolean;
+  isSales: boolean;
+  isAccounts: boolean;
+  isWarehouseManager: boolean;
+  warehouses: string[]; // Array of warehouse IDs assigned to user
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, firstName: string, lastName: string, phone: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  hasRole: (roleName: string) => boolean;
+  hasAnyRole: (roleNames: string[]) => boolean;
+  hasWarehouseAccess: (warehouseId: string) => boolean;
+  getUserWarehouses: () => Promise<string[]>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -34,8 +43,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any | null>(null);
-  const [role, setRole] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null); // Backward compatibility
+  const [roles, setRoles] = useState<string[]>([]); // New: array of roles
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [isSales, setIsSales] = useState<boolean>(false);
+  const [isAccounts, setIsAccounts] = useState<boolean>(false);
+  const [isWarehouseManager, setIsWarehouseManager] = useState<boolean>(false);
+  const [warehouses, setWarehouses] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const navigate = useNavigate();
 
@@ -61,7 +75,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
     setProfile(null);
     setIsAdmin(false);
+    setIsSales(false);
+    setIsAccounts(false);
+    setIsWarehouseManager(false);
+    setWarehouses([]);
     setRole(null);
+    setRoles([]);
   }, []);
 
   // Function to ensure backend session is in sync with Supabase session
@@ -115,18 +134,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return false;
       }
 
+      // Get roles from localStorage or profile
+      const storedRolesJson = localStorage.getItem('userRoles');
+      const storedRoles = storedRolesJson ? JSON.parse(storedRolesJson) : null;
       const storedRole = localStorage.getItem('userRole');
-      const effectiveRole = storedRole || profile?.role || null;
+      const effectiveRoles = storedRoles || (storedRole ? [storedRole] : (profile?.roles || (profile?.role ? [profile.role] : null)));
 
-      // If user has a role, sync with backend
-      if (effectiveRole) {
-        console.log('Syncing backend session for user with role:', effectiveRole);
+      // If user has roles, sync with backend
+      if (effectiveRoles && effectiveRoles.length > 0) {
+        const primaryRole = effectiveRoles[0];
+        console.log('Syncing backend session for user with roles:', effectiveRoles);
         await apiClient.post(
           '/auth/sync-session',
           {
             userId: currentSession.user.id,
             email: currentSession.user.email,
-            role: effectiveRole
+            role: primaryRole, // Backward compatibility
+            roles: effectiveRoles // New: array of roles
           },
           {
             headers: {
@@ -135,7 +159,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         );
       } else {
-        console.log('No role found for user, skipping backend sync');
+        console.log('No roles found for user, skipping backend sync');
         return false;
       }
     } catch (error: any) {
@@ -252,7 +276,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(null);
             setProfile(null);
             setIsAdmin(false);
-        setRole(null);
+            setIsSales(false);
+            setIsAccounts(false);
+            setIsWarehouseManager(false);
+            setWarehouses([]);
+            setRole(null);
+            setRoles([]);
             setIsLoading(false);
             return;
           }
@@ -341,30 +370,91 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       console.log('Fetching profile for user:', userId);
       
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
+      // Fetch user profile from backend API to get roles array
+      try {
+        const { data: userData, error: userError } = await apiClient.get<{ success: boolean; data: any }>('/auth/me');
+        
+        if (userError || !userData?.success) {
+          console.error('Error fetching user from backend:', userError);
+          // Fallback to Supabase profile
+          const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single();
 
-      if (profileError) {
-        console.error('Error fetching user profile:', profileError);
-        // Don't set profile to null if there was an error fetching
-        // This prevents UI flickering and potential auth loops
-      } else if (profileData) {
-        const storedRole = localStorage.getItem('userRole');
-        const effectiveRole = storedRole || profileData.role;
-        console.log('Profile data retrieved:', profileData, 'effectiveRole:', effectiveRole);
-        setProfile({ ...profileData, role: effectiveRole });
-        
-        const userIsAdmin = effectiveRole === 'admin';
-        console.log('User admin status from role:', userIsAdmin);
-        setIsAdmin(userIsAdmin);
-        setRole(effectiveRole || null);
-        
-        // Store the effective role in localStorage for API components to access
-        if (effectiveRole) {
-          localStorage.setItem('userRole', effectiveRole);
+          if (profileError) {
+            console.error('Error fetching user profile:', profileError);
+          } else if (profileData) {
+            const effectiveRole = profileData.role || 'user';
+            const userRoles = [effectiveRole];
+            setProfile({ ...profileData, role: effectiveRole, roles: userRoles });
+            setIsAdmin(effectiveRole === 'admin');
+            setIsSales(effectiveRole === 'sales');
+            setIsAccounts(effectiveRole === 'accounts');
+            setRole(effectiveRole);
+            setRoles(userRoles);
+          }
+        } else {
+          // Use backend data which includes roles array
+          const userProfile = userData.data;
+          const userRoles = userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
+          const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
+          
+          console.log('User profile from backend:', userProfile, 'roles:', userRoles);
+          setProfile({ ...userProfile, role: primaryRole, roles: userRoles });
+          
+          setIsAdmin(userRoles.includes('admin') || userRoles.includes('accounts'));
+          setIsSales(userRoles.includes('sales'));
+          setIsAccounts(userRoles.includes('accounts'));
+          setIsWarehouseManager(userRoles.includes('warehouse_manager'));
+          setRole(primaryRole);
+          setRoles(userRoles);
+          
+          // Fetch warehouses if user is warehouse manager
+          if (userRoles.includes('warehouse_manager') || userRoles.includes('admin')) {
+            try {
+              const { warehouseManagersService } = await import('@/api/warehouseManagers');
+              const warehouseAssignments = await warehouseManagersService.getByUser(userId);
+              const warehouseIds = warehouseAssignments
+                .map((wm: any) => wm.warehouses?.id || wm.warehouse_id)
+                .filter(Boolean);
+              setWarehouses(warehouseIds);
+            } catch (error) {
+              console.error('Error fetching user warehouses:', error);
+            }
+          } else {
+            setWarehouses([]);
+          }
+          
+          // Store roles in localStorage for backward compatibility
+          if (primaryRole) {
+            localStorage.setItem('userRole', primaryRole);
+          }
+          localStorage.setItem('userRoles', JSON.stringify(userRoles));
+        }
+      } catch (error) {
+        console.error('Error fetching user from backend, falling back to Supabase:', error);
+        // Fallback to Supabase profile
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
+
+        if (profileError) {
+          console.error('Error fetching user profile:', profileError);
+        } else if (profileData) {
+          const effectiveRole = profileData.role || 'user';
+          const userRoles = [effectiveRole];
+          setProfile({ ...profileData, role: effectiveRole, roles: userRoles });
+          setIsAdmin(effectiveRole === 'admin' || effectiveRole === 'accounts');
+          setIsSales(effectiveRole === 'sales');
+          setIsAccounts(effectiveRole === 'accounts');
+          setIsWarehouseManager(effectiveRole === 'warehouse_manager');
+          setWarehouses([]);
+          setRole(effectiveRole);
+          setRoles(userRoles);
         }
       }
       
@@ -389,12 +479,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // If Supabase login successful, also call backend login
       try {
         const { data: loginData } = await apiClient.post('/auth/login', { email, password });
-        const roleFromBackend = loginData?.data?.user?.role;
-        if (roleFromBackend) {
-          localStorage.setItem('userRole', roleFromBackend);
-          setProfile(prev => (prev ? { ...prev, role: roleFromBackend } : prev));
-          setIsAdmin(roleFromBackend === 'admin');
-          setRole(roleFromBackend);
+        const userProfile = loginData?.data?.user;
+        if (userProfile) {
+          const userRoles = userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
+          const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
+          localStorage.setItem('userRole', primaryRole);
+          localStorage.setItem('userRoles', JSON.stringify(userRoles));
+          setProfile(prev => (prev ? { ...prev, role: primaryRole, roles: userRoles } : prev));
+          setIsAdmin(userRoles.includes('admin') || userRoles.includes('accounts'));
+          setIsSales(userRoles.includes('sales'));
+          setIsAccounts(userRoles.includes('accounts'));
+          setIsWarehouseManager(userRoles.includes('warehouse_manager'));
+          setRole(primaryRole);
+          setRoles(userRoles);
+          
+          // Fetch warehouses if user is warehouse manager
+          if (userRoles.includes('warehouse_manager') || userRoles.includes('admin')) {
+            try {
+              const { warehouseManagersService } = await import('@/api/warehouseManagers');
+              const warehouseAssignments = await warehouseManagersService.getByUser(userId);
+              const warehouseIds = warehouseAssignments
+                .map((wm: any) => wm.warehouses?.id || wm.warehouse_id)
+                .filter(Boolean);
+              setWarehouses(warehouseIds);
+            } catch (error) {
+              console.error('Error fetching user warehouses:', error);
+            }
+          } else {
+            setWarehouses([]);
+          }
         }
         // We don't store the backend token since we're using Supabase's token
       } catch (backendError: any) {
@@ -459,12 +572,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
             try {
               const { data: loginData } = await apiClient.post('/auth/login', { email, password });
-              const roleFromBackend = loginData?.data?.user?.role;
-              if (roleFromBackend) {
-                localStorage.setItem('userRole', roleFromBackend);
-                setProfile(prev => (prev ? { ...prev, role: roleFromBackend } : prev));
-                setIsAdmin(roleFromBackend === 'admin');
-                setRole(roleFromBackend);
+              const userProfile = loginData?.data?.user;
+              if (userProfile) {
+                const userRoles = userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
+                const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
+                localStorage.setItem('userRole', primaryRole);
+                localStorage.setItem('userRoles', JSON.stringify(userRoles));
+                setProfile(prev => (prev ? { ...prev, role: primaryRole, roles: userRoles } : prev));
+                setIsAdmin(userRoles.includes('admin'));
+                setIsSales(userRoles.includes('sales'));
+                setIsAccounts(userRoles.includes('accounts'));
+                setRole(primaryRole);
+                setRoles(userRoles);
               }
             } catch (backendError: any) {
               const message = backendError?.response?.data?.message || 'Login failed for this company.';
@@ -534,7 +653,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       setProfile(null);
       setIsAdmin(false);
+      setIsSales(false);
+      setIsAccounts(false);
+      setIsWarehouseManager(false);
+      setWarehouses([]);
       setRole(null);
+      setRoles([]);
       
       toast.success('Successfully signed out!');
       
@@ -556,17 +680,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await fetchUserProfile(user.id);
   };
 
+  // Helper function to check if user has a specific role
+  const hasRole = (roleName: string): boolean => {
+    return roles.includes(roleName) || roles.includes('admin'); // Admin override
+  };
+
+  // Helper function to check if user has any of the specified roles
+  const hasAnyRole = (roleNames: string[]): boolean => {
+    if (roles.includes('admin')) return true; // Admin override
+    return roleNames.some(roleName => roles.includes(roleName));
+  };
+
+  // Helper function to check if user has access to a specific warehouse
+  const hasWarehouseAccess = (warehouseId: string): boolean => {
+    if (isAdmin) return true; // Admin has access to all warehouses
+    if (!isWarehouseManager) return false;
+    return warehouses.includes(warehouseId);
+  };
+
+  // Function to get user's assigned warehouses
+  const getUserWarehouses = async (): Promise<string[]> => {
+    if (!user?.id) return [];
+    try {
+      const { warehouseManagersService } = await import('@/api/warehouseManagers');
+      const warehouseAssignments = await warehouseManagersService.getByUser(user.id);
+      const warehouseIds = warehouseAssignments
+        .map((wm: any) => wm.warehouses?.id || wm.warehouse_id)
+        .filter(Boolean);
+      setWarehouses(warehouseIds);
+      return warehouseIds;
+    } catch (error) {
+      console.error('Error fetching user warehouses:', error);
+      return [];
+    }
+  };
+
   const value = {
     session,
     user,
     profile,
-    role,
+    role, // Backward compatibility
+    roles, // New: array of roles
     isAdmin,
+    isSales,
+    isAccounts,
+    isWarehouseManager,
+    warehouses,
     isLoading,
     signIn,
     signUp,
     signOut,
-    refreshProfile
+    refreshProfile,
+    hasRole,
+    hasAnyRole,
+    hasWarehouseAccess,
+    getUserWarehouses
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

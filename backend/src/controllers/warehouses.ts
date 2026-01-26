@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
 // Get all warehouses
@@ -89,7 +89,8 @@ export const createWarehouse = async (req: Request, res: Response) => {
       contact_name,
       contact_phone,
       contact_email,
-      is_active = true
+      is_active = true,
+      warehouse_manager_ids = []
     } = req.body;
     
     if (!name || !code) {
@@ -117,6 +118,42 @@ export const createWarehouse = async (req: Request, res: Response) => {
     
     if (error) {
       throw new ApiError(400, `Error creating warehouse: ${error.message}`);
+    }
+    
+    // Assign warehouse managers if provided
+    if (warehouse_manager_ids && Array.isArray(warehouse_manager_ids) && warehouse_manager_ids.length > 0) {
+      const adminClient = supabaseAdmin || supabase;
+      
+      // Verify all user IDs exist and belong to the company
+      const { data: users, error: usersError } = await adminClient
+        .from('profiles')
+        .select('id')
+        .in('id', warehouse_manager_ids)
+        .eq('company_id', req.companyId);
+      
+      if (usersError) {
+        console.error('Error verifying users:', usersError);
+      } else if (users && users.length === warehouse_manager_ids.length) {
+        // Create warehouse manager assignments
+        const assignments = warehouse_manager_ids.map((user_id: string) => ({
+          user_id,
+          warehouse_id: data.id,
+          company_id: req.companyId,
+          is_active: true
+        }));
+        
+        const { error: assignError } = await adminClient
+          .from('warehouse_managers')
+          .upsert(assignments, {
+            onConflict: 'user_id,warehouse_id,company_id',
+            ignoreDuplicates: false
+          });
+        
+        if (assignError) {
+          console.error('Error assigning warehouse managers:', assignError);
+          // Don't fail the warehouse creation, just log the error
+        }
+      }
     }
     
     return res.status(201).json({

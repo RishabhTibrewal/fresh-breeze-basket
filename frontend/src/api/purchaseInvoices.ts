@@ -1,5 +1,22 @@
 import apiClient from '@/lib/apiClient';
 
+export interface PurchaseInvoiceItem {
+  id: string;
+  purchase_invoice_id: string;
+  product_id: string;
+  goods_receipt_item_id?: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  tax_percentage: number;
+  tax_amount: number;
+  discount_amount: number;
+  line_total: number;
+  hsn_code?: string;
+  product_code?: string;
+  products?: any;
+}
+
 export interface PurchaseInvoice {
   id: string;
   purchase_order_id: string;
@@ -22,6 +39,7 @@ export interface PurchaseInvoice {
   purchase_orders?: any;
   goods_receipts?: any;
   supplier_payments?: any[];
+  purchase_invoice_items?: PurchaseInvoiceItem[];
 }
 
 export interface CreatePurchaseInvoiceData {
@@ -35,6 +53,27 @@ export interface CreatePurchaseInvoiceData {
   discount_amount?: number;
   total_amount?: number;
   invoice_file_url?: string;
+  notes?: string;
+  items?: Array<{
+    product_id: string;
+    goods_receipt_item_id?: string;
+    quantity: number;
+    unit?: string;
+    unit_price: number;
+    tax_percentage?: number;
+    discount_amount?: number;
+    hsn_code?: string;
+    product_code?: string;
+  }>;
+}
+
+export interface CreateInvoiceFromGRNData {
+  goods_receipt_id: string;
+  supplier_invoice_number?: string;
+  invoice_date?: string;
+  due_date?: string;
+  tax_amount?: number;
+  discount_amount?: number;
   notes?: string;
 }
 
@@ -64,6 +103,11 @@ export const purchaseInvoicesService = {
 
   async create(invoiceData: CreatePurchaseInvoiceData): Promise<PurchaseInvoice> {
     const { data } = await apiClient.post<{ success: boolean; data: PurchaseInvoice }>('/purchase-invoices', invoiceData);
+    return data.data;
+  },
+
+  async createFromGRN(invoiceData: CreateInvoiceFromGRNData): Promise<PurchaseInvoice> {
+    const { data } = await apiClient.post<{ success: boolean; data: PurchaseInvoice }>('/purchase-invoices/from-grn', invoiceData);
     return data.data;
   },
 

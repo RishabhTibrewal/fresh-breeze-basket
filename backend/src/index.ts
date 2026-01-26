@@ -26,13 +26,20 @@ import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import { errorHandler } from './middleware/error';
 import { initOrderScheduler } from './utils/orderScheduler';
+import { initInvoiceScheduler } from './utils/invoiceScheduler';
 import { resolveTenant } from './middleware/tenant';
 
 // Extend Express Request type to include user
 declare global {
   namespace Express {
     interface Request {
-      user?: any;
+      user?: {
+        id: string;
+        email: string;
+        role?: string; // Backward compatibility
+        roles?: string[]; // New: array of role names
+        company_id?: string;
+      };
       companyId?: string;
       companySlug?: string;
     }
@@ -65,6 +72,7 @@ import purchaseInvoicesRouter from './routes/purchaseInvoices';
 import supplierPaymentsRouter from './routes/supplierPayments';
 import invoicesRouter from './routes/invoices';
 import posRouter from './routes/pos';
+import warehouseManagersRouter from './routes/warehouseManagers';
 
 // Initialize Express app
 export const app = express();
@@ -213,6 +221,7 @@ app.use('/api/purchase-invoices', purchaseInvoicesRouter);
 app.use('/api/supplier-payments', supplierPaymentsRouter);
 app.use('/api/invoices', invoicesRouter);
 app.use('/api/pos', posRouter);
+app.use('/api/warehouse-managers', warehouseManagersRouter);
 
 // 404 handler for unmatched routes (ensures CORS headers are present)
 app.use((req: express.Request, res: express.Response) => {
@@ -232,35 +241,7 @@ app.use((req: express.Request, res: express.Response) => {
   });
 });
 
-// Final error handling middleware
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Express error handler caught:', err);
-  
-  // Don't expose the error details in production
-  const statusCode = err.statusCode || 500;
-  const message = env === 'production' && statusCode === 500 
-    ? 'Something went wrong' 
-    : err.message || 'Internal server error';
-  
-  // Ensure CORS headers are present on error responses
-  const origin = req.headers.origin;
-  if (origin && !res.getHeader('Access-Control-Allow-Origin') && isAllowedOrigin(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Tenant-Subdomain');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  }
-  
-  res.status(statusCode).json({
-    success: false,
-    error: {
-      message,
-      stack: env === 'development' ? err.stack : undefined
-    }
-  });
-});
-
-// Error handling middleware
+// Error handling middleware (must be last)
 app.use(errorHandler);
 
 // Start server
@@ -276,6 +257,11 @@ if (process.env.NODE_ENV !== 'test') {
     // Initialize the order scheduler
     initOrderScheduler().catch(err => {
       console.error('Failed to initialize order scheduler:', err);
+    });
+    
+    // Initialize the invoice scheduler
+    initInvoiceScheduler().catch(err => {
+      console.error('Failed to initialize invoice scheduler:', err);
     });
   });
   

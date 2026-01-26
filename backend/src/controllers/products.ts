@@ -173,7 +173,10 @@ export const createProduct = async (req: Request, res: Response) => {
       origin,
       best_before,
       unit,
-      badge
+      badge,
+      product_code,
+      hsn_code,
+      tax
     } = req.body;
     
     if (!req.companyId) {
@@ -220,6 +223,9 @@ export const createProduct = async (req: Request, res: Response) => {
         best_before: best_before || null,
         unit: unit || null,
         badge: badge || null,
+        product_code: product_code || null,
+        hsn_code: hsn_code || null,
+        tax: tax !== undefined && tax !== null && tax !== '' ? parseFloat(tax) : null,
         company_id: req.companyId
       })
       .select();
@@ -282,12 +288,18 @@ export const updateProduct = async (req: Request, res: Response) => {
     console.log('Updating product with ID:', id);
     console.log('Request body:', req.body);
     
-    // Check if product exists
+    // Verify company_id matches
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    // Check if product exists and belongs to the company
     console.log('Checking if product exists...');
     const { data: existingProduct, error: fetchError } = await supabase
       .from('products')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
     
     if (fetchError) {
@@ -376,18 +388,39 @@ export const updateProduct = async (req: Request, res: Response) => {
     if ('slug' in req.body && req.body.slug !== undefined && req.body.slug !== null) {
       updateData.slug = req.body.slug;
     }
+    if ('product_code' in req.body && req.body.product_code !== undefined) {
+      updateData.product_code = req.body.product_code === '' ? null : req.body.product_code;
+    }
+    if ('hsn_code' in req.body && req.body.hsn_code !== undefined) {
+      updateData.hsn_code = req.body.hsn_code === '' ? null : req.body.hsn_code;
+    }
+    if ('tax' in req.body && req.body.tax !== undefined) {
+      if (req.body.tax === null || req.body.tax === '') {
+        updateData.tax = null;
+      } else {
+        const taxValue = typeof req.body.tax === 'number' ? req.body.tax : parseFloat(req.body.tax);
+        if (!isNaN(taxValue) && taxValue >= 0 && taxValue <= 100) {
+          updateData.tax = taxValue;
+        }
+      }
+    }
     
     console.log('Prepared update data:', updateData);
     
-    // Perform the update without select
+    // Perform the update with company_id filter
     const { error: updateError } = await supabase
       .from('products')
       .update(updateData)
-      .eq('id', id);
+      .eq('id', id)
+      .eq('company_id', req.companyId);
     
     if (updateError) {
       console.error('Error updating product:', updateError);
-      throw new ApiError(400, updateError.message);
+      console.error('Update data:', updateData);
+      console.error('Product ID:', id);
+      console.error('Company ID:', req.companyId);
+      const errorMessage = updateError instanceof Error ? updateError.message : String(updateError);
+      throw new ApiError(400, `Failed to update product: ${errorMessage}`);
     }
 
     // Then fetch the updated product
@@ -395,6 +428,7 @@ export const updateProduct = async (req: Request, res: Response) => {
       .from('products')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
     
     if (fetchUpdateError || !updatedProduct) {

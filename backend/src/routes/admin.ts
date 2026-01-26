@@ -4,6 +4,9 @@ import {
   getAllUsers,
   getDashboardStats,
   updateUserRole,
+  updateUserRoles,
+  getAllAvailableRoles,
+  getUserRoles,
   getSalesExecutives,
   getSalesTargets,
   getSalesTargetById,
@@ -29,8 +32,11 @@ router.get('/users', getAllUsers);
 // Get dashboard statistics (admin only)
 router.get('/dashboard-stats', getDashboardStats);
 
-// Update user role (admin only)
-router.put('/users/:userId/role', updateUserRole);
+// Role management endpoints
+router.get('/roles', getAllAvailableRoles);
+router.get('/users/:userId/roles', getUserRoles);
+router.put('/users/:userId/roles', updateUserRoles); // New: accepts roles array
+router.put('/users/:userId/role', updateUserRole); // Legacy: single role (backward compatibility)
 
 // Get sales executives (admin only)
 router.get('/sales-executives', getSalesExecutives);

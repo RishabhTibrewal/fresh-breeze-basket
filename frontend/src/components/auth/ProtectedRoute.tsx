@@ -13,7 +13,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   requireAdmin = false,
   children 
 }) => {
-  const { user, isAdmin, isLoading, role } = useAuth();
+  const { user, isAdmin, isAccounts, isLoading, role } = useAuth();
   const location = useLocation();
 
   // Add additional logging for debugging
@@ -36,9 +36,10 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }
 
-  if (requireAdmin && !isAdmin) {
-    console.log('Access denied: User is not an admin', { 
+  if (requireAdmin && !isAdmin && !isAccounts) {
+    console.log('Access denied: User is not an admin or accounts', { 
       isAdmin, 
+      isAccounts,
       role,
       uid: user.id 
     });

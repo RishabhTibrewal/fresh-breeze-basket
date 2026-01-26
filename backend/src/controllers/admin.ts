@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
+import { assignUserRoles, getAllRoles, getUserRoles as getUserRolesUtil, invalidateRoleCache, hasRole } from '../utils/roles';
 
 // Get all users (admin only)
 export const getAllUsers = async (req: Request, res: Response) => {
@@ -39,10 +40,24 @@ export const getAllUsers = async (req: Request, res: Response) => {
       throw new ApiError(500, `Error fetching users: ${error.message}`);
     }
     
+    // Fetch roles for each user from user_roles table
+    const usersWithRoles = await Promise.all(
+      (users || []).map(async (user: any) => {
+        const userRoles = await getUserRolesUtil(user.id, req.companyId);
+        const primaryRole = userRoles.length > 0 ? userRoles[0] : (user.role || 'user');
+        
+        return {
+          ...user,
+          role: primaryRole, // Backward compatibility - primary role
+          roles: userRoles // New: array of all roles
+        };
+      })
+    );
+    
     return res.status(200).json({
       success: true,
       data: {
-        users,
+        users: usersWithRoles,
         pagination: {
           page: pageNum,
           limit: limitNum,
@@ -67,13 +82,15 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     }
 
     // Get total number of users (filtered by company_id)
-    const { count: userCount, error: userError } = await supabase
+    // Use supabaseAdmin to bypass RLS for admin operations
+    const { count: userCount, error: userError } = await (supabaseAdmin || supabase)
       .from('profiles')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', req.companyId);
     
     if (userError) {
-      throw new ApiError(500, `Error fetching user count: ${userError.message}`);
+      console.error('Error fetching user count:', userError);
+      throw new ApiError(500, `Error fetching user count: ${userError.message || JSON.stringify(userError)}`);
     }
     
     // Get total number of products (filtered by company_id)
@@ -172,18 +189,53 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       salesPercentChange = ((lastMonthSales - twoMonthsAgoSales) / twoMonthsAgoSales) * 100;
     }
     
-    // Get products with low inventory (stock <= 5) (filtered by company_id)
-    const { data: lowInventoryProducts, error: lowInventoryError } = await supabase
+    // Get products with low inventory based on warehouse inventory stock (not product.stock_count)
+    // First, get all products for the company
+    const { data: allProducts, error: productsError } = await supabase
       .from('products')
-      .select('id, name, category_id, stock_count, categories(name)')
-      .eq('company_id', req.companyId)
-      .lte('stock_count', 5)
-      .order('stock_count', { ascending: true })
-      .limit(5);
+      .select('id, name, category_id, categories(name)')
+      .eq('company_id', req.companyId);
     
-    if (lowInventoryError) {
-      throw new ApiError(500, `Error fetching low inventory products: ${lowInventoryError.message}`);
+    if (productsError) {
+      throw new ApiError(500, `Error fetching products: ${productsError.message}`);
     }
+    
+    // If no products, set low inventory to empty array and continue
+    let lowInventoryProducts: any[] = [];
+    
+    if (allProducts && allProducts.length > 0) {
+      // Get warehouse inventory for all products
+      const productIds = allProducts.map(p => p.id);
+      const { data: warehouseInventory, error: inventoryError } = await supabase
+        .from('warehouse_inventory')
+        .select('product_id, stock_count')
+        .in('product_id', productIds)
+        .eq('company_id', req.companyId);
+      
+      if (inventoryError) {
+        throw new ApiError(500, `Error fetching warehouse inventory: ${inventoryError.message}`);
+      }
+      
+      // Calculate total stock for each product across all warehouses
+      const productStockMap: Record<string, number> = {};
+      warehouseInventory?.forEach((item: any) => {
+        if (!productStockMap[item.product_id]) {
+          productStockMap[item.product_id] = 0;
+        }
+        productStockMap[item.product_id] += (item.stock_count || 0);
+      });
+      
+      // Filter products with low inventory (total stock <= 5) and add stock_count
+      lowInventoryProducts = allProducts
+        .map(product => ({
+          ...product,
+          stock_count: productStockMap[product.id] || 0
+        }))
+        .filter(product => product.stock_count <= 5)
+        .sort((a, b) => a.stock_count - b.stock_count)
+        .slice(0, 5);
+    }
+    
     
     // Get recent orders (filtered by company_id)
     const { data: recentOrders, error: recentOrdersError } = await supabase
@@ -248,19 +300,90 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     }
     throw new ApiError(500, `Error fetching dashboard statistics: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-}; 
+};
 
-// Update user role (admin only)
-export const updateUserRole = async (req: Request, res: Response) => {
+// Get all available roles
+export const getAllAvailableRoles = async (req: Request, res: Response) => {
+  try {
+    const roles = await getAllRoles();
+    return res.status(200).json({
+      success: true,
+      data: roles
+    });
+  } catch (error) {
+    console.error('Error fetching roles:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'An unexpected error occurred while fetching roles'
+    });
+  }
+};
+
+// Get user roles for a specific user in a company
+export const getUserRoles = async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
-    const { role } = req.body;
 
-    // Validate role
-    if (!role || !['user', 'admin', 'sales'].includes(role)) {
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid role specified. Must be one of: user, admin, sales'
+        message: 'User ID is required'
+      });
+    }
+
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+
+    const roles = await getUserRolesUtil(userId, req.companyId);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        userId,
+        companyId: req.companyId,
+        roles
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user roles:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'An unexpected error occurred while fetching user roles'
+    });
+  }
+};
+
+// Update user roles (admin only) - accepts roles array
+export const updateUserRoles = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { roles } = req.body;
+
+    // Check if user has admin role specifically (not accounts)
+    if (!req.user?.id || !req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User authentication required'
+      });
+    }
+
+    const hasAdminRole = await hasRole(req.user.id, req.companyId, 'admin');
+    if (!hasAdminRole) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only administrators can change user roles'
+      });
+    }
+
+    // Validate roles
+    if (!roles || !Array.isArray(roles) || roles.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Roles array is required and must not be empty'
       });
     }
 
@@ -272,14 +395,6 @@ export const updateUserRole = async (req: Request, res: Response) => {
       });
     }
 
-    // Prevent admin from removing their own admin role
-    if (req.user.id === userId && role !== 'admin') {
-      return res.status(400).json({
-        success: false,
-        message: 'You cannot remove your own admin role'
-      });
-    }
-
     if (!req.companyId) {
       return res.status(400).json({
         success: false,
@@ -287,50 +402,105 @@ export const updateUserRole = async (req: Request, res: Response) => {
       });
     }
 
-    // Update membership role (memberships are the source of truth)
-    const { data: membership, error: membershipError } = await supabase
-      .from('company_memberships')
-      .update({ 
-        role,
-        updated_at: new Date().toISOString()
-      })
-      .eq('user_id', userId)
-      .eq('company_id', req.companyId)
-      .select()
-      .single();
-
-    if (membershipError || !membership) {
-      console.error('Error updating membership role:', membershipError);
-      return res.status(500).json({
+    // Validate role names
+    const validRoles = ['admin', 'sales', 'accounts', 'user', 'warehouse_manager'];
+    const invalidRoles = roles.filter((role: string) => !validRoles.includes(role));
+    if (invalidRoles.length > 0) {
+      return res.status(400).json({
         success: false,
-        message: `Failed to update user role: ${membershipError?.message || 'Membership not found'}`
+        message: `Invalid roles: ${invalidRoles.join(', ')}. Valid roles are: ${validRoles.join(', ')}`
       });
     }
 
-    // Also update profile role for backward compatibility (RLS may still reference it)
-    const { data: profile, error: profileError } = await supabase
+    // Prevent admin from removing their own admin role
+    if (req.user?.id === userId && !roles.includes('admin')) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot remove your own admin role'
+      });
+    }
+
+    // Assign roles using the utility function
+    const result = await assignUserRoles(userId, req.companyId, roles);
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: result.error || 'Failed to update user roles'
+      });
+    }
+
+    // Update company_memberships for backward compatibility
+    // RLS policies now allow admins to manage memberships
+    const primaryRole = roles[0] || 'user';
+    const { error: membershipError } = await supabase
+      .from('company_memberships')
+      .upsert({
+        user_id: userId,
+        company_id: req.companyId,
+        role: primaryRole,
+        is_active: true,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'user_id,company_id'
+      });
+
+    if (membershipError) {
+      console.error('Error updating membership (non-critical):', membershipError);
+    }
+
+    // Update profile role for backward compatibility
+    // RLS policies now allow admins to update profiles
+    const { error: profileError } = await supabase
       .from('profiles')
       .update({ 
-        role,
+        role: primaryRole,
         updated_at: new Date().toISOString()
       })
-      .eq('id', userId)
-      .select()
-      .single();
+      .eq('id', userId);
 
     if (profileError) {
       console.error('Error updating profile role (non-critical):', profileError);
     }
 
-    // Invalidate role cache so the new role is reflected immediately
-    const { invalidateRoleCache } = await import('../middleware/auth');
+    // Invalidate role cache
     invalidateRoleCache(userId);
 
     return res.status(200).json({
       success: true,
-      data: profile,
-      message: `User role updated to ${role} successfully`
+      data: {
+        userId,
+        companyId: req.companyId,
+        roles
+      },
+      message: `User roles updated successfully`
     });
+  } catch (error) {
+    console.error('Error in updateUserRoles:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'An unexpected error occurred while updating user roles'
+    });
+  }
+};
+
+// Legacy endpoint: Update user role (admin only) - kept for backward compatibility
+export const updateUserRole = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { role } = req.body;
+
+    // Convert single role to array and use updateUserRoles
+    if (!role) {
+      return res.status(400).json({
+        success: false,
+        message: 'Role is required'
+      });
+    }
+
+    // Create a new request object with roles array
+    req.body.roles = [role];
+    return updateUserRoles(req, res);
   } catch (error) {
     console.error('Error in updateUserRole:', error);
     return res.status(500).json({
@@ -576,9 +746,10 @@ export const createSalesTarget = async (req: Request, res: Response) => {
     }
 
     // Verify sales executive exists and has sales role in this company (check membership)
+    // Check if user exists in company and has sales role using new role system
     const { data: membership, error: membershipError } = await supabase
       .from('company_memberships')
-      .select('id, role')
+      .select('id')
       .eq('user_id', sales_executive_id)
       .eq('company_id', req.companyId)
       .eq('is_active', true)
@@ -591,7 +762,9 @@ export const createSalesTarget = async (req: Request, res: Response) => {
       });
     }
 
-    if (membership.role !== 'sales') {
+    // Check if user has sales role using new role system
+    const hasSalesRole = await hasRole(sales_executive_id, req.companyId, 'sales');
+    if (!hasSalesRole) {
       return res.status(400).json({
         success: false,
         message: 'User is not a sales executive in this company'
@@ -1102,7 +1275,9 @@ export const createLeadAdmin = async (req: Request, res: Response) => {
       throw new ApiError(404, 'Sales executive not found in this company');
     }
 
-    if (membership.role !== 'sales') {
+    // Check if user has sales role using new role system
+    const hasSalesRole = await hasRole(sales_executive_id, req.companyId, 'sales');
+    if (!hasSalesRole) {
       throw new ApiError(400, 'Assigned user must have sales role in this company');
     }
 

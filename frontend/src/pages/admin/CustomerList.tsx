@@ -268,18 +268,25 @@ const CustomersPage: React.FC = () => {
                           )}
                         </TableCell>
                         <TableCell className="px-2 py-2">
-                          <Badge 
-                            className={`text-xs px-2 py-0.5 ${
-                              user.role === 'admin' 
-                                ? 'bg-primary/20 text-primary' 
-                                : user.role === 'sales'
-                                ? 'bg-blue-100 text-blue-800'
-                                : 'bg-gray-100 text-gray-800'
-                            }`}
-                            variant="outline"
-                          >
-                            {user.role}
-                          </Badge>
+                          <div className="flex flex-wrap gap-1">
+                            {(user.roles || (user.role ? [user.role] : ['user'])).map((roleName: string) => (
+                              <Badge 
+                                key={roleName}
+                                className={`text-xs px-2 py-0.5 ${
+                                  roleName === 'admin' 
+                                    ? 'bg-primary/20 text-primary' 
+                                    : roleName === 'sales'
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : roleName === 'accounts'
+                                    ? 'bg-green-100 text-green-800'
+                                    : 'bg-gray-100 text-gray-800'
+                                }`}
+                                variant="outline"
+                              >
+                                {roleName}
+                              </Badge>
+                            ))}
+                          </div>
                         </TableCell>
                         <TableCell className="px-2 py-2">
                           <div className="flex items-center gap-1 text-sm min-w-0">

@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Calendar, Flag, ShoppingCart, Heart, Minus, Plus, ArrowLeft } from 'lucide-react';
 import { productsService } from '@/api/products';
+import { warehousesService } from '@/api/warehouses';
 import ProductCard from '@/components/products/ProductCard';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
@@ -22,6 +23,17 @@ const ProductDetails = () => {
     queryFn: () => productsService.getById(id || ''),
     enabled: !!id,
   });
+
+  // Fetch warehouse inventory stock for this product
+  const { data: stockData } = useQuery({
+    queryKey: ['product-stock', id],
+    queryFn: () => warehousesService.getProductStockAcrossWarehouses(id || ''),
+    enabled: !!id,
+    staleTime: 30000, // Cache for 30 seconds
+  });
+
+  // Use ONLY warehouse inventory stock - no fallback to product.stock_count
+  const actualStock = stockData?.total_stock ?? 0;
 
   const cartItem = product ? cartState.items.find(item => item.id === product.id) : undefined;
   const quantityInCart = cartItem ? cartItem.quantity : 0;
@@ -46,16 +58,25 @@ const ProductDetails = () => {
     ?.filter(p => p.category_id === product?.category_id && p.id !== product?.id)
     .slice(0, 4);
 
+  // Fetch bulk stock data for related products
+  const { data: relatedProductsStockData = {} } = useQuery({
+    queryKey: ['bulk-product-stock-related', relatedProducts?.map(p => p.id).join(',')],
+    queryFn: () => {
+      if (!relatedProducts || relatedProducts.length === 0) return {};
+      return warehousesService.getBulkProductStock(relatedProducts.map(p => p.id));
+    },
+    enabled: !!relatedProducts && relatedProducts.length > 0,
+    staleTime: 30000, // Cache for 30 seconds
+  });
+
   // Handle quantity change (for when item is NOT in cart, or for setting new quantity if it IS)
   const decreaseQuantity = () => {
     setQuantity(prev => Math.max(1, prev - 1));
   };
 
   const increaseQuantity = () => {
-    const maxStock = product?.stock_count ?? 0;
-    // If item is in cart, allow increasing up to stock_count
-    // If item is NOT in cart, local quantity can go up to stock_count
-    const limit = maxStock; 
+    // Use actual warehouse inventory stock
+    const limit = actualStock; 
     setQuantity(prev => Math.min(limit, prev + 1));
   };
   
@@ -66,9 +87,9 @@ const ProductDetails = () => {
         toast({ title: "Invalid Quantity", description: "Please select a valid quantity.", variant: "destructive" });
         return;
       }
-      if (quantity > product.stock_count) {
-        toast({ title: "Not Enough Stock", description: `Only ${product.stock_count} items available.`, variant: "destructive" });
-        setQuantity(product.stock_count); // Adjust to max available
+      if (quantity > actualStock) {
+        toast({ title: "Not Enough Stock", description: `Only ${actualStock} items available.`, variant: "destructive" });
+        setQuantity(actualStock); // Adjust to max available
         return;
       }
       addToCart(product, quantity);
@@ -79,9 +100,9 @@ const ProductDetails = () => {
   // Handle updating quantity of an item ALREADY in the cart
   const handleUpdateCartQuantity = (newQuantity: number) => {
     if (product && cartItem) {
-      if (newQuantity > product.stock_count) {
-        toast({ title: "Not Enough Stock", description: `Only ${product.stock_count} items available.`, variant: "destructive" });
-        updateQuantity(product.id, product.stock_count); // Update to max available
+      if (newQuantity > actualStock) {
+        toast({ title: "Not Enough Stock", description: `Only ${actualStock} items available.`, variant: "destructive" });
+        updateQuantity(product.id, actualStock); // Update to max available
         return;
       }
       updateQuantity(product.id, newQuantity); // This will remove if newQuantity is 0
@@ -136,7 +157,8 @@ const ProductDetails = () => {
     : product.image_url || '/placeholder.svg';
 
   // Determine max quantity for the input based on whether it's in cart or not
-  const maxAllowedForInput = product ? product.stock_count : 0;
+  // Use ONLY warehouse inventory stock - no fallback to product.stock_count
+  const maxAllowedForInput = actualStock;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -222,16 +244,16 @@ const ProductDetails = () => {
 
                 {/* Stock Availability Display */}
                 <div className="mb-4 text-sm font-medium">
-                  {product.stock_count > 10 ? (
+                  {actualStock > 10 ? (
                     <span className="text-green-600">In Stock</span>
-                  ) : product.stock_count > 0 ? (
-                    <span className="text-orange-500">{`Only ${product.stock_count} left - order soon!`}</span>
+                  ) : actualStock > 0 ? (
+                    <span className="text-orange-500">{`Only ${actualStock} left - order soon!`}</span>
                   ) : (
                     <span className="text-red-600">Out of Stock</span>
                   )}
                 </div>
 
-                {product.stock_count > 0 && ( // Only show quantity/add to cart if in stock
+                {actualStock > 0 && ( // Only show quantity/add to cart if in stock
                   <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
                     <div className="flex items-center border rounded-lg overflow-hidden">
                       <button
@@ -257,7 +279,7 @@ const ProductDetails = () => {
                       <button
                         onClick={handleAddNewToCart}
                         className="flex-1 bg-green-600 text-white py-3 sm:py-2 rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center justify-center text-sm"
-                        disabled={!product.is_active || product.stock_count === 0 || quantity <= 0 || quantity > product.stock_count}
+                        disabled={!product.is_active || actualStock === 0 || quantity <= 0 || quantity > actualStock}
                       >
                         <ShoppingCart className="h-5 w-5 mr-2" />
                         Add to Cart ({quantity})
@@ -266,12 +288,12 @@ const ProductDetails = () => {
                   </div>
                 )}
                 
-                {quantityInCart > 0 && product.stock_count > 0 && (
+                {quantityInCart > 0 && actualStock > 0 && (
                    <p className="text-sm text-green-700 mb-6">This item is in your cart. Adjust quantity above.</p>
                 )}
                 
                 {/* Fallback for out of stock */}
-                {product.stock_count <= 0 && (
+                {actualStock <= 0 && (
                   <div className="mb-6">
                      <button
                         className="flex-1 w-full bg-gray-400 text-white py-3 sm:py-2 rounded-lg font-medium cursor-not-allowed flex items-center justify-center text-sm"
@@ -307,7 +329,11 @@ const ProductDetails = () => {
               <h2 className="text-2xl font-bold mb-6">Related Products</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 {relatedProducts.map((relatedProduct) => (
-                  <ProductCard key={relatedProduct.id} product={relatedProduct} />
+                  <ProductCard 
+                    key={relatedProduct.id} 
+                    product={relatedProduct}
+                    bulkStockData={relatedProductsStockData[relatedProduct.id] as { warehouses: any[], total_stock: number } | undefined}
+                  />
                 ))}
               </div>
             </div>

@@ -25,11 +25,11 @@ export default function WarehouseStockDisplay({
   const [isOpen, setIsOpen] = useState(false);
 
   // Only use bulk data - individual API calls are disabled to prevent rate limiting
-  // If bulkStockData is not provided, show fallback using totalStock prop
+  // Use ONLY warehouse inventory stock - no fallback to product.stock_count
   const warehouses = bulkStockData?.warehouses || [];
   const totalWarehouseStock = bulkStockData?.total_stock ?? totalStock ?? 0;
 
-  // If no bulk data and no warehouses, show simple total stock fallback
+  // If no bulk data and no warehouses, show N/A
   if (warehouses.length === 0) {
     return (
       <span className="text-xs text-muted-foreground">

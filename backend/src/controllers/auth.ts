@@ -2,15 +2,24 @@ import { Request, Response } from 'express';
 import { supabase, createAuthClient, supabaseAdmin } from '../config/supabase';
 import { SupabaseJwtVerificationError, verifySupabaseJwt } from '../utils/supabaseJwt';
 import { ApiError } from '../middleware/error';
+import { assignUserRoles, hasAnyRole, getUserRoles, invalidateRoleCache } from '../utils/roles';
 
-const ensureMembership = async (userId: string, companyId: string, role: string) => {
+const ensureMembership = async (userId: string, companyId: string, roles: string[] = ['user']) => {
+  // Use new multi-role system
+  const result = await assignUserRoles(userId, companyId, roles);
+  if (!result.success) {
+    return new Error(result.error || 'Failed to assign roles');
+  }
+  
+  // Also ensure company_memberships entry exists for backward compatibility
   const client = supabaseAdmin || supabase;
+  const primaryRole = roles.length > 0 ? roles[0] : 'user';
   const { error } = await client
     .from('company_memberships')
     .upsert({
       user_id: userId,
       company_id: companyId,
-      role,
+      role: primaryRole, // Keep for backward compatibility
       is_active: true
     }, {
       onConflict: 'user_id,company_id'
@@ -23,7 +32,7 @@ const getMembership = async (userId: string, companyId?: string) => {
   const client = supabaseAdmin || supabase;
   let query = client
     .from('company_memberships')
-    .select('company_id, role, is_active')
+    .select('company_id, is_active')
     .eq('user_id', userId)
     .eq('is_active', true);
 
@@ -46,7 +55,20 @@ const getMembership = async (userId: string, companyId?: string) => {
 export const register = async (req: Request, res: Response) => {
   try {
     console.log('Registration request body:', req.body);
-    const { email, password, first_name, last_name, phone } = req.body;
+    const { email, password, first_name, last_name, phone, roles } = req.body;
+    
+    // Validate roles if provided
+    const userRoles = roles && Array.isArray(roles) ? roles : ['user'];
+    
+    // Validate role names
+    const validRoles = ['admin', 'sales', 'accounts', 'user', 'warehouse_manager'];
+    const invalidRoles = userRoles.filter((role: string) => !validRoles.includes(role));
+    if (invalidRoles.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid roles: ${invalidRoles.join(', ')}. Valid roles are: ${validRoles.join(', ')}`
+      });
+    }
 
     if (!req.companyId) {
       return res.status(400).json({
@@ -83,7 +105,8 @@ export const register = async (req: Request, res: Response) => {
         last_name: last_name || null,
         phone: phone || null,
         company_id: req.companyId,
-        role: 'user'
+        role: userRoles[0] || 'user', // Primary role for backward compatibility
+        roles: userRoles // New: array of roles
       }
     });
     
@@ -131,7 +154,7 @@ export const register = async (req: Request, res: Response) => {
         }
 
         if (existingUserId) {
-          const membershipError = await ensureMembership(existingUserId, req.companyId, 'user');
+          const membershipError = await ensureMembership(existingUserId, req.companyId, userRoles);
           if (membershipError) {
             console.error('Error creating membership for existing user:', membershipError);
             return res.status(500).json({
@@ -203,7 +226,7 @@ export const register = async (req: Request, res: Response) => {
       last_name: last_name || null,
       phone: phone || null,
       company_id: req.companyId,
-      role: 'user'
+      role: userRoles[0] || 'user' // Primary role for backward compatibility
     };
 
     const { error: profileError } = await supabaseAdmin
@@ -218,7 +241,7 @@ export const register = async (req: Request, res: Response) => {
       });
     }
 
-    const membershipError = await ensureMembership(authData.user.id, req.companyId, 'user');
+    const membershipError = await ensureMembership(authData.user.id, req.companyId, userRoles);
     if (membershipError) {
       console.error('Error creating membership:', membershipError);
       return res.status(500).json({
@@ -315,6 +338,10 @@ export const login = async (req: Request, res: Response) => {
             .eq('id', profile.id);
         }
         
+        // Get user roles using new role system
+        const userRoles = await getUserRoles(payload.sub, activeCompanyId);
+        const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
+        
         // Return success with token (reusing the Supabase token)
         return res.status(200).json({
           success: true,
@@ -326,7 +353,8 @@ export const login = async (req: Request, res: Response) => {
               first_name: profile.first_name,
               last_name: profile.last_name,
               phone: profile.phone,
-              role: membership.role,
+              role: primaryRole, // Backward compatibility
+              roles: userRoles, // New: array of roles
               company_id: activeCompanyId
             }
           }
@@ -412,6 +440,10 @@ export const login = async (req: Request, res: Response) => {
         .eq('id', profile.id);
     }
     
+    // Get user roles using new role system
+    const userRoles = await getUserRoles(authData.user.id, activeCompanyId);
+    const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
+    
     return res.status(200).json({
       success: true,
       data: {
@@ -422,7 +454,8 @@ export const login = async (req: Request, res: Response) => {
           first_name: profile.first_name,
           last_name: profile.last_name,
           phone: profile.phone,
-          role: membership.role,
+          role: primaryRole, // Backward compatibility
+          roles: userRoles, // New: array of roles
           company_id: activeCompanyId
         }
       }
@@ -439,6 +472,15 @@ export const login = async (req: Request, res: Response) => {
 // Get current user
 export const getCurrentUser = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          message: 'User not authenticated'
+        }
+      });
+    }
+
     const userId = req.user.id;
     if (!req.companyId) {
       return res.status(400).json({
@@ -547,8 +589,12 @@ export const getCurrentUser = async (req: Request, res: Response) => {
       });
     }
     
-    // Check if user is admin
-    const { data: isAdmin } = await supabase.rpc('is_admin', { user_id: userId });
+    // Check if user is admin using new role system
+    const isAdminCheck = await hasAnyRole(userId, activeCompanyId, ['admin']);
+    
+    // Get user roles using new role system
+    const userRoles = await getUserRoles(userId, activeCompanyId);
+    const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
     
     if (profile?.company_id !== activeCompanyId) {
       await supabase
@@ -563,9 +609,10 @@ export const getCurrentUser = async (req: Request, res: Response) => {
         id: userId,
         email: req.user.email,
         ...profile,
-        isAdmin: isAdmin || false,
+        isAdmin: isAdminCheck,
         company_id: activeCompanyId,
-        role: membership.role
+        role: primaryRole, // Backward compatibility
+        roles: userRoles // New: array of roles
       }
     });
   } catch (error) {
@@ -583,6 +630,12 @@ export const getCurrentUser = async (req: Request, res: Response) => {
 // Update user profile
 export const updateProfile = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'User not authenticated' }
+      });
+    }
     const userId = req.user.id;
     const { first_name, last_name, phone, avatar_url } = req.body;
     
@@ -651,6 +704,12 @@ export const updateProfile = async (req: Request, res: Response) => {
 // Add new address
 export const addAddress = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
     const userId = req.user.id;
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
@@ -755,6 +814,12 @@ export const addAddress = async (req: Request, res: Response) => {
 // Get user addresses
 export const getAddresses = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
     const userId = req.user.id;
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
@@ -801,6 +866,12 @@ export const getAddresses = async (req: Request, res: Response) => {
 // Get address by ID
 export const getAddressById = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
     const userId = req.user.id;
     const { id } = req.params;
     const token = req.headers.authorization?.split(' ')[1];
@@ -824,7 +895,14 @@ export const getAddressById = async (req: Request, res: Response) => {
     // Create client with auth context
     const authClient = createAuthClient(token);
 
-    const isPrivileged = req.user.role === 'admin' || req.user.role === 'sales';
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
+    // Check if user has admin or sales role using new role system
+    const isPrivileged = await hasAnyRole(req.user.id, req.companyId, ['admin', 'sales']);
 
     let query = authClient
       .from('addresses')
@@ -871,6 +949,12 @@ export const getAddressById = async (req: Request, res: Response) => {
 // Update address
 export const updateAddress = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
     const userId = req.user.id;
     const { id } = req.params;
     const token = req.headers.authorization?.split(' ')[1];
@@ -977,6 +1061,12 @@ export const updateAddress = async (req: Request, res: Response) => {
 // Delete address
 export const deleteAddress = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
     const userId = req.user.id;
     const { id } = req.params;
     const token = req.headers.authorization?.split(' ')[1];
@@ -1064,6 +1154,12 @@ export const logout = async (req: Request, res: Response) => {
 // Function to check admin status
 export const checkAdminStatus = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'User not authenticated' }
+      });
+    }
     const userId = req.user.id;
     
     // Get user's profile
@@ -1088,18 +1184,19 @@ export const checkAdminStatus = async (req: Request, res: Response) => {
       console.error('Error in is_admin RPC call:', rpcError);
     }
     
-    // Use RPC result (membership-based) as primary, fallback to middleware role
-    const isAdmin = isAdminRpc || req.user.role === 'admin';
+    // Use RPC result (membership-based) as primary, fallback to new role system
+    const isAdminCheck = await hasAnyRole(req.user.id, req.companyId, ['admin']);
+    const isAdmin = isAdminRpc || isAdminCheck;
     
     return res.status(200).json({
       success: true,
       data: {
         userId,
-        email: req.user.email,
+        email: req.user?.email || '',
         profile,
         isAdmin,
         isAdminRpc,
-        membershipRole: req.user.role || 'none' // Role from membership (via middleware)
+        membershipRole: req.user?.role || 'none' // Role from membership (via middleware)
       }
     });
   } catch (error) {
@@ -1111,43 +1208,94 @@ export const checkAdminStatus = async (req: Request, res: Response) => {
   }
 };
 
-// Update user role
+// Update user role (legacy endpoint - users should not update their own roles)
+// This is kept for backward compatibility but should be deprecated
+// Role updates should be done by admins via /api/admin/users/:userId/roles
 export const updateRole = async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
     const userId = req.user.id;
     const { role } = req.body;
 
-    if (!role || !['user', 'admin', 'sales'].includes(role)) {
+    if (!req.companyId) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid role specified'
+        message: 'Company context is required'
       });
     }
 
-    // Update profile role
-    const { data: profile, error } = await supabase
+    // Validate role
+    const validRoles = ['user', 'admin', 'sales', 'accounts', 'warehouse_manager'];
+    if (!role || !validRoles.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid role specified. Valid roles are: ${validRoles.join(', ')}`
+      });
+    }
+
+    // Prevent users from assigning themselves admin role
+    if (role === 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'You cannot assign yourself admin role. Contact an administrator.'
+      });
+    }
+
+    // Use new role system to assign role
+    const result = await assignUserRoles(userId, req.companyId, [role]);
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: result.error || 'Failed to update role'
+      });
+    }
+
+    // Update profile role for backward compatibility
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .update({ role })
       .eq('id', userId)
       .select()
       .single();
 
-    if (error) {
-      console.error('Error updating role:', error);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to update role'
+    if (profileError) {
+      console.error('Error updating profile role (non-critical):', profileError);
+    }
+
+    // Update company_memberships for backward compatibility
+    const { error: membershipError } = await supabase
+      .from('company_memberships')
+      .upsert({
+        user_id: userId,
+        company_id: req.companyId,
+        role,
+        is_active: true,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'user_id,company_id'
       });
+
+    if (membershipError) {
+      console.error('Error updating membership (non-critical):', membershipError);
     }
 
     // Invalidate role cache so the new role is reflected immediately
-    // Use dynamic import to avoid circular dependency
-    const { invalidateRoleCache } = await import('../middleware/auth');
     invalidateRoleCache(userId);
 
     return res.status(200).json({
       success: true,
-      data: profile
+      data: {
+        ...profile,
+        role, // Backward compatibility
+        roles: [role] // New: array format
+      },
+      message: 'Role updated successfully. Note: Role management should be done by administrators.'
     });
   } catch (error) {
     console.error('Error in updateRole:', error);
@@ -1183,6 +1331,12 @@ export const syncSession = async (req: Request, res: Response) => {
       });
     }
     
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
     const membership = await getMembership(req.user.id, req.companyId);
     if (!membership || membership.company_id !== req.companyId) {
       return res.status(403).json({

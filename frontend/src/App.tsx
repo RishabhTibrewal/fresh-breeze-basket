@@ -144,6 +144,7 @@ const App: React.FC = () => {
                     <Route path="purchase-orders/:id" element={<PurchaseOrderDetail />} />
                     <Route path="goods-receipts" element={<GoodsReceipts />} />
                     <Route path="goods-receipts/new" element={<CreateGoodsReceipt />} />
+                    <Route path="goods-receipts/:id/edit" element={<CreateGoodsReceipt />} />
                     <Route path="goods-receipts/:id" element={<GoodsReceiptDetail />} />
                     <Route path="suppliers" element={<Suppliers />} />
                     <Route path="suppliers/new" element={<SupplierForm />} />
@@ -151,6 +152,7 @@ const App: React.FC = () => {
                     <Route path="suppliers/:id/edit" element={<SupplierForm />} />
                     <Route path="purchase-invoices" element={<PurchaseInvoices />} />
                     <Route path="purchase-invoices/new" element={<CreatePurchaseInvoice />} />
+                    <Route path="purchase-invoices/:id/edit" element={<CreatePurchaseInvoice />} />
                     <Route path="purchase-invoices/:id" element={<PurchaseInvoiceDetail />} />
                     <Route path="supplier-payments" element={<SupplierPayments />} />
                     <Route path="supplier-payments/new" element={<CreateSupplierPayment />} />

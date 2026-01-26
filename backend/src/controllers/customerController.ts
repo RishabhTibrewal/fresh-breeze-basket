@@ -465,7 +465,8 @@ export const createCustomer = async (req: Request, res: Response) => {
           name,
           phone,
           company_id: req.companyId,
-          role: 'user'
+          role: 'user', // Primary role for backward compatibility
+          roles: ['user'] // Default role for customers
         }
       });
 
@@ -867,7 +868,8 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
         name,
         phone,
         company_id: req.companyId,
-        role: 'user'
+        role: 'user', // Primary role for backward compatibility
+        roles: ['user'] // Default role for customers
       }
     });
 

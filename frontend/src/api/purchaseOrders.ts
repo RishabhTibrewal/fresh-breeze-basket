@@ -29,6 +29,10 @@ export interface PurchaseOrderItem {
   unit_price: number;
   line_total: number;
   received_quantity: number;
+  unit?: string;
+  product_code?: string;
+  hsn_code?: string;
+  tax_percentage?: number;
   created_at: string;
   products?: any;
 }
@@ -76,6 +80,13 @@ export const purchaseOrdersService = {
 
   async update(id: string, orderData: Partial<CreatePurchaseOrderData>): Promise<PurchaseOrder> {
     const { data } = await apiClient.put<{ success: boolean; data: PurchaseOrder }>(`/purchase-orders/${id}`, orderData);
+    return data.data;
+  },
+
+  async submit(id: string): Promise<PurchaseOrder> {
+    const { data } = await apiClient.post<{ success: boolean; message: string; data: PurchaseOrder }>(
+      `/purchase-orders/${id}/submit`
+    );
     return data.data;
   },
 

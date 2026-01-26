@@ -31,6 +31,10 @@ export interface GoodsReceiptItem {
   batch_number?: string;
   expiry_date?: string;
   condition_notes?: string;
+  unit?: string;
+  product_code?: string;
+  hsn_code?: string;
+  tax_percentage?: number;
   created_at: string;
   products?: any;
   purchase_order_items?: any;

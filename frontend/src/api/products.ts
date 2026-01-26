@@ -29,6 +29,9 @@ interface APIProduct {
   updated_at: string;
   unit: number | null;
   badge: string | null;
+  product_code: string | null;
+  hsn_code: string | null;
+  tax: number | null;
 }
 
 export interface Product {
@@ -51,6 +54,9 @@ export interface Product {
   updated_at: string;                  // timestamp with timezone
   unit: number | null;                 // numeric
   badge: string | null;                // text
+  product_code: string | null;         // varchar(100)
+  hsn_code: string | null;              // varchar(50)
+  tax: number | null;                  // decimal(5,2)
   additional_images: string[];         // handled separately in product_images table
 }
 
@@ -73,6 +79,9 @@ export interface CreateProductInput {
   is_featured: boolean;
   is_active: boolean;
   slug?: string;
+  product_code?: string | null;
+  hsn_code?: string | null;
+  tax?: string | null;
 }
 
 export interface UpdateProductData extends CreateProductInput {}
@@ -106,7 +115,10 @@ export const productsService = {
       created_at: apiProduct.created_at,
       updated_at: apiProduct.updated_at,
       nutritional_info: apiProduct.nutritional_info,
-      best_before: apiProduct.best_before
+      best_before: apiProduct.best_before,
+      product_code: apiProduct.product_code || null,
+      hsn_code: apiProduct.hsn_code || null,
+      tax: apiProduct.tax || null
     }));
   },
 
@@ -139,7 +151,10 @@ export const productsService = {
       created_at: apiProduct.created_at,
       updated_at: apiProduct.updated_at,
       nutritional_info: apiProduct.nutritional_info,
-      best_before: apiProduct.best_before
+      best_before: apiProduct.best_before,
+      product_code: apiProduct.product_code || null,
+      hsn_code: apiProduct.hsn_code || null,
+      tax: apiProduct.tax || null
     };
   },
 
@@ -235,6 +250,22 @@ export const productsService = {
       formattedData.slug = productData.slug;
     } else if (productData.name) {
       formattedData.slug = productData.name.toLowerCase().replace(/\s+/g, '-');
+    }
+    if (productData.product_code !== undefined) {
+      formattedData.product_code = (productData.product_code === '' || productData.product_code === null) ? null : productData.product_code;
+    }
+    if (productData.hsn_code !== undefined) {
+      formattedData.hsn_code = (productData.hsn_code === '' || productData.hsn_code === null) ? null : productData.hsn_code;
+    }
+    if (productData.tax !== undefined) {
+      if (productData.tax === null || productData.tax === '') {
+        formattedData.tax = null;
+      } else {
+        const taxValue = parseFloat(productData.tax);
+        if (!isNaN(taxValue) && taxValue >= 0 && taxValue <= 100) {
+          formattedData.tax = taxValue;
+        }
+      }
     }
 
     const { data: response } = await apiClient.put<ApiResponse<Product>>(`/products/${id}`, formattedData);

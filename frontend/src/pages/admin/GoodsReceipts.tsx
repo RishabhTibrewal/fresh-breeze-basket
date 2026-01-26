@@ -19,9 +19,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Eye } from "lucide-react";
+import { Plus, Search, Eye, FileText, CheckCircle, ExternalLink, MoreHorizontal, Pencil } from "lucide-react";
 import { goodsReceiptsService } from '@/api/goodsReceipts';
+import { purchaseInvoicesService } from '@/api/purchaseInvoices';
 import { warehousesService } from '@/api/warehouses';
+import { useAuth } from '@/contexts/AuthContext';
+import { StatusBadge } from '@/components/procurement/StatusBadge';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -34,10 +45,49 @@ export default function GoodsReceipts() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const poId = searchParams.get('po');
+  const queryClient = useQueryClient();
+  const { isAdmin, isWarehouseManager, isAccounts, hasWarehouseAccess } = useAuth();
   
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
+
+  // Complete GRN mutation for quick action
+  const completeMutation = useMutation({
+    mutationFn: (grnId: string) => goodsReceiptsService.complete(grnId),
+    onSuccess: () => {
+      toast.success('GRN completed successfully');
+      queryClient.invalidateQueries({ queryKey: ['goods-receipts'] });
+    },
+    onError: (error: any) => {
+      const errorMessage = error.response?.data?.error?.message || error.response?.data?.error || 'Failed to complete GRN';
+      toast.error(errorMessage);
+    },
+  });
+
+  // Create invoice from GRN mutation
+  const createInvoiceMutation = useMutation({
+    mutationFn: (grnId: string) => purchaseInvoicesService.createFromGRN({ goods_receipt_id: grnId }),
+    onSuccess: (invoice) => {
+      toast.success('Invoice created successfully');
+      queryClient.invalidateQueries({ queryKey: ['purchase-invoices'] });
+      navigate(`/admin/purchase-invoices/${invoice.id}`);
+    },
+    onError: (error: any) => {
+      const errorMessage = error.response?.data?.error?.message || error.response?.data?.error || 'Failed to create invoice';
+      toast.error(errorMessage);
+    },
+  });
+
+  // Check if GRN already has an invoice
+  const { data: allInvoices = [] } = useQuery({
+    queryKey: ['purchase-invoices'],
+    queryFn: () => purchaseInvoicesService.getAll({}),
+  });
+
+  const hasInvoice = (grnId: string) => {
+    return allInvoices.some((inv: any) => inv.goods_receipt_id === grnId);
+  };
 
   // Fetch goods receipts
   const { data: goodsReceipts = [], isLoading } = useQuery({
@@ -51,27 +101,20 @@ export default function GoodsReceipts() {
   });
 
   // Fetch warehouses for filter
-  const { data: warehouses = [] } = useQuery({
+  const { data: allWarehouses = [] } = useQuery({
     queryKey: ['warehouses'],
     queryFn: () => warehousesService.getAll(true),
   });
 
-  const getStatusBadgeVariant = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return 'default';
-      case 'inspected':
-        return 'secondary';
-      case 'approved':
-        return 'default';
-      case 'rejected':
-        return 'destructive';
-      case 'completed':
-        return 'default';
-      default:
-        return 'secondary';
-    }
-  };
+  // Filter warehouses based on user access
+  const availableWarehouses = isAdmin 
+    ? allWarehouses 
+    : allWarehouses.filter((wh: any) => hasWarehouseAccess(wh.id));
+
+  // Filter GRNs by warehouse access for warehouse managers
+  const filteredGRNs = isAdmin 
+    ? goodsReceipts 
+    : goodsReceipts.filter((grn: any) => hasWarehouseAccess(grn.warehouse_id));
 
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
@@ -82,10 +125,12 @@ export default function GoodsReceipts() {
             Manage goods receipt notes (GRN)
           </p>
         </div>
-        <Button onClick={() => navigate('/admin/goods-receipts/new' + (poId ? `?po=${poId}` : ''))}>
-          <Plus className="h-4 w-4 mr-2" />
-          Create GRN
-        </Button>
+        {(isAdmin || isWarehouseManager) && (
+          <Button onClick={() => navigate('/admin/goods-receipts/new' + (poId ? `?po=${poId}` : ''))}>
+            <Plus className="h-4 w-4 mr-2" />
+            Create GRN
+          </Button>
+        )}
       </div>
 
       {/* Filters */}
@@ -120,7 +165,7 @@ export default function GoodsReceipts() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Warehouses</SelectItem>
-                {warehouses.map((warehouse: any) => (
+                {availableWarehouses.map((warehouse: any) => (
                   <SelectItem key={warehouse.id} value={warehouse.id}>
                     {warehouse.code} - {warehouse.name}
                   </SelectItem>
@@ -134,12 +179,12 @@ export default function GoodsReceipts() {
       {/* Goods Receipts Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Goods Receipts ({goodsReceipts.length})</CardTitle>
+          <CardTitle>Goods Receipts ({filteredGRNs.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8">Loading goods receipts...</div>
-          ) : goodsReceipts.length === 0 ? (
+          ) : filteredGRNs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No goods receipts found
             </div>
@@ -158,11 +203,26 @@ export default function GoodsReceipts() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {goodsReceipts.map((grn) => (
+                  {filteredGRNs.map((grn) => (
                     <TableRow key={grn.id}>
                       <TableCell className="font-medium">{grn.grn_number}</TableCell>
                       <TableCell>
-                        {grn.purchase_orders?.po_number || 'N/A'}
+                        <div className="flex items-center gap-2">
+                          <span>{grn.purchase_orders?.po_number || 'N/A'}</span>
+                          {grn.purchase_order_id && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/admin/purchase-orders/${grn.purchase_order_id}`);
+                              }}
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         {grn.warehouses?.code || 'N/A'}
@@ -171,21 +231,66 @@ export default function GoodsReceipts() {
                         {new Date(grn.receipt_date).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="font-medium">
-                        ₹{grn.total_received_amount.toFixed(2)}
+                        ₹{grn.total_received_amount?.toFixed(2) || '0.00'}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getStatusBadgeVariant(grn.status)}>
-                          {grn.status.toUpperCase()}
-                        </Badge>
+                        <StatusBadge status={grn.status} />
                       </TableCell>
                       <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => navigate(`/admin/goods-receipts/${grn.id}`)}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => navigate(`/admin/goods-receipts/${grn.id}`)}>
+                              <Eye className="h-4 w-4 mr-2" />
+                              View Details
+                            </DropdownMenuItem>
+                            {isAdmin && (grn.status === 'pending' || grn.status === 'inspected') && (
+                              <DropdownMenuItem onClick={() => navigate(`/admin/goods-receipts/${grn.id}/edit`)}>
+                                <Pencil className="h-4 w-4 mr-2" />
+                                Edit GRN
+                              </DropdownMenuItem>
+                            )}
+                            {grn.status !== 'completed' && (isAdmin || isAccounts) && (
+                              <DropdownMenuItem 
+                                onClick={() => completeMutation.mutate(grn.id)}
+                                disabled={completeMutation.isPending}
+                              >
+                                <CheckCircle className="h-4 w-4 mr-2" />
+                                Complete GRN
+                              </DropdownMenuItem>
+                            )}
+                            {grn.status === 'completed' && !hasInvoice(grn.id) && (isAdmin || isAccounts) && (
+                              <DropdownMenuItem 
+                                onClick={() => createInvoiceMutation.mutate(grn.id)}
+                                disabled={createInvoiceMutation.isPending}
+                              >
+                                <FileText className="h-4 w-4 mr-2" />
+                                Create Invoice
+                              </DropdownMenuItem>
+                            )}
+                            {hasInvoice(grn.id) && (
+                              <DropdownMenuItem 
+                                onClick={() => {
+                                  const invoice = allInvoices.find((inv: any) => inv.goods_receipt_id === grn.id);
+                                  if (invoice) navigate(`/admin/purchase-invoices/${invoice.id}`);
+                                }}
+                              >
+                                <FileText className="h-4 w-4 mr-2" />
+                                View Invoice
+                              </DropdownMenuItem>
+                            )}
+                            {grn.purchase_order_id && (
+                              <DropdownMenuItem onClick={() => navigate(`/admin/purchase-orders/${grn.purchase_order_id}`)}>
+                                <ExternalLink className="h-4 w-4 mr-2" />
+                                View PO
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   ))}

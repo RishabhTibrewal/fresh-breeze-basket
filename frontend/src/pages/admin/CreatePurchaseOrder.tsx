@@ -24,6 +24,7 @@ import { purchaseOrdersService } from '@/api/purchaseOrders';
 import { suppliersService } from '@/api/suppliers';
 import { warehousesService } from '@/api/warehouses';
 import { productsService } from '@/api/products';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   Select,
   SelectContent,
@@ -33,11 +34,15 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import WarehouseStockDisplay from "@/components/products/WarehouseStockDisplay";
 
 interface OrderItem {
+  id: string; // Unique ID for each row
   product_id: string;
   product_name: string;
+  product_code?: string;
+  hsn_code?: string;
+  unit?: string;
+  tax_percentage?: number;
   quantity: number;
   unit_price: number;
   line_total: number;
@@ -48,13 +53,13 @@ export default function CreatePurchaseOrder() {
   const isEditMode = !!id;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isAdmin, warehouses, hasWarehouseAccess } = useAuth();
   const [items, setItems] = useState<OrderItem[]>([]);
   const [supplierId, setSupplierId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
   const [notes, setNotes] = useState('');
   const [termsConditions, setTermsConditions] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
 
   // Fetch suppliers
   const { data: suppliers = [] } = useQuery({
@@ -63,10 +68,15 @@ export default function CreatePurchaseOrder() {
   });
 
   // Fetch warehouses
-  const { data: warehouses = [] } = useQuery({
+  const { data: allWarehouses = [] } = useQuery({
     queryKey: ['warehouses'],
     queryFn: () => warehousesService.getAll(true),
   });
+
+  // Filter warehouses based on user access
+  const availableWarehouses = isAdmin 
+    ? allWarehouses 
+    : allWarehouses.filter((wh: any) => hasWarehouseAccess(wh.id));
 
   // Fetch products
   const { data: products = [] } = useQuery({
@@ -74,16 +84,6 @@ export default function CreatePurchaseOrder() {
     queryFn: () => productsService.getAll(),
   });
 
-  // Fetch bulk stock data
-  const { data: bulkStockData } = useQuery({
-    queryKey: ['bulk-product-stock', products.map((p: any) => p.id).join(',')],
-    queryFn: () => {
-      if (products.length === 0) return {};
-      return warehousesService.getBulkProductStock(products.map((p: any) => p.id));
-    },
-    enabled: products.length > 0,
-    staleTime: 30000,
-  });
 
   // Fetch existing purchase order if in edit mode
   const { data: existingPO, isLoading: isLoadingPO } = useQuery({
@@ -104,8 +104,13 @@ export default function CreatePurchaseOrder() {
       // Load items from purchase_order_items
       if (existingPO.purchase_order_items && existingPO.purchase_order_items.length > 0) {
         const loadedItems: OrderItem[] = existingPO.purchase_order_items.map((item: any) => ({
+          id: `row-${item.id}-${Date.now()}`,
           product_id: item.product_id,
           product_name: item.products?.name || '',
+          product_code: item.product_code || item.products?.product_code || '',
+          hsn_code: item.hsn_code || item.products?.hsn_code || '',
+          unit: item.unit || item.products?.unit_type || 'piece',
+          tax_percentage: item.tax_percentage || item.products?.tax || 0,
           quantity: item.quantity,
           unit_price: parseFloat(item.unit_price),
           line_total: parseFloat(item.line_total),
@@ -134,44 +139,62 @@ export default function CreatePurchaseOrder() {
     },
   });
 
-  // Add product to order
-  const addProduct = (product: any) => {
-    const existingItem = items.find(item => item.product_id === product.id);
-    const price = product.sale_price || product.price || 0;
+  // Add a new empty row
+  const addRow = () => {
+    setItems([
+      ...items,
+      {
+        id: `row-${Date.now()}-${Math.random()}`,
+        product_id: '',
+        product_name: '',
+        product_code: '',
+        hsn_code: '',
+        unit: '',
+        tax_percentage: 0,
+        quantity: 1,
+        unit_price: 0,
+        line_total: 0
+      }
+    ]);
+  };
 
-    if (existingItem) {
-      setItems(items.map(item =>
-        item.product_id === product.id
-          ? {
-              ...item,
-              quantity: item.quantity + 1,
-              line_total: (item.quantity + 1) * item.unit_price
-            }
-          : item
-      ));
-    } else {
-      setItems([
-        ...items,
-        {
+  // Update product for a specific row
+  const updateProductForRow = (rowId: string, productId: string) => {
+    const product = products.find((p: any) => p.id === productId);
+    if (!product) return;
+
+    const price = product.sale_price || product.price || 0;
+    const taxPercentage = product.tax || 0;
+    
+    setItems(items.map(item => {
+      if (item.id === rowId) {
+        const lineTotal = item.quantity * price;
+        return {
+          ...item,
           product_id: product.id,
           product_name: product.name,
-          quantity: 1,
+          product_code: product.product_code || '',
+          hsn_code: product.hsn_code || '',
+          unit: product.unit_type || 'piece',
+          tax_percentage: taxPercentage,
           unit_price: price,
-          line_total: price
-        }
-      ]);
-    }
+          line_total: lineTotal
+        };
+      }
+      return item;
+    }));
   };
 
   // Update quantity
-  const updateQuantity = (productId: string, delta: number) => {
+  const updateQuantity = (rowId: string, delta: number) => {
     setItems(items.map(item => {
-      if (item.product_id === productId) {
+      if (item.id === rowId) {
         const newQuantity = Math.max(1, item.quantity + delta);
+        const taxAmount = (newQuantity * item.unit_price * (item.tax_percentage || 0)) / 100;
         return {
           ...item,
           quantity: newQuantity,
-          line_total: newQuantity * item.unit_price
+          line_total: (newQuantity * item.unit_price) + taxAmount
         };
       }
       return item;
@@ -179,14 +202,15 @@ export default function CreatePurchaseOrder() {
   };
 
   // Update quantity by direct input
-  const updateQuantityDirect = (productId: string, quantity: number) => {
+  const updateQuantityDirect = (rowId: string, quantity: number) => {
     setItems(items.map(item => {
-      if (item.product_id === productId) {
+      if (item.id === rowId) {
         const newQuantity = Math.max(1, quantity);
+        const taxAmount = (newQuantity * item.unit_price * (item.tax_percentage || 0)) / 100;
         return {
           ...item,
           quantity: newQuantity,
-          line_total: newQuantity * item.unit_price
+          line_total: (newQuantity * item.unit_price) + taxAmount
         };
       }
       return item;
@@ -194,13 +218,14 @@ export default function CreatePurchaseOrder() {
   };
 
   // Update price
-  const updatePrice = (productId: string, price: number) => {
+  const updatePrice = (rowId: string, price: number) => {
     setItems(items.map(item => {
-      if (item.product_id === productId) {
+      if (item.id === rowId) {
+        const taxAmount = (item.quantity * price * (item.tax_percentage || 0)) / 100;
         return {
           ...item,
           unit_price: price,
-          line_total: item.quantity * price
+          line_total: (item.quantity * price) + taxAmount
         };
       }
       return item;
@@ -208,12 +233,14 @@ export default function CreatePurchaseOrder() {
   };
 
   // Remove item
-  const removeItem = (productId: string) => {
-    setItems(items.filter(item => item.product_id !== productId));
+  const removeItem = (rowId: string) => {
+    setItems(items.filter(item => item.id !== rowId));
   };
 
-  // Calculate total
-  const totalAmount = items.reduce((sum, item) => sum + item.line_total, 0);
+  // Calculate total (only for items with products selected)
+  const totalAmount = items
+    .filter(item => item.product_id && item.product_id !== '')
+    .reduce((sum, item) => sum + item.line_total, 0);
 
   // Handle submit
   const handleSubmit = () => {
@@ -232,13 +259,21 @@ export default function CreatePurchaseOrder() {
       return;
     }
 
+    // Filter out items without products selected
+    const validItems = items.filter(item => item.product_id && item.product_id !== '');
+    
+    if (validItems.length === 0) {
+      toast.error('Please add at least one item with a product selected');
+      return;
+    }
+
     createMutation.mutate({
       supplier_id: supplierId,
       warehouse_id: warehouseId,
       expected_delivery_date: expectedDeliveryDate || undefined,
       notes: notes || undefined,
       terms_conditions: termsConditions || undefined,
-      items: items.map(item => ({
+      items: validItems.map(item => ({
         product_id: item.product_id,
         quantity: item.quantity,
         unit_price: item.unit_price
@@ -246,10 +281,6 @@ export default function CreatePurchaseOrder() {
     });
   };
 
-  // Filter products
-  const filteredProducts = products.filter((product: any) =>
-    product.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   // Show loading state when fetching existing PO
   if (isEditMode && isLoadingPO) {
@@ -282,151 +313,148 @@ export default function CreatePurchaseOrder() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        {/* Main Form */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Supplier and Warehouse Selection */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Order Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label>Supplier *</Label>
-                <Select value={supplierId} onValueChange={setSupplierId}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select supplier" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {suppliers.map((supplier) => (
-                      <SelectItem key={supplier.id} value={supplier.id}>
-                        {supplier.supplier_code ? `${supplier.supplier_code} - ` : ''}{supplier.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Warehouse *</Label>
-                <Select value={warehouseId} onValueChange={setWarehouseId}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select warehouse" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {warehouses.map((warehouse: any) => (
-                      <SelectItem key={warehouse.id} value={warehouse.id}>
-                        {warehouse.code} - {warehouse.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Expected Delivery Date</Label>
-                <Input
-                  type="date"
-                  value={expectedDeliveryDate}
-                  onChange={(e) => setExpectedDeliveryDate(e.target.value)}
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label>Notes</Label>
-                <Textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Additional notes..."
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label>Terms & Conditions</Label>
-                <Textarea
-                  value={termsConditions}
-                  onChange={(e) => setTermsConditions(e.target.value)}
-                  placeholder="Terms and conditions..."
-                  className="mt-1"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Products Selection */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Add Products</CardTitle>
-            </CardHeader>
-            <CardContent>
+      {/* Order Details - 2 columns at top */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Order Details</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label>Supplier *</Label>
+              <Select value={supplierId} onValueChange={setSupplierId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select supplier" />
+                </SelectTrigger>
+                <SelectContent>
+                  {suppliers.map((supplier) => (
+                    <SelectItem key={supplier.id} value={supplier.id}>
+                      {supplier.supplier_code ? `${supplier.supplier_code} - ` : ''}{supplier.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Warehouse *</Label>
+              <Select value={warehouseId} onValueChange={setWarehouseId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select warehouse" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableWarehouses.map((warehouse: any) => (
+                    <SelectItem key={warehouse.id} value={warehouse.id}>
+                      {warehouse.code} - {warehouse.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Expected Delivery Date</Label>
               <Input
-                placeholder="Search products..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="mb-4"
+                type="date"
+                value={expectedDeliveryDate}
+                onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+                className="mt-1"
               />
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-96 overflow-y-auto">
-                {filteredProducts.map((product: any) => (
-                  <Card
-                    key={product.id}
-                    className="cursor-pointer hover:shadow-md transition-shadow"
-                    onClick={() => addProduct(product)}
-                  >
-                    <CardContent className="p-3">
-                      {product.image_url && (
-                        <img
-                          src={product.image_url}
-                          alt={product.name}
-                          className="w-full h-20 object-cover rounded mb-2"
-                        />
-                      )}
-                      <h3 className="font-medium text-sm mb-1 line-clamp-2">
-                        {product.name}
-                      </h3>
-                      <p className="text-xs font-bold text-primary">
-                        ₹{product.sale_price || product.price}
-                      </p>
-                        <div className="mt-2">
-                          <WarehouseStockDisplay
-                            productId={product.id}
-                            bulkStockData={bulkStockData?.[product.id]}
-                            compact
-                          />
-                        </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+            <div>
+              <Label>Notes</Label>
+              <Textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Additional notes..."
+                className="mt-1"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <Label>Terms & Conditions</Label>
+              <Textarea
+                value={termsConditions}
+                onChange={(e) => setTermsConditions(e.target.value)}
+                placeholder="Terms and conditions..."
+                className="mt-1"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-        {/* Order Summary */}
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Order Items ({items.length})</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {items.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground text-sm">
-                  No items added. Select products to add.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[150px]">Product</TableHead>
-                        <TableHead className="w-[80px]">Qty</TableHead>
-                        <TableHead className="w-[100px]">Price</TableHead>
-                        <TableHead className="w-[100px]">Total</TableHead>
-                        <TableHead className="w-[50px]"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.map((item) => (
-                        <TableRow key={item.product_id}>
-                          <TableCell className="font-medium text-sm">
-                            {item.product_name}
+      {/* Order Items */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Order Items ({items.filter(item => item.product_id).length})</CardTitle>
+          <Button onClick={addRow} size="sm" variant="outline">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Row
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {items.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              <p>No items added. Click "Add Row" to add products.</p>
+              <Button onClick={addRow} className="mt-4" variant="outline">
+                <Plus className="h-4 w-4 mr-2" />
+                Add First Row
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[150px]">Product Code</TableHead>
+                      <TableHead className="min-w-[200px]">Product Name</TableHead>
+                      <TableHead className="min-w-[100px]">HSN Code</TableHead>
+                      <TableHead className="min-w-[80px]">Qty</TableHead>
+                      <TableHead className="min-w-[80px]">Unit</TableHead>
+                      <TableHead className="min-w-[100px]">Price</TableHead>
+                      <TableHead className="min-w-[80px]">Tax %</TableHead>
+                      <TableHead className="min-w-[120px]">Total</TableHead>
+                      <TableHead className="w-[50px]"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {items.map((item) => {
+                      const taxAmount = item.product_id ? (item.quantity * item.unit_price * (item.tax_percentage || 0)) / 100 : 0;
+                      const totalWithTax = item.product_id ? (item.quantity * item.unit_price) + taxAmount : 0;
+                      return (
+                        <TableRow key={item.id}>
+                          <TableCell className="text-sm">
+                            {item.product_code || '-'}
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={item.product_id || ''}
+                              onValueChange={(productId) => updateProductForRow(item.id, productId)}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Select product" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {products.map((product: any) => {
+                                  // Check if product is already used in another row
+                                  const isUsedInOtherRow = items.some(
+                                    (i) => i.product_id === product.id && i.id !== item.id
+                                  );
+                                  return (
+                                    <SelectItem 
+                                      key={product.id} 
+                                      value={product.id}
+                                      disabled={isUsedInOtherRow}
+                                    >
+                                      {product.name} - ₹{product.sale_price || product.price}
+                                      {isUsedInOtherRow && ' (Already added)'}
+                                    </SelectItem>
+                                  );
+                                })}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {item.hsn_code || '-'}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1">
@@ -434,85 +462,122 @@ export default function CreatePurchaseOrder() {
                                 variant="outline"
                                 size="icon"
                                 className="h-6 w-6"
-                                onClick={() => updateQuantity(item.product_id, -1)}
+                                onClick={() => updateQuantity(item.id, -1)}
+                                disabled={!item.product_id}
                               >
                                 <Minus className="h-3 w-3" />
                               </Button>
                               <Input
                                 type="number"
                                 value={item.quantity}
-                                onChange={(e) => updateQuantityDirect(item.product_id, parseInt(e.target.value) || 1)}
+                                onChange={(e) => updateQuantityDirect(item.id, parseInt(e.target.value) || 1)}
                                 className="h-8 w-16 text-center text-sm"
                                 min="1"
                                 step="1"
+                                disabled={!item.product_id}
                               />
                               <Button
                                 variant="outline"
                                 size="icon"
                                 className="h-6 w-6"
-                                onClick={() => updateQuantity(item.product_id, 1)}
+                                onClick={() => updateQuantity(item.id, 1)}
+                                disabled={!item.product_id}
                               >
                                 <Plus className="h-3 w-3" />
                               </Button>
                             </div>
                           </TableCell>
+                          <TableCell className="text-sm">
+                            {item.unit || '-'}
+                          </TableCell>
                           <TableCell>
                             <Input
                               type="number"
                               value={item.unit_price}
-                              onChange={(e) => updatePrice(item.product_id, parseFloat(e.target.value) || 0)}
-                              className="h-8 w-20 text-sm"
+                              onChange={(e) => updatePrice(item.id, parseFloat(e.target.value) || 0)}
+                              className="h-8 w-24 text-sm"
                               min="0"
                               step="0.01"
+                              disabled={!item.product_id}
                             />
                           </TableCell>
+                          <TableCell className="text-sm">
+                            {item.tax_percentage ? `${item.tax_percentage}%` : '-'}
+                          </TableCell>
                           <TableCell className="font-medium text-sm">
-                            ₹{item.line_total.toFixed(2)}
+                            {item.product_id ? `₹${totalWithTax.toFixed(2)}` : '-'}
                           </TableCell>
                           <TableCell>
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-6 w-6"
-                              onClick={() => removeItem(item.product_id)}
+                              onClick={() => removeItem(item.id)}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  <div className="border-t pt-4 space-y-2">
-                    <div className="flex justify-between font-bold text-lg">
-                      <span>Total:</span>
-                      <span>₹{totalAmount.toFixed(2)}</span>
-                    </div>
-                  </div>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex justify-between items-center pt-4 border-t">
+                <Button onClick={addRow} variant="outline" size="sm">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Row
+                </Button>
+                <div className="flex justify-between font-bold text-lg min-w-[200px]">
+                  <span>Total:</span>
+                  <span>₹{totalAmount.toFixed(2)}</span>
                 </div>
-              )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+        {/* Summary */}
+        <div className="lg:col-span-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Summary</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Items:</span>
+                  <span className="font-medium">{items.length}</span>
+                </div>
+                <div className="flex justify-between font-bold text-lg pt-2 border-t">
+                  <span>Total:</span>
+                  <span>₹{totalAmount.toFixed(2)}</span>
+                </div>
+              </div>
             </CardContent>
           </Card>
+        </div>
 
-          {/* Actions */}
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              className="flex-1"
-              onClick={() => navigate('/admin/purchase-orders')}
-            >
-              Cancel
-            </Button>
-            <Button
-              className="flex-1"
-              onClick={handleSubmit}
-              disabled={createMutation.isPending || items.length === 0 || !supplierId || !warehouseId}
-            >
-              {createMutation.isPending 
-                ? (isEditMode ? 'Updating...' : 'Creating...') 
-                : (isEditMode ? 'Update PO' : 'Create PO')}
-            </Button>
-          </div>
+        {/* Actions */}
+        <div className="flex flex-col gap-2">
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => navigate('/admin/purchase-orders')}
+          >
+            Cancel
+          </Button>
+          <Button
+            className="w-full"
+            onClick={handleSubmit}
+            disabled={createMutation.isPending || items.length === 0 || !supplierId || !warehouseId}
+          >
+            {createMutation.isPending 
+              ? (isEditMode ? 'Updating...' : 'Creating...') 
+              : (isEditMode ? 'Update PO' : 'Create PO')}
+          </Button>
         </div>
       </div>
     </div>

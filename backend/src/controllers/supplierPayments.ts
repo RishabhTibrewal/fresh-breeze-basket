@@ -9,7 +9,8 @@ const generatePaymentNumber = async (companyId: string): Promise<string> => {
   const year = new Date().getFullYear();
   
   const { data: latestPayment, error } = await supabase
-    .from('procurement.supplier_payments')
+    .schema('procurement')
+    .from('supplier_payments')
     .select('payment_number')
     .eq('company_id', companyId)
     .like('payment_number', `PAY-${year}-%`)
@@ -81,22 +82,33 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
 
     // Verify invoice exists and get supplier_id if not provided
     const { data: invoice, error: invoiceError } = await supabase
-      .from('procurement.purchase_invoices')
-      .select('*, procurement.purchase_orders!inner(supplier_id)')
+      .schema('procurement')
+      .from('purchase_invoices')
+      .select('*')
       .eq('id', purchase_invoice_id)
       .eq('company_id', req.companyId)
       .single();
 
     if (invoiceError || !invoice) {
+      console.error('Error fetching invoice:', invoiceError);
       throw new ApiError(404, 'Purchase invoice not found');
     }
 
-    // Handle purchase_orders - Supabase returns relations, need to type cast
-    const invoiceWithRelations = invoice as any;
-    const purchaseOrder = Array.isArray(invoiceWithRelations.purchase_orders) 
-      ? invoiceWithRelations.purchase_orders[0] 
-      : invoiceWithRelations.purchase_orders;
-    const finalSupplierId = supplier_id || purchaseOrder?.supplier_id;
+    // Fetch purchase order to get supplier_id if not provided
+    let finalSupplierId = supplier_id;
+    if (!finalSupplierId && invoice.purchase_order_id) {
+      const { data: purchaseOrder, error: poError } = await supabase
+        .schema('procurement')
+        .from('purchase_orders')
+        .select('supplier_id')
+        .eq('id', invoice.purchase_order_id)
+        .eq('company_id', req.companyId)
+        .single();
+      
+      if (!poError && purchaseOrder) {
+        finalSupplierId = purchaseOrder.supplier_id;
+      }
+    }
     if (!finalSupplierId) {
       throw new ValidationError('Supplier ID is required');
     }
@@ -106,7 +118,8 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
 
     // Create supplier payment
     const { data: payment, error: paymentError } = await supabase
-      .from('procurement.supplier_payments')
+      .schema('procurement')
+      .from('supplier_payments')
       .insert({
         purchase_invoice_id,
         supplier_id: finalSupplierId,
@@ -132,25 +145,42 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
     }
 
     // Update invoice paid amount and status
+    // Only count completed payments towards paid_amount
     const { data: invoiceData } = await supabase
-      .from('procurement.purchase_invoices')
-      .select('paid_amount, total_amount')
+      .schema('procurement')
+      .from('purchase_invoices')
+      .select('paid_amount, total_amount, status')
       .eq('id', purchase_invoice_id)
       .eq('company_id', req.companyId)
       .single();
 
     if (invoiceData) {
-      const newPaidAmount = (invoiceData.paid_amount || 0) + amount;
-      let newStatus = 'pending';
+      // Get all completed payments for this invoice
+      const { data: completedPayments } = await supabase
+        .schema('procurement')
+        .from('supplier_payments')
+        .select('amount')
+        .eq('purchase_invoice_id', purchase_invoice_id)
+        .eq('status', 'completed')
+        .eq('company_id', req.companyId);
+
+      const newPaidAmount = completedPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+      let newStatus = invoiceData.status || 'pending';
       
-      if (newPaidAmount >= invoiceData.total_amount) {
-        newStatus = 'paid';
-      } else if (newPaidAmount > 0) {
-        newStatus = 'partial';
+      // Don't change status if invoice is cancelled
+      if (invoiceData.status !== 'cancelled') {
+        if (newPaidAmount >= invoiceData.total_amount) {
+          newStatus = 'paid';
+        } else if (newPaidAmount > 0) {
+          newStatus = 'partial';
+        } else {
+          newStatus = 'pending';
+        }
       }
 
       await supabase
-        .from('procurement.purchase_invoices')
+        .schema('procurement')
+        .from('purchase_invoices')
         .update({
           paid_amount: newPaidAmount,
           status: newStatus,
@@ -160,25 +190,28 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
         .eq('company_id', req.companyId);
     }
 
-    // Fetch complete payment with relations
-    const { data: completePayment, error: fetchError } = await supabase
-      .from('procurement.supplier_payments')
-      .select(`
-        *,
-        procurement.purchase_invoices (*),
-        suppliers (*)
-      `)
-      .eq('id', payment.id)
-      .eq('company_id', req.companyId)
-      .single();
+    // Fetch complete payment with relations separately
+    const [relatedInvoiceResult, supplierResult] = await Promise.all([
+      payment.purchase_invoice_id
+        ? supabase.schema('procurement').from('purchase_invoices').select('*').eq('id', payment.purchase_invoice_id).eq('company_id', req.companyId).single()
+        : Promise.resolve({ data: null, error: null }),
+      payment.supplier_id
+        ? supabase.from('suppliers').select('*').eq('id', payment.supplier_id).eq('company_id', req.companyId).single()
+        : Promise.resolve({ data: null, error: null })
+    ]);
 
-    if (fetchError) {
-      console.error('Error fetching supplier payment:', fetchError);
-    }
+    const relatedInvoice = relatedInvoiceResult.error ? null : relatedInvoiceResult.data;
+    const supplier = supplierResult.error ? null : supplierResult.data;
+
+    const completePayment = {
+      ...payment,
+      purchase_invoices: relatedInvoice,
+      suppliers: supplier
+    };
 
     res.status(201).json({
       success: true,
-      data: completePayment || payment
+      data: completePayment
     });
   } catch (error) {
     next(error);
@@ -197,12 +230,9 @@ export const getSupplierPayments = async (req: Request, res: Response, next: Nex
     }
 
     let query = supabase
-      .from('procurement.supplier_payments')
-      .select(`
-        *,
-        procurement.purchase_invoices (*),
-        suppliers (*)
-      `)
+      .schema('procurement')
+      .from('supplier_payments')
+      .select('*')
       .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
 
@@ -226,16 +256,55 @@ export const getSupplierPayments = async (req: Request, res: Response, next: Nex
       query = query.lte('payment_date', date_to);
     }
 
-    const { data, error } = await query;
+    const { data: payments, error } = await query;
 
     if (error) {
       console.error('Error fetching supplier payments:', error);
       throw new ApiError(500, 'Failed to fetch supplier payments');
     }
 
+    // Fetch related purchase invoices and suppliers separately
+    const invoiceIds = [...new Set((payments || []).map((p: any) => p.purchase_invoice_id).filter(Boolean))];
+    const supplierIds = [...new Set((payments || []).map((p: any) => p.supplier_id).filter(Boolean))];
+
+    const invoicesMap = new Map();
+    const suppliersMap = new Map();
+
+    if (invoiceIds.length > 0) {
+      const { data: invoices } = await supabase
+        .schema('procurement')
+        .from('purchase_invoices')
+        .select('*')
+        .in('id', invoiceIds)
+        .eq('company_id', req.companyId);
+      
+      invoices?.forEach((inv: any) => {
+        invoicesMap.set(inv.id, inv);
+      });
+    }
+
+    if (supplierIds.length > 0) {
+      const { data: suppliers } = await supabase
+        .from('suppliers')
+        .select('*')
+        .in('id', supplierIds)
+        .eq('company_id', req.companyId);
+      
+      suppliers?.forEach((supplier: any) => {
+        suppliersMap.set(supplier.id, supplier);
+      });
+    }
+
+    // Enrich payments with related data
+    const enrichedPayments = (payments || []).map((payment: any) => ({
+      ...payment,
+      purchase_invoices: payment.purchase_invoice_id ? invoicesMap.get(payment.purchase_invoice_id) : null,
+      suppliers: payment.supplier_id ? suppliersMap.get(payment.supplier_id) : null
+    }));
+
     res.json({
       success: true,
-      data: data || []
+      data: enrichedPayments
     });
   } catch (error) {
     next(error);
@@ -254,12 +323,9 @@ export const getSupplierPaymentById = async (req: Request, res: Response, next: 
     }
 
     const { data: payment, error } = await supabase
-      .from('procurement.supplier_payments')
-      .select(`
-        *,
-        procurement.purchase_invoices (*),
-        suppliers (*)
-      `)
+      .schema('procurement')
+      .from('supplier_payments')
+      .select('*')
       .eq('id', id)
       .eq('company_id', req.companyId)
       .single();
@@ -272,9 +338,26 @@ export const getSupplierPaymentById = async (req: Request, res: Response, next: 
       throw new ApiError(500, 'Failed to fetch supplier payment');
     }
 
+    // Fetch related purchase invoice and supplier separately
+    const [invoiceResult, supplierResult] = await Promise.all([
+      payment.purchase_invoice_id
+        ? supabase.schema('procurement').from('purchase_invoices').select('*').eq('id', payment.purchase_invoice_id).eq('company_id', req.companyId).single()
+        : Promise.resolve({ data: null, error: null }),
+      payment.supplier_id
+        ? supabase.from('suppliers').select('*').eq('id', payment.supplier_id).eq('company_id', req.companyId).single()
+        : Promise.resolve({ data: null, error: null })
+    ]);
+
+    const invoice = invoiceResult.error ? null : invoiceResult.data;
+    const supplier = supplierResult.error ? null : supplierResult.data;
+
     res.json({
       success: true,
-      data: payment
+      data: {
+        ...payment,
+        purchase_invoices: invoice,
+        suppliers: supplier
+      }
     });
   } catch (error) {
     next(error);
@@ -318,7 +401,8 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
     }
 
     const { data: payment, error: updateError } = await supabase
-      .from('procurement.supplier_payments')
+      .schema('procurement')
+      .from('supplier_payments')
       .update(updateData)
       .eq('id', id)
       .eq('company_id', req.companyId)
@@ -333,34 +417,46 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
       throw new ApiError(500, 'Failed to update supplier payment');
     }
 
-    // If amount changed, update invoice paid amount
-    if (amount !== undefined && payment.purchase_invoice_id) {
+    // Update invoice paid amount if amount or status changed
+    if ((amount !== undefined || status !== undefined) && payment.purchase_invoice_id) {
       const { data: payments } = await supabase
-        .from('procurement.supplier_payments')
-        .select('amount')
+        .schema('procurement')
+        .from('supplier_payments')
+        .select('amount, status')
         .eq('purchase_invoice_id', payment.purchase_invoice_id)
         .eq('company_id', req.companyId);
 
       if (payments) {
-        const totalPaid = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        // Only count completed payments towards paid_amount
+        const totalPaid = payments
+          .filter((p) => p.status === 'completed')
+          .reduce((sum, p) => sum + (p.amount || 0), 0);
         
         const { data: invoiceData } = await supabase
-          .from('procurement.purchase_invoices')
-          .select('total_amount')
+          .schema('procurement')
+          .from('purchase_invoices')
+          .select('total_amount, status')
           .eq('id', payment.purchase_invoice_id)
           .eq('company_id', req.companyId)
           .single();
 
         if (invoiceData) {
-          let newStatus = 'pending';
-          if (totalPaid >= invoiceData.total_amount) {
-            newStatus = 'paid';
-          } else if (totalPaid > 0) {
-            newStatus = 'partial';
+          let newStatus = invoiceData.status || 'pending';
+          
+          // Don't change status to 'paid' if invoice is cancelled
+          if (invoiceData.status !== 'cancelled') {
+            if (totalPaid >= invoiceData.total_amount) {
+              newStatus = 'paid';
+            } else if (totalPaid > 0) {
+              newStatus = 'partial';
+            } else {
+              newStatus = 'pending';
+            }
           }
 
           await supabase
-            .from('procurement.purchase_invoices')
+            .schema('procurement')
+            .from('purchase_invoices')
             .update({
               paid_amount: totalPaid,
               status: newStatus,
@@ -372,24 +468,28 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
       }
     }
 
-    const { data: completePayment, error: fetchError } = await supabase
-      .from('procurement.supplier_payments')
-      .select(`
-        *,
-        procurement.purchase_invoices (*),
-        suppliers (*)
-      `)
-      .eq('id', id)
-      .eq('company_id', req.companyId)
-      .single();
+    // Fetch related purchase invoice and supplier separately
+    const [invoiceResult, supplierResult] = await Promise.all([
+      payment.purchase_invoice_id
+        ? supabase.schema('procurement').from('purchase_invoices').select('*').eq('id', payment.purchase_invoice_id).eq('company_id', req.companyId).single()
+        : Promise.resolve({ data: null, error: null }),
+      payment.supplier_id
+        ? supabase.from('suppliers').select('*').eq('id', payment.supplier_id).eq('company_id', req.companyId).single()
+        : Promise.resolve({ data: null, error: null })
+    ]);
 
-    if (fetchError) {
-      console.error('Error fetching supplier payment:', fetchError);
-    }
+    const invoice = invoiceResult.error ? null : invoiceResult.data;
+    const supplier = supplierResult.error ? null : supplierResult.data;
+
+    const completePayment = {
+      ...payment,
+      purchase_invoices: invoice,
+      suppliers: supplier
+    };
 
     res.json({
       success: true,
-      data: completePayment || payment
+      data: completePayment
     });
   } catch (error) {
     next(error);

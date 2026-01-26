@@ -2,24 +2,18 @@ import { Request, Response, NextFunction } from 'express';
 import { AuthenticationError, AuthorizationError, ApiError } from './error';
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { SupabaseJwtVerificationError, verifySupabaseJwt } from '../utils/supabaseJwt';
+import { getUserRoles, hasAnyRole, invalidateRoleCache as invalidateRolesCache } from '../utils/roles';
 
 // Simple in-memory rate limiting
 const rateLimit = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
 const MAX_REQUESTS = 100;
 
-// In-memory role cache to avoid fetching role on every request
-const roleCache = new Map<string, { role: string; expiresAt: number }>();
-const ROLE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache TTL
-
-const getRoleCacheKey = (userId: string, companyId?: string) =>
-  `${userId}:${companyId || 'default'}`;
-
 const getUserMembership = async (userId: string, companyId?: string) => {
   const client = supabaseAdmin || supabase;
   let query = client
     .from('company_memberships')
-    .select('company_id, role, is_active')
+    .select('company_id, is_active')
     .eq('user_id', userId)
     .eq('is_active', true);
 
@@ -38,43 +32,9 @@ const getUserMembership = async (userId: string, companyId?: string) => {
   return data || null;
 };
 
-// Helper function to get role from cache or database
-const getUserRole = async (userId: string, companyId?: string): Promise<string> => {
-  const cacheKey = getRoleCacheKey(userId, companyId);
-  // Check cache first
-  const cached = roleCache.get(cacheKey);
-  const now = Date.now();
-  
-  if (cached && now < cached.expiresAt) {
-    return cached.role;
-  }
-  
-  // Cache miss or expired - fetch from database
-  try {
-    const membership = await getUserMembership(userId, companyId);
-    const role = membership?.role || 'user';
-    
-    // Cache the role
-    roleCache.set(cacheKey, {
-      role,
-      expiresAt: now + ROLE_CACHE_TTL
-    });
-    
-    return role;
-  } catch (error) {
-    console.error(`Error fetching role for user ${userId}:`, error);
-    return 'user'; // Default role on error (matches database default)
-  }
-};
-
 // Export function to invalidate role cache (useful when role is updated)
 export const invalidateRoleCache = (userId: string): void => {
-  roleCache.forEach((_value, key) => {
-    if (key.startsWith(`${userId}:`)) {
-      roleCache.delete(key);
-    }
-  });
-  console.log(`Role cache invalidated for user ${userId}`);
+  invalidateRolesCache(userId);
 };
 
 const rateLimitedAuthPaths = new Set([
@@ -148,13 +108,16 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         throw new AuthorizationError('User does not belong to this company');
       }
 
-      const userRole = await getUserRole(payload.sub, req.companyId);
+      const userRoles = await getUserRoles(payload.sub, req.companyId);
+      // For backward compatibility, set role to first role or 'user'
+      const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
 
       // Add user info to request
       req.user = {
         id: payload.sub,
         email: payload.email || '',
-        role: userRole, // Use the fetched/cached role
+        role: primaryRole, // Backward compatibility
+        roles: userRoles, // New: array of roles
         company_id: req.companyId
       };
 
@@ -176,23 +139,52 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
   }
 };
 
+/**
+ * Middleware to require one or more roles (admin override applies)
+ * Usage: requireRole(['sales']), requireRole(['sales', 'accounts'])
+ */
+export const requireRole = (requiredRoles: string[]) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) {
+        throw new AuthenticationError('User not authenticated');
+      }
+
+      if (!req.companyId) {
+        throw new AuthenticationError('Company context is required');
+      }
+
+      // Check if user has any of the required roles (includes admin override)
+      const hasAccess = await hasAnyRole(req.user.id, req.companyId, requiredRoles);
+
+      if (!hasAccess) {
+        throw new AuthorizationError(
+          `Access denied. Required roles: ${requiredRoles.join(', ')}`
+        );
+      }
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+};
+
 export const adminOnly = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
       throw new AuthenticationError('User not authenticated');
     }
 
-    // Use role from req.user (already set by protect middleware)
-    // If role is not set, fetch it (in case adminOnly is used without protect)
-    let userRole = req.user.role;
-      
-    if (!userRole) {
-      userRole = await getUserRole(req.user.id, req.companyId);
-      req.user.role = userRole;
+    if (!req.companyId) {
+      throw new AuthenticationError('Company context is required');
     }
+
+    // Check if user has admin or accounts role (admin override is built into hasAnyRole)
+    const hasAccess = await hasAnyRole(req.user.id, req.companyId, ['admin', 'accounts']);
     
-    if (userRole !== 'admin') {
-      throw new AuthorizationError('Admin access required');
+    if (!hasAccess) {
+      throw new AuthorizationError('Admin or Accounts access required');
     }
     
     next();
@@ -210,10 +202,12 @@ export const isAuthenticated = async (req: Request, res: Response, next: NextFun
 
     try {
       const payload = await verifySupabaseJwt(token);
+      const userRoles = await getUserRoles(payload.sub, req.companyId);
       req.user = {
         id: payload.sub,
         email: payload.email || '',
-        role: 'user',
+        role: userRoles.length > 0 ? userRoles[0] : 'user', // Backward compatibility
+        roles: userRoles, // New: array of roles
         company_id: req.companyId
       };
       next();
@@ -234,16 +228,15 @@ export const isAdmin = async (req: Request, res: Response, next: NextFunction) =
       return res.status(401).json({ error: 'User not authenticated' });
     }
 
-    // Use role from req.user if available, otherwise fetch from cache/database
-    let userRole = req.user.role;
-
-    if (!userRole) {
-      userRole = await getUserRole(req.user.id, req.companyId);
-      req.user.role = userRole;
+    if (!req.companyId) {
+      return res.status(400).json({ error: 'Company context is required' });
     }
 
-    if (userRole !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
+    // Check if user has admin or accounts role (admin override is built into hasAnyRole)
+    const hasAccess = await hasAnyRole(req.user.id, req.companyId, ['admin', 'accounts']);
+
+    if (!hasAccess) {
+      return res.status(403).json({ error: 'Admin or Accounts access required' });
     }
 
     next();
@@ -258,20 +251,124 @@ export const isSalesExecutive = async (req: Request, res: Response, next: NextFu
       return res.status(401).json({ error: 'User not authenticated' });
     }
 
-    // Use role from req.user if available, otherwise fetch from cache/database
-    let userRole = req.user.role;
-
-    if (!userRole) {
-      userRole = await getUserRole(req.user.id, req.companyId);
-      req.user.role = userRole;
+    if (!req.companyId) {
+      return res.status(400).json({ error: 'Company context is required' });
     }
 
-    if (userRole !== 'sales') {
+    // Check if user has sales role (admin override applies)
+    const hasAccess = await hasAnyRole(req.user.id, req.companyId, ['sales']);
+
+    if (!hasAccess) {
       return res.status(403).json({ error: 'Sales executive access required' });
     }
 
     next();
   } catch (error) {
     res.status(500).json({ error: 'Authorization failed' });
+  }
+};
+
+export const requireAccounts = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      throw new AuthenticationError('User not authenticated');
+    }
+
+    if (!req.companyId) {
+      throw new AuthenticationError('Company context is required');
+    }
+
+    // Check if user has accounts role (admin override applies)
+    const hasAccess = await hasAnyRole(req.user.id, req.companyId, ['accounts']);
+
+    if (!hasAccess) {
+      throw new AuthorizationError('Accounts access required');
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Middleware to require accounts or admin role (for approval actions)
+ */
+export const requireAccountsOrAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      throw new AuthenticationError('User not authenticated');
+    }
+
+    if (!req.companyId) {
+      throw new AuthenticationError('Company context is required');
+    }
+
+    // Check if user has accounts or admin role (admin override applies)
+    const hasAccess = await hasAnyRole(req.user.id, req.companyId, ['accounts', 'admin']);
+
+    if (!hasAccess) {
+      throw new AuthorizationError('Accounts or Admin access required');
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Middleware to require warehouse manager or admin role
+ */
+export const requireWarehouseManager = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      throw new AuthenticationError('User not authenticated');
+    }
+
+    if (!req.companyId) {
+      throw new AuthenticationError('Company context is required');
+    }
+
+    // Check if user has warehouse_manager or admin role (admin override applies)
+    const hasAccess = await hasAnyRole(req.user.id, req.companyId, ['warehouse_manager', 'admin']);
+
+    if (!hasAccess) {
+      throw new AuthorizationError('Warehouse Manager or Admin access required');
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Helper function to check if user can manage a specific warehouse
+ */
+export const canManageWarehouse = async (
+  userId: string,
+  companyId: string,
+  warehouseId: string
+): Promise<boolean> => {
+  try {
+    const client = supabaseAdmin || supabase;
+    
+    // Check using database function
+    const { data, error } = await client.rpc('has_warehouse_access', {
+      p_user_id: userId,
+      p_warehouse_id: warehouseId,
+      p_company_id: companyId
+    });
+
+    if (error) {
+      console.error(`Error checking warehouse access for user ${userId}:`, error);
+      return false;
+    }
+
+    return data === true;
+  } catch (error) {
+    console.error(`Error checking warehouse access for user ${userId}:`, error);
+    return false;
   }
 }; 

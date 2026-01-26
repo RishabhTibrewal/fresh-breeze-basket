@@ -530,7 +530,8 @@ router.post('/purchase-invoice', protect, upload.single('invoiceFile'), async (r
 
     // Update purchase invoice invoice_file_url in database
     const { error: updateError } = await supabase
-      .from('procurement.purchase_invoices')
+      .schema('procurement')
+      .from('purchase_invoices')
       .update({ invoice_file_url: fileUrl })
       .eq('id', purchaseInvoiceId)
       .eq('company_id', req.companyId);
