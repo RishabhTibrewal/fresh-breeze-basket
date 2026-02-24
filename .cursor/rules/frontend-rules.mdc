@@ -1,52 +1,422 @@
 ---
-description: Frontend development rules for the Fresh Breeze Basket e-commerce application, focusing on React best practices, component structure, state management, and API integration.
-globs: 
+description: Frontend development rules for Multi-Tenant ERP/POS system using React Router + Vite + TypeScript + Tailwind CSS, focusing on module-based navigation, RBAC UI, and performance.
+globs:
+  - "src/**/*.tsx"
+  - "src/**/*.ts"
+  - "src/**/*.css"
 alwaysApply: false
 ---
-description: Frontend development rules for the Fresh Breeze Basket e-commerce application, focusing on React best practices, component structure, state management, and API integration.
 
+# Frontend Rules - Multi-Tenant ERP with React Router + Vite
+
+## Auto-Attach Paths
 auto_attach:
   paths:
-    - frontend/**/*.js
-    - frontend/**/*.jsx
-    - frontend/**/*.ts
-    - frontend/**/*.tsx
-    - frontend/**/*.css
-    - frontend/**/*.scss
+    - "src/**/*.tsx"
+    - "src/**/*.ts"
+    - "src/**/*.jsx"
+    - "src/**/*.js"
+    - "src/**/*.css"
+    - "src/components/**/*"
+    - "src/pages/**/*"
+    - "src/hooks/**/*"
+    - "src/config/**/*"
 
-goals:
-  - Create a responsive and accessible user interface for the e-commerce platform
-  - Implement consistent component architecture across the frontend
-  - Ensure efficient state management and data flow
-  - Establish robust API integration patterns with the backend
-  - Maintain performance optimization across all frontend components
+## Goals
+- Implement module-based navigation system (E-commerce, Sales, Inventory, etc.)
+- Create permission-driven UI with RBAC integration
+- Build responsive, accessible components with Tailwind CSS
+- Ensure type safety with TypeScript across the entire app
+- Optimize performance for multi-tenant architecture
 
-rules:
-  - Use functional components with hooks instead of class components
-  - Implement reusable UI components in a component library
-  - Follow atomic design principles (atoms, molecules, organisms, templates, pages)
-  - Use CSS modules or styled-components for component styling
-  - Implement responsive design with mobile-first approach
-  - Separate business logic from UI components using custom hooks
-  - Use form libraries (Formik/React Hook Form) for complex forms
-  - Implement proper loading and error states for all data-fetching components
-  - Use React.memo, useCallback, and useMemo for performance optimization
-  - Follow accessibility (a11y) best practices
-  - Use TypeScript for type safety when applicable
-  - Include prop validation with PropTypes or TypeScript
-  - Implement a consistent error boundary strategy
-  - Use lazy loading for code splitting where appropriate
-  - Structure Redux state with domain-driven design principles
-  - Follow a consistent naming convention for components and files
+## Tech Stack
+- **Framework**: React 18+ with TypeScript
+- **Build Tool**: Vite
+- **Routing**: React Router v6
+- **Styling**: Tailwind CSS v3
+- **Backend**: Supabase (Postgres + Auth)
+- **State**: React Context + Custom Hooks
+- **Icons**: Lucide React
 
-context:
-  - Frontend is built with React in the frontend/ directory
-  - UI design follows the company brand guidelines and color scheme
-  - The application targets both desktop and mobile users
-  - User authentication state must be maintained across page refreshes
-  - Shopping cart persistence is required for guest and logged-in users
-  - Product catalog must implement filtering, sorting, and pagination
-  - Checkout flow includes multi-step form validation
-  - User dashboard displays order history and account management
-  - Admin interface requires role-based access control
-  - Image optimization is important for product gallery performance
+## Core Rules
+
+### 1. Navigation Architecture (CRITICAL)
+The app uses **THREE-LEVEL navigation**:
+
+```
+Level 1: E-commerce Landing (post-login entry point)
+    ↓
+Level 2: Home Dashboard (module launcher with cards)
+    ↓
+Level 3: Module Pages (with context-aware sidebar)
+```
+
+**Navigation Rules:**
+- E-commerce page serves as BOTH landing page AND module
+- Dashboard shows module cards filtered by permissions
+- Sidebar appears ONLY inside modules, NOT on dashboard
+- Each module has its own sidebar items
+- "Home" button in modules returns to dashboard
+
+### 2. Module Configuration (Single Source of Truth)
+**ALWAYS** use `src/config/modules.config.tsx` for:
+- Module definitions
+- Permissions mapping
+- Sidebar items
+- KPI definitions
+- Module routes
+- Icons and colors
+
+**NEVER** hardcode module data in components.
+
+Structure:
+```typescript
+type ModuleConfig = {
+  key: string                    // 'sales', 'inventory'
+  label: string                  // 'Sales'
+  description: string            // For dashboard cards
+  route: string                  // '/sales'
+  icon: LucideIcon              // Icon component
+  iconColor: string             // Tailwind class
+  permissions: string[]         // ['sales.read']
+  showOnDashboard: boolean
+  kpis: ModuleKPI[]
+  ctas: ModuleCTA[]
+  sidebarItems?: SidebarItem[]
+}
+```
+
+### 3. Permission System
+**Double-Check Pattern:**
+```typescript
+// Check 1: Company has module enabled
+// Check 2: User has permission for module
+const visibleModules = modules.filter(module => {
+  const companyHasModule = companyModules.includes(module.key);
+  const userHasPermission = permissions.some(p => 
+    module.permissions.includes(p)
+  );
+  return companyHasModule && userHasPermission;
+});
+```
+
+**Permission Hooks:**
+- `useUserPermissions()` - Get all user permissions
+- `useCanAccess(permission)` - Check single permission
+- `useAccessibleModules(modules)` - Filter modules
+- `useHasModuleAccess(module)` - Check module access
+
+**NEVER** hardcode permission checks in JSX.
+
+### 4. Component Structure
+Follow this hierarchy:
+
+```
+src/
+├── config/
+│   └── modules.config.tsx        # SINGLE SOURCE OF TRUTH
+├── hooks/
+│   ├── useAuth.ts                # Auth + company context
+│   ├── usePermissions.ts         # Permission hooks
+│   └── useModuleKPIs.ts          # KPI data fetching
+├── components/
+│   ├── ui/                       # Shadcn-style primitives
+│   ├── layout/
+│   │   ├── Sidebar.tsx          # Context-aware sidebar
+│   │   └── Layout.tsx           # App shell
+│   └── modules/                 # Module-specific components
+├── pages/
+│   ├── HomeDashboard.tsx        # Module launcher
+│   ├── ecommerce/
+│   │   ├── Landing.tsx          # Post-login landing
+│   │   └── Dashboard.tsx        # E-commerce module
+│   ├── sales/
+│   ├── inventory/
+│   └── ...
+└── lib/
+    ├── supabase.ts
+    └── utils.ts
+```
+
+### 5. TypeScript Rules
+- **ALWAYS** define types for props, state, and API responses
+- **NEVER** use `any` type
+- Use `interface` for object shapes, `type` for unions
+- Export types from component files
+- Create shared types in `src/types/`
+
+Example:
+```typescript
+interface ModuleCardProps {
+  module: ModuleConfig;
+  userPermissions: string[];
+  onNavigate: (route: string) => void;
+}
+```
+
+### 6. React Patterns
+
+**Components:**
+- Use functional components with hooks
+- One component per file
+- Export component as default
+- Props interface above component
+- Use TypeScript for all props
+
+**Hooks:**
+- Custom hooks start with `use`
+- Extract complex logic into hooks
+- Return object with named values
+- Include loading and error states
+
+**State Management:**
+- Use Context for global state (auth, permissions)
+- Use local state for component-specific data
+- Use custom hooks for reusable logic
+- Avoid prop drilling with Context
+
+### 7. Styling with Tailwind CSS
+
+**Rules:**
+- Use Tailwind utility classes directly in JSX
+- Create reusable components for common patterns
+- Use `cn()` helper for conditional classes
+- Follow mobile-first approach
+- Use Tailwind's color palette consistently
+
+**Utility Pattern:**
+```typescript
+import { cn } from '@/lib/utils';
+
+<div className={cn(
+  'base-classes',
+  isActive && 'active-classes',
+  variant === 'primary' && 'variant-classes'
+)} />
+```
+
+**Responsive:**
+```typescript
+<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+```
+
+### 8. Routing with React Router v6
+
+**Route Protection:**
+```typescript
+<Route 
+  path="/sales" 
+  element={
+    <ProtectedRoute requiredPermissions={['sales.read']}>
+      <SalesDashboard />
+    </ProtectedRoute>
+  } 
+/>
+```
+
+**Module Routes:**
+```typescript
+<Route 
+  path="/sales/*" 
+  element={<ModuleRoute modulePermissions={['sales.read']} />}
+>
+  <Route index element={<SalesDashboard />} />
+  <Route path="orders" element={<SalesOrders />} />
+  <Route path="invoices" element={<SalesInvoices />} />
+</Route>
+```
+
+### 9. Supabase Integration
+
+**Auth:**
+```typescript
+const { data: { user } } = await supabase.auth.getUser();
+```
+
+**RPC Calls:**
+```typescript
+const { data, error } = await supabase.rpc('get_user_permissions', {
+  p_user_id: user.id,
+  p_company_id: companyId
+});
+```
+
+**Queries:**
+```typescript
+const { data, error } = await supabase
+  .from('sales_orders')
+  .select('*')
+  .eq('company_id', companyId)
+  .order('created_at', { ascending: false })
+  .limit(20);
+```
+
+**Real-time:**
+```typescript
+supabase
+  .channel('sales_orders')
+  .on('postgres_changes', 
+    { event: '*', schema: 'public', table: 'sales_orders' },
+    handleChange
+  )
+  .subscribe();
+```
+
+### 10. Multi-Tenant Context
+
+**Company Extraction:**
+```typescript
+function getCompanyFromSubdomain(): string {
+  const hostname = window.location.hostname;
+  
+  // Handle localhost
+  if (hostname === 'localhost') {
+    return 'dev-company-id';
+  }
+  
+  // Extract subdomain
+  const subdomain = hostname.split('.')[0];
+  return lookupCompanyId(subdomain);
+}
+```
+
+**Company Context:**
+```typescript
+const CompanyContext = createContext<CompanyContextType>(null);
+
+export function CompanyProvider({ children }) {
+  const [companyId, setCompanyId] = useState<string | null>(null);
+  
+  useEffect(() => {
+    const company = getCompanyFromSubdomain();
+    setCompanyId(company);
+  }, []);
+  
+  return (
+    <CompanyContext.Provider value={{ companyId }}>
+      {children}
+    </CompanyContext.Provider>
+  );
+}
+```
+
+### 11. Performance Optimization
+
+**Code Splitting:**
+```typescript
+const SalesDashboard = lazy(() => import('@/pages/sales/Dashboard'));
+
+<Suspense fallback={<LoadingSpinner />}>
+  <SalesDashboard />
+</Suspense>
+```
+
+**Memoization:**
+```typescript
+const filteredModules = useMemo(() => {
+  return modules.filter(m => hasAccess(m));
+}, [modules, permissions]);
+```
+
+**Debouncing:**
+```typescript
+const debouncedSearch = useDeferredValue(searchQuery);
+```
+
+### 12. Error Handling
+
+**Component Error Boundaries:**
+```typescript
+<ErrorBoundary fallback={<ErrorFallback />}>
+  <ModuleContent />
+</ErrorBoundary>
+```
+
+**API Error Handling:**
+```typescript
+try {
+  const data = await fetchData();
+  setData(data);
+} catch (error) {
+  console.error('Error:', error);
+  setError(error instanceof Error ? error.message : 'Unknown error');
+} finally {
+  setLoading(false);
+}
+```
+
+### 13. Accessibility
+
+- Use semantic HTML elements
+- Include ARIA labels where needed
+- Ensure keyboard navigation works
+- Maintain proper heading hierarchy
+- Test with screen readers
+
+```typescript
+<button
+  aria-label="Close dialog"
+  onClick={handleClose}
+>
+  <X className="h-4 w-4" />
+</button>
+```
+
+### 14. File Naming Conventions
+
+- Components: `PascalCase.tsx` (e.g., `ModuleCard.tsx`)
+- Hooks: `camelCase.ts` (e.g., `usePermissions.ts`)
+- Utils: `camelCase.ts` (e.g., `formatCurrency.ts`)
+- Pages: `PascalCase.tsx` (e.g., `Dashboard.tsx`)
+- Types: `PascalCase.ts` or `types.ts`
+
+### 15. Loading & Empty States
+
+**Always include:**
+- Loading skeletons for async data
+- Empty states with helpful messages
+- Error states with retry options
+
+```typescript
+if (isLoading) return <LoadingSkeleton />;
+if (error) return <ErrorState error={error} onRetry={refetch} />;
+if (data.length === 0) return <EmptyState />;
+return <DataView data={data} />;
+```
+
+## Context Variables
+
+- Frontend built with **React 18 + TypeScript + Vite**
+- Styling with **Tailwind CSS v3**
+- Routing with **React Router v6**
+- Backend is **Supabase (Postgres + Auth)**
+- Multi-tenant with **subdomain-based isolation**
+- RBAC with **granular module permissions**
+- Navigation: **E-commerce Landing → Dashboard → Modules**
+- Each module has **context-aware sidebar**
+- Users can have **multiple roles per company**
+- Companies can **enable/disable modules**
+
+## Common Pitfalls to Avoid
+
+- ❌ Hardcoding module lists in components
+- ❌ Showing sidebar on dashboard/landing pages
+- ❌ Skipping permission checks in UI
+- ❌ Not handling loading/error states
+- ❌ Using `any` type in TypeScript
+- ❌ Forgetting to filter by companyId
+- ❌ Not memoizing expensive computations
+- ❌ Ignoring accessibility
+- ❌ Inconsistent error handling
+- ❌ Missing mobile responsiveness
+
+## Testing Scenarios
+
+- [ ] Admin sees all modules (if company has them)
+- [ ] Sales user sees only Sales module
+- [ ] Multi-role user sees merged permissions
+- [ ] Unauthorized access redirects properly
+- [ ] Sidebar shows only in modules
+- [ ] Dashboard cards filter correctly
+- [ ] Mobile navigation works (drawer)
+- [ ] Permission checks work on all routes

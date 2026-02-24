@@ -4,3 +4,6 @@ export * from './auth';
 export * from './payments';
 export * from './products';
 export * from './categories'; 
+export * from './brands';
+export * from './prices';
+export * from './taxes'; 

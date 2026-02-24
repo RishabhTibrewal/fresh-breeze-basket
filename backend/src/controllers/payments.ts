@@ -3,6 +3,7 @@ import { supabase } from '../config/supabase';
 import { supabaseAdmin } from '../lib/supabase';
 import { ApiError } from '../middleware/error';
 import { stripe } from '../config/stripe';
+import { PaymentService } from '../services/core/PaymentService';
 
 // Create a payment intent
 export const createPaymentIntent = async (req: Request, res: Response) => {
@@ -317,11 +318,37 @@ const handlePaymentSuccess = async (paymentIntent: any) => {
       return; // Exit early since we already have a payment record
     }
 
-    // Create new payment record only if one doesn't exist
+    // Create new payment record using PaymentService
+    if (order_id && order_id !== 'pending_order') {
+      const paymentService = new PaymentService(companyId);
+      const paymentId = await paymentService.processPayment({
+        orderId: order_id,
+        amount: paymentIntent.amount / 100,
+        paymentMethod: paymentIntent.payment_method_types[0] || 'card',
+        status: 'completed',
+        stripePaymentIntentId: paymentIntent.id,
+        paymentGatewayResponse: {
+          source: 'stripe_webhook',
+          payment_intent_id: paymentIntent.id,
+          created_at: new Date().toISOString()
+        },
+        transactionReferences: {
+          stripe_payment_intent_id: paymentIntent.id,
+          webhook_processed: true
+        }
+      });
+
+      if (paymentId) {
+        console.log('Payment record created successfully via PaymentService:', paymentId);
+      } else {
+        console.error('Failed to create payment record via PaymentService');
+      }
+    } else {
+      // For pending orders, create payment record directly (will be linked later)
     const { data: payment, error: paymentError } = await supabaseAdmin
       .from('payments')
       .insert({
-        order_id: order_id !== 'pending_order' ? order_id : null,
+          order_id: null,
         amount: paymentIntent.amount / 100,
         status: 'completed',
         payment_method: paymentIntent.payment_method_types[0] || 'card',
@@ -346,6 +373,7 @@ const handlePaymentSuccess = async (paymentIntent: any) => {
     }
 
     console.log('Payment record created successfully:', payment.id);
+    }
 
     // Update order if we have a valid order_id (not pending_order)
     if (order_id && order_id !== 'pending_order') {
@@ -672,49 +700,36 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       });
     }
 
-    // Create new payment record only if one doesn't exist
-    const { data: payment, error: paymentError } = await supabase
-      .from('payments')
-      .insert({
-        order_id,
+    // Create new payment record using PaymentService
+    const paymentService = new PaymentService(req.companyId);
+    const paymentId = await paymentService.processPayment({
+      orderId: order_id,
         amount: paymentAmount,
-        status,
-        payment_method,
-        stripe_payment_intent_id: stripe_payment_intent_id || null,
-        company_id: req.companyId,
-        payment_gateway_response: {
+      paymentMethod: payment_method,
+      status: status as 'pending' | 'completed' | 'failed',
+      stripePaymentIntentId: stripe_payment_intent_id || undefined,
+      paymentGatewayResponse: {
           source: 'manual_creation',
           created_by: userId,
           created_at: new Date().toISOString()
         },
-        transaction_references: {
+      transactionReferences: {
           stripe_payment_intent_id: stripe_payment_intent_id || null,
           manual_creation: true
         }
-      })
-      .select()
-      .single();
+    });
 
-    if (paymentError) {
-      console.error('Error creating payment record:', paymentError);
+    if (!paymentId) {
       throw new ApiError(500, 'Error creating payment record');
     }
 
-    // Update order payment status
-    const { error: orderUpdateError } = await supabase
-      .from('orders')
-      .update({
-        payment_status: 'paid',
-        payment_intent_id: stripe_payment_intent_id,
-        updated_at: new Date()
-      })
-      .eq('id', order_id)
-      .eq('company_id', req.companyId);
-
-    if (orderUpdateError) {
-      console.error('Error updating order payment status:', orderUpdateError);
-      // Don't fail the request if order update fails, but log it
-    }
+    // Fetch the created payment
+    const { data: payment } = await supabaseAdmin
+      .from('payments')
+      .select('*')
+      .eq('id', paymentId)
+      .eq('company_id', req.companyId)
+      .single();
 
     console.log('Payment record created successfully:', payment.id);
 

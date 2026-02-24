@@ -32,9 +32,16 @@ export default function SupplierForm() {
     state: '',
     country: '',
     postal_code: '',
-    tax_id: '',
+    gst_no: '',
     payment_terms: '',
     notes: '',
+    opening_balance: 0,
+    closing_balance: 0,
+    vendor_name: '',
+    trade_name: '',
+    legal_name: '',
+    udyam_registration_number: '',
+    pan_number: '',
     bank_accounts: [],
   });
 
@@ -43,6 +50,11 @@ export default function SupplierForm() {
     account_number: string;
     ifsc_code: string;
     account_holder_name: string;
+    bank_address: string;
+    city: string;
+    state: string;
+    country: string;
+    postal_code: string;
     is_primary: boolean;
   }>>([]);
 
@@ -67,9 +79,17 @@ export default function SupplierForm() {
         state: supplier.state || '',
         country: supplier.country || '',
         postal_code: supplier.postal_code || '',
-        tax_id: supplier.tax_id || '',
+        gst_no: supplier.gst_no || '',
         payment_terms: supplier.payment_terms || '',
         notes: supplier.notes || '',
+        opening_balance: supplier.opening_balance || 0,
+        closing_balance: supplier.closing_balance || 0,
+        vendor_name: supplier.vendor_name || '',
+        trade_name: supplier.trade_name || '',
+        legal_name: supplier.legal_name || '',
+        udyam_registration_number: supplier.udyam_registration_number || '',
+        pan_number: supplier.pan_number || '',
+        is_active: supplier.is_active,
         bank_accounts: [],
       });
       if (supplier.supplier_bank_accounts) {
@@ -78,6 +98,11 @@ export default function SupplierForm() {
           account_number: acc.account_number || '',
           ifsc_code: acc.ifsc_code || '',
           account_holder_name: acc.account_holder_name || '',
+          bank_address: acc.bank_address || '',
+          city: acc.city || '',
+          state: acc.state || '',
+          country: acc.country || '',
+          postal_code: acc.postal_code || '',
           is_primary: acc.is_primary || false,
         })));
       }
@@ -121,6 +146,11 @@ export default function SupplierForm() {
       account_number: '',
       ifsc_code: '',
       account_holder_name: '',
+      bank_address: '',
+      city: '',
+      state: '',
+      country: '',
+      postal_code: '',
       is_primary: false,
     }]);
   };
@@ -167,6 +197,30 @@ export default function SupplierForm() {
               <CardTitle>Basic Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div>
+                <Label>Legal Name</Label>
+                <Input
+                  value={formData.legal_name}
+                  onChange={(e) => setFormData({ ...formData, legal_name: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>Trade Name</Label>
+                <Input
+                  value={formData.trade_name}
+                  onChange={(e) => setFormData({ ...formData, trade_name: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>Vendor Name</Label>
+                <Input
+                  value={formData.vendor_name}
+                  onChange={(e) => setFormData({ ...formData, vendor_name: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
               <div>
                 <Label>Supplier Name *</Label>
                 <Input
@@ -263,13 +317,74 @@ export default function SupplierForm() {
                   />
                 </div>
               </div>
+              
+            </CardContent>
+          </Card>
+
+          {/* Financial Information */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Financial Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div>
-                <Label>Tax ID</Label>
+                <Label>Opening Balance</Label>
                 <Input
-                  value={formData.tax_id}
-                  onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
+                  type="number"
+                  step="0.01"
+                  value={formData.opening_balance}
+                  onChange={(e) => setFormData({ ...formData, opening_balance: parseFloat(e.target.value) || 0 })}
                   className="mt-1"
                 />
+              </div>
+              <div>
+                <Label>Closing Balance</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={formData.closing_balance}
+                  onChange={(e) => setFormData({ ...formData, closing_balance: parseFloat(e.target.value) || 0 })}
+                  className="mt-1"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Legal & Tax Information */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Legal & Tax Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label>PAN Number</Label>
+                <Input
+                  value={formData.pan_number}
+                  onChange={(e) => setFormData({ ...formData, pan_number: e.target.value.toUpperCase() })}
+                  placeholder="ABCDE1234F"
+                  maxLength={10}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>GST Number</Label>
+                <Input
+                  value={formData.gst_no}
+                  onChange={(e) => setFormData({ ...formData, gst_no: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>Udyam Registration Number (URN)</Label>
+                <Input
+                  value={formData.udyam_registration_number}
+                  onChange={(e) => setFormData({ ...formData, udyam_registration_number: e.target.value })}
+                  placeholder="UDYAM-XX-XX-XXXXXX"
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  MSME Udyam Registration Number
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -296,6 +411,18 @@ export default function SupplierForm() {
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                   className="mt-1"
                 />
+              </div>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="is_active"
+                  checked={formData.is_active !== false}
+                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                  className="rounded border-gray-300"
+                />
+                <Label htmlFor="is_active" className="cursor-pointer">
+                  Active
+                </Label>
               </div>
             </CardContent>
           </Card>
@@ -358,6 +485,46 @@ export default function SupplierForm() {
                         <Input
                           value={account.account_holder_name}
                           onChange={(e) => updateBankAccount(index, 'account_holder_name', e.target.value)}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label>Bank Address</Label>
+                        <Textarea
+                          value={account.bank_address}
+                          onChange={(e) => updateBankAccount(index, 'bank_address', e.target.value)}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label>City</Label>
+                        <Input
+                          value={account.city}
+                          onChange={(e) => updateBankAccount(index, 'city', e.target.value)}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label>State</Label>
+                        <Input
+                          value={account.state}
+                          onChange={(e) => updateBankAccount(index, 'state', e.target.value)}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label>Country</Label>
+                        <Input
+                          value={account.country}
+                          onChange={(e) => updateBankAccount(index, 'country', e.target.value)}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label>Postal Code</Label>
+                        <Input
+                          value={account.postal_code}
+                          onChange={(e) => updateBankAccount(index, 'postal_code', e.target.value)}
                           className="mt-1"
                         />
                       </div>

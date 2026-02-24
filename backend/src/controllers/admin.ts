@@ -519,15 +519,56 @@ export const getSalesExecutives = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Company context is required');
     }
     
-    const { data: salesExecutives, error } = await supabase
+    // Get the 'sales' role ID
+    const { data: salesRole, error: roleError } = await supabase
+      .from('roles')
+      .select('id')
+      .eq('name', 'sales')
+      .maybeSingle();
+
+    if (roleError) {
+      throw new ApiError(500, `Error fetching sales role: ${roleError.message}`);
+    }
+
+    // If sales role doesn't exist, return empty array (no sales executives)
+    if (!salesRole) {
+      return res.status(200).json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Get all users with 'sales' role in this company from user_roles table
+    const { data: userRoles, error: userRolesError } = await supabase
+      .from('user_roles')
+      .select('user_id')
+      .eq('company_id', req.companyId)
+      .eq('role_id', salesRole.id);
+
+    if (userRolesError) {
+      throw new ApiError(500, `Error fetching user roles: ${userRolesError.message}`);
+    }
+
+    if (!userRoles || userRoles.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Get user IDs
+    const userIds = userRoles.map(ur => ur.user_id);
+
+    // Fetch profiles for these users
+    const { data: salesExecutives, error: profilesError } = await supabase
       .from('profiles')
-      .select('id, email, first_name, last_name, phone, role')
-      .eq('role', 'sales')
+      .select('id, email, first_name, last_name, phone, avatar_url, created_at, updated_at')
+      .in('id', userIds)
       .eq('company_id', req.companyId)
       .order('first_name', { ascending: true });
 
-    if (error) {
-      throw new ApiError(500, `Error fetching sales executives: ${error.message}`);
+    if (profilesError) {
+      throw new ApiError(500, `Error fetching sales executive profiles: ${profilesError.message}`);
     }
 
     return res.status(200).json({

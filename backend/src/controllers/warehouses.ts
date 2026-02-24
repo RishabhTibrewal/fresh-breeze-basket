@@ -275,6 +275,25 @@ export const getWarehouseInventory = async (req: Request, res: Response) => {
           name,
           code,
           is_active
+        ),
+        variant:product_variants (
+          id,
+          name,
+          sku,
+          price:product_prices!price_id (
+            sale_price,
+            mrp_price
+          ),
+          brand:brands (
+            id,
+            name,
+            logo_url
+          ),
+          tax:taxes (
+            id,
+            name,
+            rate
+          )
         )
       `)
       .eq('warehouse_id', warehouseId)
@@ -335,6 +354,25 @@ export const getProductStockAcrossWarehouses = async (req: Request, res: Respons
           name,
           code,
           is_active
+        ),
+        variant:product_variants (
+          id,
+          name,
+          sku,
+          price:product_prices!price_id (
+            sale_price,
+            mrp_price
+          ),
+          brand:brands (
+            id,
+            name,
+            logo_url
+          ),
+          tax:taxes (
+            id,
+            name,
+            rate
+          )
         )
       `)
       .eq('product_id', productId)
@@ -392,6 +430,25 @@ export const getBulkProductStock = async (req: Request, res: Response) => {
           name,
           code,
           is_active
+        ),
+        variant:product_variants (
+          id,
+          name,
+          sku,
+          price:product_prices!price_id (
+            sale_price,
+            mrp_price
+          ),
+          brand:brands (
+            id,
+            name,
+            logo_url
+          ),
+          tax:taxes (
+            id,
+            name,
+            rate
+          )
         )
       `)
       .in('product_id', productIds)

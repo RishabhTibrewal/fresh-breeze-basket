@@ -2,21 +2,29 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Calendar, Flag, ShoppingCart, Heart, Minus, Plus, ArrowLeft } from 'lucide-react';
-import { productsService } from '@/api/products';
-import { warehousesService } from '@/api/warehouses';
+import { productsService, ProductVariant } from '@/api/products';
 import ProductCard from '@/components/products/ProductCard';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { useCart } from '@/contexts/CartContext';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorMessage } from '@/components/ui/error-message';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
+import { VariantSelector } from '@/components/products/VariantSelector';
+import { PriceDisplay } from '@/components/products/PriceDisplay';
+import { StockDisplay } from '@/components/inventory/StockDisplay';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 
 const ProductDetails = () => {
   const { id } = useParams<{ id: string }>();
   const [quantity, setQuantity] = useState(1);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
-  const { state: cartState, addToCart, updateQuantity } = useCart();
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
+  const isMobile = useIsMobile();
+  const { state: cartState, addToCart, updateQuantity, removeFromCart } = useCart();
 
   const { data: product, isLoading, error } = useQuery({
     queryKey: ['product', id],
@@ -24,92 +32,75 @@ const ProductDetails = () => {
     enabled: !!id,
   });
 
-  // Fetch warehouse inventory stock for this product
-  const { data: stockData } = useQuery({
-    queryKey: ['product-stock', id],
-    queryFn: () => warehousesService.getProductStockAcrossWarehouses(id || ''),
-    enabled: !!id,
-    staleTime: 30000, // Cache for 30 seconds
-  });
+  // Get active variants
+  const activeVariants = product?.variants?.filter(v => v.is_active) || [];
+  
+  // Select default variant or first active variant
+  useEffect(() => {
+    if (!selectedVariantId && activeVariants.length > 0) {
+      const defaultVariant = activeVariants.find(v => v.is_default) || activeVariants[0];
+      setSelectedVariantId(defaultVariant.id);
+    }
+  }, [activeVariants, selectedVariantId]);
 
-  // Use ONLY warehouse inventory stock - no fallback to product.stock_count
-  const actualStock = stockData?.total_stock ?? 0;
-
-  const cartItem = product ? cartState.items.find(item => item.id === product.id) : undefined;
+  const selectedVariant = activeVariants.find(v => v.id === selectedVariantId);
+  
+  // Find cart item by product ID and variant ID
+  const cartItem = product && selectedVariantId
+    ? cartState.items.find(
+        item => item.id === product.id && item.variant_id === selectedVariantId
+      )
+    : undefined;
   const quantityInCart = cartItem ? cartItem.quantity : 0;
 
   useEffect(() => {
-    if (product) {
+    if (product && selectedVariant) {
       setQuantity(quantityInCart > 0 ? quantityInCart : 1);
     }
-  }, [product, quantityInCart]);
+  }, [product, selectedVariant, quantityInCart]);
 
-  // Add console log to debug product data
-  console.log('Product data:', product);
-  console.log('Quantity in cart:', quantityInCart, 'Local quantity:', quantity);
-
-  // Get related products - MODIFIED QUERY KEY
+  // Get related products
   const { data: allProductsForRelated, isLoading: isLoadingRelated } = useQuery({
-    queryKey: ['products', 'allUnfilteredForRelated'], // Changed queryKey
+    queryKey: ['products', 'allUnfilteredForRelated'],
     queryFn: productsService.getAll,
   });
 
-  const relatedProducts = allProductsForRelated // Use the new data variable
+  const relatedProducts = allProductsForRelated
     ?.filter(p => p.category_id === product?.category_id && p.id !== product?.id)
     .slice(0, 4);
 
-  // Fetch bulk stock data for related products
-  const { data: relatedProductsStockData = {} } = useQuery({
-    queryKey: ['bulk-product-stock-related', relatedProducts?.map(p => p.id).join(',')],
-    queryFn: () => {
-      if (!relatedProducts || relatedProducts.length === 0) return {};
-      return warehousesService.getBulkProductStock(relatedProducts.map(p => p.id));
-    },
-    enabled: !!relatedProducts && relatedProducts.length > 0,
-    staleTime: 30000, // Cache for 30 seconds
-  });
-
-  // Handle quantity change (for when item is NOT in cart, or for setting new quantity if it IS)
   const decreaseQuantity = () => {
     setQuantity(prev => Math.max(1, prev - 1));
   };
 
   const increaseQuantity = () => {
-    // Use actual warehouse inventory stock
-    const limit = actualStock; 
-    setQuantity(prev => Math.min(limit, prev + 1));
+    // Stock limit will be checked when adding to cart
+    setQuantity(prev => prev + 1);
   };
   
-  // Handle adding a new item to the cart
   const handleAddNewToCart = () => {
-    if (product) {
-      if (quantity <= 0) {
-        toast({ title: "Invalid Quantity", description: "Please select a valid quantity.", variant: "destructive" });
-        return;
-      }
-      if (quantity > actualStock) {
-        toast({ title: "Not Enough Stock", description: `Only ${actualStock} items available.`, variant: "destructive" });
-        setQuantity(actualStock); // Adjust to max available
-        return;
-      }
-      addToCart(product, quantity);
-      toast({ title: "Added to Cart", description: `${quantity} x ${product.name} added.`});
+    if (!product || !selectedVariant) {
+      toast.error('Please select a variant');
+      return;
     }
+
+    if (quantity <= 0) {
+      toast.error('Please select a valid quantity');
+      return;
+    }
+
+    addToCart(product, selectedVariant, quantity);
+    toast.success(`Added ${quantity} × ${product.name} (${selectedVariant.name}) to cart`);
   };
 
-  // Handle updating quantity of an item ALREADY in the cart
   const handleUpdateCartQuantity = (newQuantity: number) => {
-    if (product && cartItem) {
-      if (newQuantity > actualStock) {
-        toast({ title: "Not Enough Stock", description: `Only ${actualStock} items available.`, variant: "destructive" });
-        updateQuantity(product.id, actualStock); // Update to max available
-        return;
-      }
-      updateQuantity(product.id, newQuantity); // This will remove if newQuantity is 0
+    if (product && selectedVariant && cartItem) {
       if (newQuantity > 0) {
-         toast({ title: "Cart Updated", description: `${product.name} quantity set to ${newQuantity}.`});
+        updateQuantity(product.id, selectedVariant.id, newQuantity);
+        toast.success(`Updated quantity to ${newQuantity}`);
       } else {
-         toast({ title: "Item Removed", description: `${product.name} removed from cart.`});
+        removeFromCart(product.id, selectedVariant.id);
+        toast.success('Removed from cart');
       }
     }
   };
@@ -152,18 +143,27 @@ const ProductDetails = () => {
     );
   }
 
-  const mainImage = product.additional_images && product.additional_images.length > 0 
-    ? product.additional_images[activeImageIndex]
-    : product.image_url || '/placeholder.svg';
+  // Get images from variant or product
+  // Priority: variant.image_url (main) > variant_images array (additional) > product images
+  const mainVariantImage = selectedVariant?.image_url ? [selectedVariant.image_url] : [];
+  const variantAdditionalImages = selectedVariant?.variant_images 
+    ? selectedVariant.variant_images
+        .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+        .map(img => img.image_url)
+    : [];
+  const variantImages = [...mainVariantImage, ...variantAdditionalImages];
+  const productImages = product.image_url ? [product.image_url, ...(product.additional_images || [])] : [];
+  const displayImages = variantImages.length > 0 ? variantImages : productImages;
+  
+  const mainImage = displayImages[activeImageIndex] || '/placeholder.svg';
 
-  // Determine max quantity for the input based on whether it's in cart or not
-  // Use ONLY warehouse inventory stock - no fallback to product.stock_count
-  const maxAllowedForInput = actualStock;
+  // Get display badge
+  const displayBadge = selectedVariant?.badge || product.badge;
 
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <main className="flex-grow">
+      <main className="flex-grow pb-20 md:pb-8">
         <div className="container mx-auto px-4 py-8">
           {/* Breadcrumbs */}
           <div className="mb-6">
@@ -185,15 +185,16 @@ const ProductDetails = () => {
                     className="absolute inset-0 w-full h-full object-contain"
                   />
                 </div>
-                {product.additional_images && product.additional_images.length > 1 && (
+                {displayImages.length > 1 && (
                   <div className="grid grid-cols-5 sm:grid-cols-6 gap-2">
-                    {product.additional_images.map((imageUrl, index) => (
+                    {displayImages.map((imageUrl, index) => (
                       <button
                         key={index}
                         onClick={() => setActiveImageIndex(index)}
-                        className={`relative rounded-lg overflow-hidden aspect-square ${
+                        className={cn(
+                          "relative rounded-lg overflow-hidden aspect-square",
                           index === activeImageIndex ? 'ring-2 ring-primary' : ''
-                        }`}
+                        )}
                       >
                         <img
                           src={imageUrl}
@@ -208,104 +209,152 @@ const ProductDetails = () => {
               
               {/* Product Info */}
               <div>
-                {product.sale_price && (
-                  <div className="inline-block bg-red-500 text-white text-sm font-medium px-3 py-1 rounded-full mb-2">
-                    SALE
-                  </div>
+                {displayBadge && (
+                  <Badge variant="secondary" className="mb-2">
+                    {displayBadge}
+                  </Badge>
                 )}
                 <h1 className="text-2xl sm:text-3xl font-bold mb-3">{product.name}</h1>
                 
-                <div className="flex items-center mb-4">
-                  <Flag className="h-4 w-4 mr-2 text-gray-500" />
-                  <span className="text-gray-600">Origin: {product.origin}</span>
-                </div>
-                
-                <div className="flex flex-wrap items-baseline mb-6">
-                  {product.sale_price ? (
-                    <>
-                      <span className="text-2xl sm:text-3xl font-bold text-red-500">₹ {product.sale_price.toFixed(2)}</span>
-                      <span className="ml-3 text-gray-500 line-through">₹ {product.price.toFixed(2)}</span>
-                      <span className="ml-2 text-gray-600">/{product.unit} {product.unit_type}</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-2xl sm:text-3xl font-bold">₹ {product.price.toFixed(2)}</span>
-                      <span className="ml-2 text-gray-600">/{product.unit} {product.unit_type}</span>
-                    </>
-                  )}
-                </div>
+                {product.origin && (
+                  <div className="flex items-center mb-4">
+                    <Flag className="h-4 w-4 mr-2 text-gray-500" />
+                    <span className="text-gray-600">Origin: {product.origin}</span>
+                  </div>
+                )}
+
+                {/* Variant Selector */}
+                {activeVariants.length > 1 && (
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium mb-2">Select Variant</label>
+                    <VariantSelector
+                      variants={activeVariants}
+                      selectedVariantId={selectedVariantId}
+                      onSelect={setSelectedVariantId}
+                      productId={product.id}
+                      showStock
+                    />
+                  </div>
+                )}
+
+                {selectedVariant ? (
+                  <>
+                    {/* Price Display */}
+                    <div className="mb-4">
+                      {selectedVariant.price ? (
+                        <PriceDisplay
+                          mrpPrice={selectedVariant.price.mrp_price}
+                          salePrice={selectedVariant.price.sale_price}
+                          size="lg"
+                        />
+                      ) : (
+                        <span className="text-2xl sm:text-3xl font-bold">Price not available</span>
+                      )}
+                      {selectedVariant.unit && selectedVariant.unit_type && (
+                        <span className="ml-2 text-gray-600 text-lg">
+                          / {selectedVariant.unit} {selectedVariant.unit_type}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Stock Display */}
+                    <div className="mb-6">
+                      <StockDisplay
+                        productId={product.id}
+                        variantId={selectedVariant.id}
+                        format="detailed"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="mb-6">
+                    <Badge variant="destructive">No variant available</Badge>
+                  </div>
+                )}
                 
                 <p className="text-gray-700 mb-6">{product.description}</p>
 
-                <div className="mb-6">
-                  <h2 className="text-xl font-semibold mb-2">Nutritional Highlights:</h2>
-                  <p className="text-gray-700">{product.nutritional_info}</p>
-                </div>
+                {product.nutritional_info && (
+                  <div className="mb-6">
+                    <h2 className="text-xl font-semibold mb-2">Nutritional Highlights:</h2>
+                    <p className="text-gray-700">{product.nutritional_info}</p>
+                  </div>
+                )}
 
-                {/* Stock Availability Display */}
-                <div className="mb-4 text-sm font-medium">
-                  {actualStock > 10 ? (
-                    <span className="text-green-600">In Stock</span>
-                  ) : actualStock > 0 ? (
-                    <span className="text-orange-500">{`Only ${actualStock} left - order soon!`}</span>
-                  ) : (
-                    <span className="text-red-600">Out of Stock</span>
-                  )}
-                </div>
-
-                {actualStock > 0 && ( // Only show quantity/add to cart if in stock
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
-                    <div className="flex items-center border rounded-lg overflow-hidden">
-                      <button
-                        onClick={() => quantityInCart > 0 ? handleUpdateCartQuantity(quantityInCart - 1) : decreaseQuantity()}
-                        className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-r"
-                        disabled={(quantityInCart > 0 ? quantityInCart : quantity) <= (quantityInCart > 0 ? 0 : 1)} // Allow decreasing to 0 if in cart (to remove)
-                      >
-                        <Minus className="h-4 w-4" />
-                      </button>
-                      <span className="w-12 text-center text-lg tabular-nums">
-                        {quantityInCart > 0 ? quantityInCart : quantity}
-                      </span>
-                      <button
-                        onClick={() => quantityInCart > 0 ? handleUpdateCartQuantity(quantityInCart + 1) : increaseQuantity()}
-                        className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-l"
-                        disabled={(quantityInCart > 0 ? quantityInCart : quantity) >= maxAllowedForInput}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                    </div>
-                    
-                    {quantityInCart === 0 && (
-                      <button
-                        onClick={handleAddNewToCart}
-                        className="flex-1 bg-green-600 text-white py-3 sm:py-2 rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center justify-center text-sm"
-                        disabled={!product.is_active || actualStock === 0 || quantity <= 0 || quantity > actualStock}
-                      >
-                        <ShoppingCart className="h-5 w-5 mr-2" />
-                        Add to Cart ({quantity})
-                      </button>
+                {/* Add to Cart Section */}
+                {selectedVariant && selectedVariant.price && (
+                  <div className="mb-6">
+                    {quantityInCart === 0 ? (
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                        <div className="flex items-center border rounded-lg overflow-hidden">
+                          <button
+                            onClick={decreaseQuantity}
+                            className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-r"
+                            disabled={quantity <= 1}
+                          >
+                            <Minus className="h-4 w-4" />
+                          </button>
+                          <span className="w-12 text-center text-lg tabular-nums">
+                            {quantity}
+                          </span>
+                          <button
+                            onClick={increaseQuantity}
+                            className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-l"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
+                        </div>
+                        
+                        <Button
+                          onClick={handleAddNewToCart}
+                          className="flex-1 bg-green-600 text-white py-3 sm:py-2 hover:bg-green-700"
+                          disabled={!product.is_active || !selectedVariant.is_active}
+                        >
+                          <ShoppingCart className="h-5 w-5 mr-2" />
+                          Add to Cart ({quantity})
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex items-center border rounded-lg overflow-hidden">
+                          <button
+                            onClick={() => handleUpdateCartQuantity(quantityInCart - 1)}
+                            className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-r"
+                            disabled={quantityInCart <= 0}
+                          >
+                            <Minus className="h-4 w-4" />
+                          </button>
+                          <span className="w-12 text-center text-lg tabular-nums">
+                            {quantityInCart}
+                          </span>
+                          <button
+                            onClick={() => handleUpdateCartQuantity(quantityInCart + 1)}
+                            className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-l"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <p className="text-sm text-green-700">
+                          This item is in your cart. Adjust quantity above.
+                        </p>
+                      </div>
                     )}
                   </div>
                 )}
-                
-                {quantityInCart > 0 && actualStock > 0 && (
-                   <p className="text-sm text-green-700 mb-6">This item is in your cart. Adjust quantity above.</p>
-                )}
-                
-                {/* Fallback for out of stock */}
-                {actualStock <= 0 && (
+
+                {!selectedVariant && (
                   <div className="mb-6">
-                     <button
-                        className="flex-1 w-full bg-gray-400 text-white py-3 sm:py-2 rounded-lg font-medium cursor-not-allowed flex items-center justify-center text-sm"
-                        disabled={true}
-                      >
-                        <ShoppingCart className="h-5 w-5 mr-2" />
-                        Out of Stock
-                      </button>
+                    <Button
+                      disabled
+                      className="w-full bg-gray-400 text-white cursor-not-allowed"
+                    >
+                      <ShoppingCart className="h-5 w-5 mr-2" />
+                      Select Variant to Add to Cart
+                    </Button>
                   </div>
                 )}
 
-                <div className="flex gap-3 mb-6"> {/* Ensure this div is present for the heart button */}
+                <div className="flex gap-3 mb-6">
                   <button
                     className="w-12 sm:w-14 h-12 sm:h-14 flex items-center justify-center border rounded-lg hover:bg-gray-50 transition-colors"
                   >
@@ -332,7 +381,6 @@ const ProductDetails = () => {
                   <ProductCard 
                     key={relatedProduct.id} 
                     product={relatedProduct}
-                    bulkStockData={relatedProductsStockData[relatedProduct.id] as { warehouses: any[], total_stock: number } | undefined}
                   />
                 ))}
               </div>
@@ -340,6 +388,82 @@ const ProductDetails = () => {
           )}
         </div>
       </main>
+
+      {/* Mobile Sticky Variant Selector & Add to Cart */}
+      {isMobile && selectedVariant && selectedVariant.price && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t shadow-lg md:hidden p-4">
+          <div className="flex items-center gap-4">
+            <div className="flex-1">
+              {activeVariants.length > 1 && (
+                <VariantSelector
+                  variants={activeVariants}
+                  selectedVariantId={selectedVariantId}
+                  onSelect={setSelectedVariantId}
+                  productId={product.id}
+                  showStock={false}
+                />
+              )}
+              {selectedVariant.price && (
+                <PriceDisplay
+                  mrpPrice={selectedVariant.price.mrp_price}
+                  salePrice={selectedVariant.price.sale_price}
+                  size="sm"
+                />
+              )}
+            </div>
+            {quantityInCart === 0 ? (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center border rounded-lg overflow-hidden">
+                  <button
+                    onClick={decreaseQuantity}
+                    className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-r"
+                    disabled={quantity <= 1}
+                  >
+                    <Minus className="h-4 w-4" />
+                  </button>
+                  <span className="w-12 text-center text-lg tabular-nums">
+                    {quantity}
+                  </span>
+                  <button
+                    onClick={increaseQuantity}
+                    className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-l"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+                <Button
+                  onClick={handleAddNewToCart}
+                  className="bg-green-600 text-white hover:bg-green-700"
+                  disabled={!product.is_active || !selectedVariant.is_active}
+                >
+                  <ShoppingCart className="h-5 w-5 mr-2" />
+                  Add
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center border rounded-lg overflow-hidden">
+                <button
+                  onClick={() => handleUpdateCartQuantity(quantityInCart - 1)}
+                  className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-r"
+                  disabled={quantityInCart <= 0}
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <span className="w-12 text-center text-lg tabular-nums">
+                  {quantityInCart}
+                </span>
+                <button
+                  onClick={() => handleUpdateCartQuantity(quantityInCart + 1)}
+                  className="w-10 h-10 flex items-center justify-center hover:bg-gray-50 border-l"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <Footer />
     </div>
   );

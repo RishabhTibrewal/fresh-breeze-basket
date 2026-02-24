@@ -5,6 +5,8 @@ import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { useCart } from '@/contexts/CartContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { PriceDisplay } from '@/components/products/PriceDisplay';
+import { Badge } from '@/components/ui/badge';
 
 const Cart = () => {
   const { state, removeFromCart, updateQuantity, loadBackendCart } = useCart();
@@ -66,31 +68,32 @@ const Cart = () => {
                               {item.name}
                             </Link>
                             
-                            <div className="mt-1 text-gray-600">
-                              <span className="text-sm">Price: </span>
-                              {item.sale_price ? (
-                                <>
-                                  <span className="font-medium text-red-500">
-                                    ₹ {item.sale_price.toFixed(2)}
-                                  </span>
-                                  <span className="text-gray-500 text-sm line-through ml-1">
-                                    ₹ {item.price.toFixed(2)}
-                                  </span>
-                                </>
-                              ) : (
-                                <span className="font-medium">
-                                  ₹ {item.price.toFixed(2)}
+                            {item.variant_name && (
+                              <div className="mt-1">
+                                <Badge variant="outline" className="text-xs">
+                                  {item.variant_name}
+                                  {item.variant_sku && ` (${item.variant_sku})`}
+                                </Badge>
+                              </div>
+                            )}
+                            
+                            <div className="mt-2">
+                              <PriceDisplay
+                                mrpPrice={item.price}
+                                salePrice={item.sale_price}
+                                size="sm"
+                              />
+                              {item.unit && item.unit_type && (
+                                <span className="text-gray-500 ml-1 text-sm">
+                                  / {item.unit} {item.unit_type}
                                 </span>
                               )}
-                              <span className="text-gray-500 ml-1">
-                                /{item.unit} {item.unit_type}
-                              </span>
                             </div>
                             
                             <div className="flex items-center justify-between mt-4">
                               <div className="flex items-center border rounded-md">
                                 <button 
-                                  onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                                  onClick={() => updateQuantity(item.id, item.variant_id, item.quantity - 1)}
                                   className="px-3 py-1 text-gray-600 hover:bg-gray-100"
                                   disabled={item.quantity <= 1}
                                 >
@@ -98,7 +101,7 @@ const Cart = () => {
                                 </button>
                                 <span className="px-4 py-1 text-center min-w-[40px]">{item.quantity}</span>
                                 <button 
-                                  onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                                  onClick={() => updateQuantity(item.id, item.variant_id, item.quantity + 1)}
                                   className="px-3 py-1 text-gray-600 hover:bg-gray-100"
                                 >
                                   <Plus className="h-4 w-4" />
@@ -110,7 +113,7 @@ const Cart = () => {
                                   ₹ {((item.sale_price || item.price) * item.quantity).toFixed(2)}
                                 </div>
                                 <button 
-                                  onClick={() => removeFromCart(item.id)}
+                                  onClick={() => removeFromCart(item.id, item.variant_id)}
                                   className="mt-2 flex items-center text-red-600 hover:text-red-800 text-sm"
                                 >
                                   <Trash className="h-4 w-4 mr-1" />

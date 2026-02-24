@@ -56,7 +56,8 @@ import {
   adminRoutes,
   customerRoutes,
   creditPeriodRoutes,
-  companyRoutes
+  companyRoutes,
+  brandRoutes
 } from './routes';
 import productImagesRouter from './routes/productImages';
 import inventoryRouter from './routes/inventory';
@@ -73,6 +74,9 @@ import supplierPaymentsRouter from './routes/supplierPayments';
 import invoicesRouter from './routes/invoices';
 import posRouter from './routes/pos';
 import warehouseManagersRouter from './routes/warehouseManagers';
+import pricesRouter from './routes/prices';
+import taxesRouter from './routes/taxes';
+import kpiRouter from './routes/kpi';
 
 // Initialize Express app
 export const app = express();
@@ -202,6 +206,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/companies', companyRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/brands', brandRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/product-images', productImagesRouter);
@@ -209,6 +214,7 @@ app.use('/api/inventory', inventoryRouter);
 app.use('/api/cart', cartRouter);
 app.use('/api/admin', adminRoutes);
 app.use('/api/customer', customerRoutes);
+app.use('/api/customers', customerRoutes); // Alias for plural form
 app.use('/api/credit-period', creditPeriodRoutes);
 app.use('/api/sales/orders', salesOrderRouter);
 app.use('/api/leads', leadsRouter);
@@ -222,6 +228,9 @@ app.use('/api/supplier-payments', supplierPaymentsRouter);
 app.use('/api/invoices', invoicesRouter);
 app.use('/api/pos', posRouter);
 app.use('/api/warehouse-managers', warehouseManagersRouter);
+app.use('/api/prices', pricesRouter);
+app.use('/api/taxes', taxesRouter);
+app.use('/api/kpis', kpiRouter);
 
 // 404 handler for unmatched routes (ensures CORS headers are present)
 app.use((req: express.Request, res: express.Response) => {

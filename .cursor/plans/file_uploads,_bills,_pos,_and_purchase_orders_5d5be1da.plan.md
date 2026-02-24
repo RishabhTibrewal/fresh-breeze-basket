@@ -161,7 +161,7 @@ CREATE TABLE suppliers (
   state VARCHAR(100),
   country VARCHAR(100),
   postal_code VARCHAR(20),
-  tax_id VARCHAR(100),
+   VARCHAR(100),
   payment_terms TEXT,
   notes TEXT,
   is_active BOOLEAN DEFAULT true,
@@ -495,8 +495,8 @@ USING (
 - Product selection with barcode scanner support (future)
 - Cart display
 - Customer section (optional):
-  - Name field (optional)
-  - Phone number field (optional)
+- Name field (optional)
+- Phone number field (optional)
 - Payment method selection
 - Generate HTML invoice on order completion
 - Print invoice functionality
@@ -745,9 +745,7 @@ USING (
 
 ### 8.3 Order Detail Pages
 
-**File**: `frontend/src/pages/sales/OrderDetail.tsx`
-
-**File**: `frontend/src/pages/admin/AdminOrderDetails.tsx`
+**File**: `frontend/src/pages/sales/OrderDetail.tsx`**File**: `frontend/src/pages/admin/AdminOrderDetails.tsx`
 
 - Add "Generate Invoice" button (HTML for POS)
 - Add "Generate Bill" button (PDF for customers)
@@ -767,7 +765,7 @@ USING (
 
 ## 10. File Structure
 
-```
+```javascript
 backend/src/
   controllers/
     invoices.ts (new)
@@ -829,10 +827,3 @@ frontend/src/
 8. Purchase invoice backend (controllers, routes)
 9. Supplier payment backend (controllers, routes)
 10. Invoice/bill generation (HTML & PDF)
-11. POS ordering page (frontend + backend)
-12. Purchase order frontend pages
-13. Goods receipt frontend pages
-14. Purchase invoice frontend pages
-15. Supplier payment frontend pages
-16. Integration with existing forms
-17. Testing and refinement

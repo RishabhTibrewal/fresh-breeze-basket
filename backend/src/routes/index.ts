@@ -7,6 +7,7 @@ import adminRoutes from './admin';
 import customerRoutes from './customerRoutes';
 import creditPeriodRoutes from './creditPeriod';
 import companyRoutes from './companies';
+import brandRoutes from './brands';
 
 export {
   authRoutes,
@@ -17,5 +18,6 @@ export {
   adminRoutes,
   customerRoutes,
   creditPeriodRoutes,
-  companyRoutes
+  companyRoutes,
+  brandRoutes
 }; 

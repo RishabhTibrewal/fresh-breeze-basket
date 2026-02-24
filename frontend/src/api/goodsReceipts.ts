@@ -106,4 +106,8 @@ export const goodsReceiptsService = {
     );
     return data.data;
   },
+
+  async delete(id: string): Promise<void> {
+    await apiClient.delete<{ success: boolean; message: string }>(`/goods-receipts/${id}`);
+  },
 };

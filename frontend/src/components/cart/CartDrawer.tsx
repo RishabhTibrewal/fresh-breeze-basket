@@ -3,10 +3,15 @@ import { Link } from 'react-router-dom';
 import { X, ShoppingCart, Trash, Plus, Minus, Upload } from 'lucide-react';
 import { useCart } from '@/contexts/CartContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { PriceDisplay } from '@/components/products/PriceDisplay';
+import { Badge } from '@/components/ui/badge';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { cn } from '@/lib/utils';
 
 const CartDrawer = () => {
   const { state, removeFromCart, updateQuantity, isCartOpen, setIsCartOpen, isSyncing, syncCartWithBackend } = useCart();
   const { user } = useAuth();
+  const isMobile = useIsMobile();
 
   return (
     <>
@@ -19,9 +24,11 @@ const CartDrawer = () => {
       )}
       
       {/* Cart drawer */}
-      <div className={`fixed top-0 right-0 h-full w-[85%] sm:w-80 md:w-96 bg-white shadow-lg z-50 transform transition-transform duration-300 ease-in-out ${
+      <div className={cn(
+        "fixed top-0 right-0 h-full bg-white shadow-lg z-50 transform transition-transform duration-300 ease-in-out",
+        isMobile ? "w-full" : "w-[85%] sm:w-80 md:w-96",
         isCartOpen ? 'translate-x-0' : 'translate-x-full'
-      }`}>
+      )}>
         <div className="flex flex-col h-full">
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b">
@@ -71,28 +78,32 @@ const CartDrawer = () => {
                         {item.name}
                       </Link>
                       
-                      <div className="flex items-center mt-1 text-sm">
-                        {item.sale_price ? (
-                          <>
-                            <span className="font-semibold text-red-500">
-                            ₹ {item.sale_price.toFixed(2)}
-                            </span>
-                            <span className="text-gray-500 line-through ml-1 text-xs">
-                            ₹ {item.price.toFixed(2)}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="font-semibold">
-                            ₹ {item.price.toFixed(2)}
+                      {item.variant_name && (
+                        <div className="mt-1">
+                          <Badge variant="outline" className="text-xs">
+                            {item.variant_name}
+                            {item.variant_sku && ` (${item.variant_sku})`}
+                          </Badge>
+                        </div>
+                      )}
+                      
+                      <div className="mt-2">
+                        <PriceDisplay
+                          mrpPrice={item.price}
+                          salePrice={item.sale_price}
+                          size="sm"
+                        />
+                        {item.unit && item.unit_type && (
+                          <span className="text-gray-500 ml-1 text-xs">
+                            / {item.unit} {item.unit_type}
                           </span>
                         )}
-                        <span className="text-gray-500 ml-1">/{item.unit} {item.unit_type}</span>
                       </div>
                       
                       <div className="flex items-center justify-between mt-2">
                         <div className="flex items-center border rounded-md">
                           <button 
-                            onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                            onClick={() => updateQuantity(item.id, item.variant_id, item.quantity - 1)}
                             className="p-1 text-gray-600 hover:bg-gray-100"
                             disabled={item.quantity <= 1}
                           >
@@ -100,7 +111,7 @@ const CartDrawer = () => {
                           </button>
                           <span className="px-2 text-sm">{item.quantity}</span>
                           <button 
-                            onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                            onClick={() => updateQuantity(item.id, item.variant_id, item.quantity + 1)}
                             className="p-1 text-gray-600 hover:bg-gray-100"
                           >
                             <Plus className="h-3 w-3" />
@@ -108,7 +119,7 @@ const CartDrawer = () => {
                         </div>
                         
                         <button 
-                          onClick={() => removeFromCart(item.id)}
+                          onClick={() => removeFromCart(item.id, item.variant_id)}
                           className="p-1 text-gray-400 hover:text-red-500"
                         >
                           <Trash className="h-4 w-4" />

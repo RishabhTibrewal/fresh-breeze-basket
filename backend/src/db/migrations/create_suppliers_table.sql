@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
   state VARCHAR(100),
   country VARCHAR(100),
   postal_code VARCHAR(20),
-  tax_id VARCHAR(100),
+  gst_no VARCHAR(100),
   payment_terms TEXT,
   notes TEXT,
   is_active BOOLEAN DEFAULT true,

@@ -2,18 +2,27 @@ import { supabase } from '../config/supabase';
 import { supabaseAdmin } from '../config/supabase';
 
 /**
- * Get stock count for a product in a specific warehouse
+ * Get stock count for a product variant in a specific warehouse
+ * 
+ * @deprecated Use InventoryService.getCurrentStock() instead
+ * @param variantId - MANDATORY: Variant ID (use DEFAULT variant if product has no visible variants)
  */
 export const getWarehouseStock = async (
   productId: string,
   warehouseId: string,
+  variantId: string, // MANDATORY - no longer nullable
   companyId?: string
 ): Promise<number> => {
+  if (!variantId) {
+    throw new Error('variantId is required');
+  }
+
   let query = supabase
     .from('warehouse_inventory')
     .select('stock_count')
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId);
+    .eq('warehouse_id', warehouseId)
+    .eq('variant_id', variantId); // Now required
 
   if (companyId) {
     query = query.eq('company_id', companyId);
@@ -29,17 +38,25 @@ export const getWarehouseStock = async (
 };
 
 /**
- * Update stock count for a product in a specific warehouse
+ * Update stock count for a product variant in a specific warehouse
  * Returns the new stock count
+ * 
+ * @deprecated Use InventoryService.recordStockMovement() instead
+ * @param variantId - MANDATORY: Variant ID (use DEFAULT variant if product has no visible variants)
  */
 export const updateWarehouseStock = async (
   productId: string,
   warehouseId: string,
+  variantId: string, // MANDATORY - no longer nullable
   quantityChange: number,
   companyId?: string,
   allowNegative: boolean = false,
   useAdminClient: boolean = false
 ): Promise<number> => {
+  if (!variantId) {
+    throw new Error('variantId is required');
+  }
+
   const client = useAdminClient && supabaseAdmin ? supabaseAdmin : supabase;
 
   // Get current stock using the same client to avoid RLS issues
@@ -47,7 +64,8 @@ export const updateWarehouseStock = async (
     .from('warehouse_inventory')
     .select('stock_count')
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId);
+    .eq('warehouse_id', warehouseId)
+    .eq('variant_id', variantId); // Now required
 
   if (companyId) {
     stockQuery = stockQuery.eq('company_id', companyId);
@@ -69,6 +87,7 @@ export const updateWarehouseStock = async (
   const upsertPayload: Record<string, any> = {
     warehouse_id: warehouseId,
     product_id: productId,
+    variant_id: variantId, // Now required
     stock_count: newStockCount,
     updated_at: new Date().toISOString()
   };
@@ -80,7 +99,7 @@ export const updateWarehouseStock = async (
   const { data, error } = await client
     .from('warehouse_inventory')
     .upsert(upsertPayload, {
-      onConflict: 'warehouse_id,product_id'
+      onConflict: 'warehouse_id,product_id,variant_id' // Updated constraint
     })
     .select('stock_count')
     .single();
@@ -178,14 +197,22 @@ export const getDefaultWarehouseId = async (companyId?: string): Promise<string 
 /**
  * Reserve stock for an order (move from stock_count to reserved_stock)
  * Returns the new reserved_stock count
+ * 
+ * @deprecated Use InventoryService.reserveStock() instead
+ * @param variantId - MANDATORY: Variant ID (use DEFAULT variant if product has no visible variants)
  */
 export const reserveWarehouseStock = async (
   productId: string,
   warehouseId: string,
+  variantId: string, // MANDATORY - no longer nullable
   quantity: number,
   companyId?: string,
   useAdminClient: boolean = false
 ): Promise<{ stock_count: number; reserved_stock: number }> => {
+  if (!variantId) {
+    throw new Error('variantId is required');
+  }
+
   const client = useAdminClient && supabaseAdmin ? supabaseAdmin : supabase;
 
   // Get current inventory
@@ -193,7 +220,8 @@ export const reserveWarehouseStock = async (
     .from('warehouse_inventory')
     .select('stock_count, reserved_stock')
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId);
+    .eq('warehouse_id', warehouseId)
+    .eq('variant_id', variantId); // Now required
 
   if (companyId) {
     inventoryQuery = inventoryQuery.eq('company_id', companyId);
@@ -208,6 +236,7 @@ export const reserveWarehouseStock = async (
     const upsertPayload: Record<string, any> = {
       warehouse_id: warehouseId,
       product_id: productId,
+      variant_id: variantId, // Now required
       stock_count: -quantity, // Negative for advance orders when no inventory exists
       reserved_stock: quantity,
       updated_at: new Date().toISOString()
@@ -220,7 +249,7 @@ export const reserveWarehouseStock = async (
     const { data, error } = await client
       .from('warehouse_inventory')
       .upsert(upsertPayload, {
-        onConflict: 'warehouse_id,product_id'
+        onConflict: 'warehouse_id,product_id,variant_id' // Updated constraint
       })
       .select('stock_count, reserved_stock')
       .maybeSingle(); // Use maybeSingle() for better error handling
@@ -261,6 +290,7 @@ export const reserveWarehouseStock = async (
     })
     .eq('product_id', productId)
     .eq('warehouse_id', warehouseId)
+    .eq('variant_id', variantId) // Now required
     .select('stock_count, reserved_stock')
     .maybeSingle(); // Use maybeSingle() for better error handling
 
@@ -279,15 +309,23 @@ export const reserveWarehouseStock = async (
 /**
  * Release reserved stock (deduct from reserved_stock when order is processed)
  * Returns the new reserved_stock count
+ * 
+ * @deprecated Use InventoryService.releaseStock() instead
+ * @param variantId - MANDATORY: Variant ID (use DEFAULT variant if product has no visible variants)
  */
 export const releaseReservedStock = async (
   productId: string,
   warehouseId: string,
+  variantId: string, // MANDATORY - no longer nullable
   quantity: number,
   companyId?: string,
   allowNegative: boolean = false,
   useAdminClient: boolean = false
 ): Promise<{ stock_count: number; reserved_stock: number }> => {
+  if (!variantId) {
+    throw new Error('variantId is required');
+  }
+
   const client = useAdminClient && supabaseAdmin ? supabaseAdmin : supabase;
 
   // Get current inventory
@@ -295,7 +333,8 @@ export const releaseReservedStock = async (
     .from('warehouse_inventory')
     .select('stock_count, reserved_stock')
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId);
+    .eq('warehouse_id', warehouseId)
+    .eq('variant_id', variantId); // Now required
 
   if (companyId) {
     inventoryQuery = inventoryQuery.eq('company_id', companyId);
@@ -320,7 +359,8 @@ export const releaseReservedStock = async (
       updated_at: new Date().toISOString()
     })
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId);
+    .eq('warehouse_id', warehouseId)
+    .eq('variant_id', variantId); // Now required
 
   if (companyId) {
     updateQuery = updateQuery.eq('company_id', companyId);
@@ -341,14 +381,22 @@ export const releaseReservedStock = async (
 /**
  * Restore reserved stock back to available stock (when order is cancelled)
  * Moves stock from reserved_stock back to stock_count
+ * 
+ * @deprecated Use InventoryService.releaseStock() instead
+ * @param variantId - MANDATORY: Variant ID (use DEFAULT variant if product has no visible variants)
  */
 export const restoreReservedStock = async (
   productId: string,
   warehouseId: string,
+  variantId: string, // MANDATORY - no longer nullable
   quantity: number,
   companyId?: string,
   useAdminClient: boolean = false
 ): Promise<{ stock_count: number; reserved_stock: number }> => {
+  if (!variantId) {
+    throw new Error('variantId is required');
+  }
+
   const client = useAdminClient && supabaseAdmin ? supabaseAdmin : supabase;
 
   // Get current inventory
@@ -356,7 +404,8 @@ export const restoreReservedStock = async (
     .from('warehouse_inventory')
     .select('stock_count, reserved_stock')
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId);
+    .eq('warehouse_id', warehouseId)
+    .eq('variant_id', variantId); // Now required
 
   if (companyId) {
     inventoryQuery = inventoryQuery.eq('company_id', companyId);
@@ -384,7 +433,8 @@ export const restoreReservedStock = async (
       updated_at: new Date().toISOString()
     })
     .eq('product_id', productId)
-    .eq('warehouse_id', warehouseId);
+    .eq('warehouse_id', warehouseId)
+    .eq('variant_id', variantId); // Now required
 
   if (companyId) {
     updateQuery = updateQuery.eq('company_id', companyId);

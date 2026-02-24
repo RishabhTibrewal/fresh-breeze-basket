@@ -176,8 +176,6 @@ frontend/src/
         └── PurchaseInvoices.tsx (enhance)
 ```
 
-
-
 ## Key Features to Implement
 
 1. **Auto-Create Invoice from GRN**

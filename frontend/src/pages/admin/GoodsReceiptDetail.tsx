@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, CheckCircle, FileText, ExternalLink, Pencil } from "lucide-react";
+import { ArrowLeft, CheckCircle, FileText, ExternalLink, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { goodsReceiptsService } from '@/api/goodsReceipts';
 import { purchaseInvoicesService } from '@/api/purchaseInvoices';
@@ -17,7 +17,7 @@ export default function GoodsReceiptDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { isAdmin, isAccounts } = useAuth();
+  const { isAdmin, isAccounts, isWarehouseManager, hasAnyRole } = useAuth();
 
   const { data: grn, isLoading } = useQuery({
     queryKey: ['goods-receipt', id],
@@ -72,6 +72,29 @@ export default function GoodsReceiptDetail() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => goodsReceiptsService.delete(id!),
+    onSuccess: () => {
+      toast.success('GRN deleted successfully');
+      queryClient.invalidateQueries({ queryKey: ['goods-receipts'] });
+      navigate('/admin/goods-receipts');
+    },
+    onError: (error: any) => {
+      handleApiError(error, 'delete GRN', ['admin', 'accounts', 'warehouse_manager']);
+    },
+  });
+
+  const handleDelete = () => {
+    if (window.confirm(
+      `Are you sure you want to delete this GRN (${grn.grn_number})? ` +
+      (grn.status === 'completed' 
+        ? 'This will reverse inventory updates and cannot be undone.' 
+        : 'This action cannot be undone.')
+    )) {
+      deleteMutation.mutate();
+    }
+  };
+
   const handleCreateInvoice = () => {
     createInvoiceMutation.mutate({});
   };
@@ -111,6 +134,20 @@ export default function GoodsReceiptDetail() {
             >
               <Pencil className="h-4 w-4 mr-2" />
               Edit
+            </Button>
+          )}
+          {/* Show delete button based on status and role */}
+          {/* Completed GRNs: only admin can delete */}
+          {/* Pending GRNs: admin, accounts, or warehouse managers can delete */}
+          {((grn.status === 'completed' && isAdmin) || 
+            (grn.status === 'pending' && hasAnyRole(['admin', 'accounts', 'warehouse_manager']))) && (
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
             </Button>
           )}
         </div>

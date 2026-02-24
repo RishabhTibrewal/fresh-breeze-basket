@@ -329,6 +329,26 @@ export default function OrdersPage() {
           </Button>
         </div>
 
+        {/* Simple strip showing counts by order_type */}
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="border rounded-md px-3 py-2">
+            <div className="text-muted-foreground">Total</div>
+            <div className="text-lg font-semibold">{sortedOrders.length}</div>
+          </div>
+          <div className="border rounded-md px-3 py-2">
+            <div className="text-muted-foreground">Sales</div>
+            <div className="text-lg font-semibold">
+              {sortedOrders.filter((o) => o.order_type === 'sales').length}
+            </div>
+          </div>
+          <div className="border rounded-md px-3 py-2">
+            <div className="text-muted-foreground">Returns</div>
+            <div className="text-lg font-semibold">
+              {sortedOrders.filter((o) => o.order_type === 'return').length}
+            </div>
+          </div>
+        </div>
+
         {sortedOrders.length === 0 ? (
           <div className="text-center py-12 border rounded-md bg-muted/20">
             <ShoppingBag className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
@@ -337,7 +357,7 @@ export default function OrdersPage() {
               You haven't placed any orders yet. Start shopping to see your orders here!
             </p>
             <Button asChild>
-              <Link to="/shop">Browse Products</Link>
+              <Link to="/products">Browse Products</Link>
             </Button>
           </div>
         ) : (

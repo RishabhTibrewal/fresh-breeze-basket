@@ -537,6 +537,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       
       toast.success('Successfully signed in!');
+      // Set flag to show dashboard button on landing page
+      sessionStorage.setItem('from_login', 'true');
       navigate('/');
     } catch (error) {
       console.error('Error signing in:', error);

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabaseAdmin } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 
 const slugify = (value: string) =>
   value
@@ -179,6 +179,49 @@ export const registerCompany = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: 'Error registering company'
+    });
+  }
+};
+
+export const getCompanyBySlug = async (req: Request, res: Response) => {
+  try {
+    const { slug } = req.params;
+
+    if (!slug) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company slug is required'
+      });
+    }
+
+    const client = supabaseAdmin || supabase;
+    const { data: company, error } = await client
+      .from('companies')
+      .select('id, name, slug, is_active')
+      .eq('slug', slug)
+      .eq('is_active', true)
+      .single();
+
+    if (error || !company) {
+      return res.status(404).json({
+        success: false,
+        message: 'Company not found'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        id: company.id,
+        name: company.name,
+        slug: company.slug
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching company by slug:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching company'
     });
   }
 };

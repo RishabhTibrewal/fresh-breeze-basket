@@ -5,6 +5,8 @@ import { ApiError } from '../middleware/error';
 import { stripeClient } from '../config';
 import { scheduleOrderProcessing } from '../utils/orderScheduler';
 import { hasAnyRole } from '../utils/roles';
+import { OrderService } from '../services/core/OrderService';
+import { ProductService } from '../services/core/ProductService';
 
 // Get all orders (admin only)
 export const getOrders = async (req: Request, res: Response) => {
@@ -12,37 +14,125 @@ export const getOrders = async (req: Request, res: Response) => {
     if (!req.user) {
       throw new ApiError(401, 'Authentication required');
     }
-    const { status, from_date, to_date, limit, page } = req.query;
+    const {
+      status,
+      from_date,
+      to_date,
+      limit,
+      page,
+      order_type,
+      order_source,
+      fulfillment_type,
+    } = req.query as {
+      status?: string;
+      from_date?: string;
+      to_date?: string;
+      limit?: string;
+      page?: string;
+      order_type?: string;
+      order_source?: string;
+      fulfillment_type?: string;
+    };
     const userId = req.user.id;
+    const userRoles = req.user?.roles || [];
     
     // Log to help with debugging
-    console.log('getOrders for user ID:', userId);
+    console.log('getOrders for user ID:', userId, 'roles:', userRoles);
     
-    // Check if user has admin role using new role system
-    // Note: This endpoint is protected by adminOnly middleware, but double-check here
-    const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
+    // Check if user has admin or sales role
+    const isAdmin = userRoles.includes('admin');
+    const isSales = userRoles.includes('sales');
     
-    if (!isAdmin) {
-      console.error('Non-admin user attempting to access all orders');
-      throw new ApiError(403, 'Admin access required');
+    if (!isAdmin && !isSales) {
+      console.error('User does not have admin or sales role');
+      throw new ApiError(403, 'Admin or Sales access required');
     }
-    
-    console.log('Admin status confirmed, fetching all orders');
     
     if (!req.companyId) {
       throw new ApiError(400, 'Company context is required');
     }
     
-    // First get the total count (filtered by company_id)
-    const { count: totalCount } = await supabase
+    // Get customer user IDs if user is sales (not admin)
+    let customerUserIds: string[] | null = null;
+    if (isSales && !isAdmin) {
+      const { data: customers } = await supabase
+        .from('customers')
+        .select('user_id')
+        .eq('sales_executive_id', userId)
+        .eq('company_id', req.companyId);
+      
+      customerUserIds = customers?.map(c => c.user_id).filter(Boolean) || [];
+      
+      if (customerUserIds.length === 0) {
+        // No customers, return empty result
+        return res.json({
+          data: [],
+          pagination: {
+            total: 0,
+            page: parseInt(page as string) || 1,
+            limit: parseInt(limit as string) || 10,
+            totalPages: 0
+          }
+        });
+      }
+    }
+    
+    // First get the total count (filtered by company_id and sales_executive if needed)
+    let countQuery = supabase
       .from('orders')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', req.companyId);
+
+    if (order_type) {
+      countQuery = countQuery.eq('order_type', order_type);
+    }
+    if (order_source) {
+      countQuery = countQuery.eq('order_source', order_source);
+    }
+    if (fulfillment_type) {
+      countQuery = countQuery.eq('fulfillment_type', fulfillment_type);
+    }
+    
+    if (customerUserIds) {
+      countQuery = countQuery.in('user_id', customerUserIds);
+    }
+    
+    const { count: totalCount } = await countQuery;
     
     let query = supabase
       .from('orders')
-      .select('*, order_items(*, products(*))')
+      .select(`
+        *,
+        order_items (
+          *,
+          products (*),
+          variant:product_variants (
+            id,
+            name,
+            sku,
+            price:product_prices!price_id (
+              sale_price,
+              mrp_price
+            ),
+            brand:brands (
+              id,
+              name,
+              logo_url
+            ),
+            tax:taxes (
+              id,
+              name,
+              rate
+            )
+          )
+        )
+      `)
       .eq('company_id', req.companyId);
+    
+    // Filter by customer user IDs if user is sales (not admin)
+    if (customerUserIds) {
+      query = query.in('user_id', customerUserIds);
+    }
     
     // Apply filters
     if (status) {
@@ -55,6 +145,16 @@ export const getOrders = async (req: Request, res: Response) => {
     
     if (to_date) {
       query = query.lte('created_at', to_date);
+    }
+
+    if (order_type) {
+      query = query.eq('order_type', order_type);
+    }
+    if (order_source) {
+      query = query.eq('order_source', order_source);
+    }
+    if (fulfillment_type) {
+      query = query.eq('fulfillment_type', fulfillment_type);
     }
     
     // Apply sorting
@@ -135,7 +235,32 @@ export const getUserOrders = async (req: Request, res: Response) => {
     
     const { data, error } = await supabase
       .from('orders')
-      .select('*, order_items(*)')
+      .select(`
+        *,
+        order_items (
+          *,
+          products (*),
+          variant:product_variants (
+            id,
+            name,
+            sku,
+            price:product_prices!price_id (
+              sale_price,
+              mrp_price
+            ),
+            brand:brands (
+              id,
+              name,
+              logo_url
+            ),
+            tax:taxes (
+              id,
+              name,
+              rate
+            )
+          )
+        )
+      `)
       .eq('user_id', userId)
       .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
@@ -187,6 +312,25 @@ export const getOrderById = async (req: Request, res: Response) => {
           product:products (
             *,
             images:product_images (*)
+          ),
+          variant:product_variants (
+            id,
+            name,
+            sku,
+            price:product_prices!price_id (
+              sale_price,
+              mrp_price
+            ),
+            brand:brands (
+              id,
+              name,
+              logo_url
+            ),
+            tax:taxes (
+              id,
+              name,
+              rate
+            )
           )
         )
       `)
@@ -226,12 +370,31 @@ export const getOrderById = async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'You do not have permission to view this order' });
     }
     
-    // Get order items with product details
+    // Get order items with product and variant details
     const { data: orderItems, error: itemsError } = await supabase
       .from('order_items')
       .select(`
         *,
-        product:products (*)
+        product:products (*),
+        variant:product_variants (
+          id,
+          name,
+          sku,
+          price:product_prices!price_id (
+            sale_price,
+            mrp_price
+          ),
+          brand:brands (
+            id,
+            name,
+            logo_url
+          ),
+          tax:taxes (
+            id,
+            name,
+            rate
+          )
+        )
       `)
       .eq('order_id', id)
       .eq('company_id', req.companyId);
@@ -336,43 +499,6 @@ export const createOrder = async (req: Request, res: Response) => {
       throw new ApiError(400, 'No items provided');
     }
     
-    // Get product details to verify prices
-    const productIds = items.map((item: any) => item.product_id);
-    console.log('Validating products:', productIds);
-    
-    const { data: products, error: productsError } = await supabase
-      .from('products')
-      .select('id, name, price, sale_price, stock_count')
-      .in('id', productIds);
-    
-    if (productsError) {
-      console.error('Product validation error:', productsError);
-      throw new ApiError(400, 'Error validating product information');
-    }
-    
-    if (!products) {
-      throw new ApiError(400, 'No products found');
-    }
-    
-    // Verify product availability and prices
-    for (const item of items) {
-      const product = products.find(p => p.id === item.product_id);
-      
-      if (!product) {
-        throw new ApiError(400, `Product with ID ${item.product_id} not found`);
-      }
-      
-      if (product.stock_count < item.quantity) {
-        throw new ApiError(400, `Not enough stock for ${product.name}`);
-      }
-      
-      // Verify price
-      const currentPrice = product.sale_price || product.price;
-      if (currentPrice !== item.price) {
-        throw new ApiError(400, `Price mismatch for ${product.name}. Please refresh and try again.`);
-      }
-    }
-    
     // Variables to store address IDs
     let finalShippingAddressId: string;
     let finalBillingAddressId: string;
@@ -470,7 +596,7 @@ export const createOrder = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Either shipping address details or shipping address ID must be provided');
     }
     
-    // Create order
+    // Create order using OrderService
     console.log('Creating order with payment_status from request:', req_payment_status);
     
     // Determine final payment status
@@ -480,112 +606,55 @@ export const createOrder = async (req: Request, res: Response) => {
       console.log('Payment intent ID provided, setting payment_status to paid');
     }
     
-    const { data: order, error: orderError } = await supabase
-      .from('orders')
-      .insert({
-        user_id: userId,
-        status: 'pending', 
-        shipping_address_id: finalShippingAddressId,
-        billing_address_id: finalBillingAddressId,
-        total_amount,
-        payment_status: finalPaymentStatus,
-        payment_method: payment_method,
-        payment_intent_id: payment_intent_id 
-      })
-      .select('*')
-      .single();
-
-    if (orderError) {
-      console.error('Error creating order:', orderError);
-      // Log the exact error from Supabase
-      console.error('Supabase order insertion error details:', orderError.message, orderError.details, orderError.hint);
-      return res.status(500).json({
-        success: false,
-        error: 'Error creating order',
-        details: orderError.message
-      });
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
     }
-    console.log('Order created in DB with ID:', order.id, 'and resulting payment_status:', order.payment_status);
 
-    // If we have a payment intent ID, update the payment record to link it to this order
-    if (payment_intent_id) {
-      console.log('Linking payment record to order:', order.id);
-      
-      // First check if payment record exists
-      const { data: existingPayment, error: checkError } = await supabaseAdmin
-        .from('payments')
-        .select('id, order_id')
-        .eq('stripe_payment_intent_id', payment_intent_id)
-        .single();
-      
-      if (checkError && checkError.code !== 'PGRST116') {
-        console.error('Error checking payment record:', checkError);
-      } else if (existingPayment) {
-        // Payment record exists, update it with order_id
-        const { error: paymentUpdateError } = await supabaseAdmin
-          .from('payments')
-          .update({
-            order_id: order.id,
-            updated_at: new Date()
-          })
-          .eq('stripe_payment_intent_id', payment_intent_id);
+    const orderService = new OrderService(req.companyId);
 
-        if (paymentUpdateError) {
-          console.error('Error updating payment record with order_id:', paymentUpdateError);
-        } else {
-          console.log('Successfully linked existing payment record to order');
-        }
-      } else {
-        // Payment record doesn't exist, create it with order_id
-        console.log('Payment record not found, creating new one with order_id');
-        const { error: paymentCreateError } = await supabaseAdmin
-          .from('payments')
-          .insert({
-            order_id: order.id,
-            amount: total_amount,
-            status: 'completed',
-            payment_method: 'card',
-            stripe_payment_intent_id: payment_intent_id,
-            payment_gateway_response: {
-              source: 'order_creation',
-              created_at: new Date().toISOString(),
-              payment_intent_id: payment_intent_id
-            },
-            transaction_references: {
-              order_created: true,
-              stripe_payment_intent_id: payment_intent_id
-            }
-          });
+    // Transform items to OrderService format
+    const orderItems = items.map((item: any) => ({
+      productId: item.product_id,
+      variantId: item.variant_id || null,
+      quantity: item.quantity,
+      unitPrice: item.price,
+      outletId: item.warehouse_id || item.outlet_id || null,
+    }));
 
-        if (paymentCreateError) {
-          console.error('Error creating payment record:', paymentCreateError);
-          // Check if it's a duplicate key error
-          if (paymentCreateError.code === '23505') {
-            console.log('Duplicate payment record detected, attempting to update existing record');
-            // Try to update the existing record instead
-            const { error: updateError } = await supabaseAdmin
-              .from('payments')
-              .update({
-                order_id: order.id,
-                updated_at: new Date()
-              })
-              .eq('stripe_payment_intent_id', payment_intent_id);
+    // Determine fulfillment type for ecommerce order
+    const fulfillmentType: 'delivery' | 'pickup' =
+      !!finalShippingAddressId ? 'delivery' : 'pickup';
 
-            if (updateError) {
-              console.error('Error updating existing payment record:', updateError);
-            } else {
-              console.log('Successfully updated existing payment record with order_id');
-            }
-          }
-        } else {
-          console.log('Successfully created payment record with order_id');
-        }
+    // Create order using OrderService
+    const result = await orderService.createOrder(
+      {
+        items: orderItems,
+        shippingAddressId: finalShippingAddressId,
+        billingAddressId: finalBillingAddressId,
+        paymentMethod: payment_method,
+        paymentStatus: finalPaymentStatus,
+        totalAmount: total_amount,
+        paymentIntentId: payment_intent_id || undefined,
+      },
+      {
+        userId,
+        outletId: items[0]?.warehouse_id || items[0]?.outlet_id || null,
+        industryContext: 'retail', // E-commerce orders are retail
+        orderType: 'sales',
+        orderSource: 'ecommerce',
+        fulfillmentType,
       }
-    }
+    );
+
+    const order = await orderService.getOrderById(result.id);
+    console.log('Order created in DB with ID:', result.id, 'and resulting payment_status:', order.payment_status);
+
+    // Payment handling is done by OrderService.createOrder if payment_intent_id is provided
+    // Additional payment linking logic can be added here if needed
 
     // If payment status is credit or partial, create credit period
     if (req_payment_status === 'full_credit' || req_payment_status === 'partial_payment') {
-      console.log('Creating credit period for order:', order.id, 'request payment_status:', req_payment_status);
+      console.log('Creating credit period for order:', result.id, 'request payment_status:', req_payment_status);
       const creditAmount = req_payment_status === 'full_credit' ? total_amount : (total_amount - (partial_payment_amount || 0));
       
       // First get the customer ID for this user
@@ -598,10 +667,7 @@ export const createOrder = async (req: Request, res: Response) => {
       if (customerError) {
         console.error('Error finding customer:', customerError);
         // Rollback order creation
-        await supabase
-          .from('orders')
-          .delete()
-          .eq('id', order.id);
+        await orderService.cancelOrder(result.id);
           
         return res.status(500).json({
           success: false,
@@ -617,60 +683,31 @@ export const createOrder = async (req: Request, res: Response) => {
       const { error: creditError } = await supabase
         .from('credit_periods')
         .insert({
-          order_id: order.id,
+          order_id: result.id,
           amount: creditAmount,
           period: credit_period || 30,
           start_date: startDate.toISOString().split('T')[0],
           end_date: endDate.toISOString().split('T')[0],
           customer_id: customerData.id,  // Use the customer ID we just fetched
           type: 'credit',  // This is required based on the schema
-          description: `Credit for order ${order.id}. Payment ${req_payment_status}.`
+          description: `Credit for order ${result.id}. Payment ${req_payment_status}.`
         });
 
       if (creditError) {
         console.error('Error creating credit period:', creditError);
         // Rollback order creation
-        await supabase
-          .from('orders')
-          .delete()
-          .eq('id', order.id);
+        await orderService.cancelOrder(result.id);
         
         return res.status(500).json({
           success: false,
           error: 'Error creating credit period'
         });
       }
-      console.log('Credit period created successfully for order:', order.id);
+      console.log('Credit period created successfully for order:', result.id);
     }
 
-    // Add order items
-    console.log('Adding order items...');
-    const orderItems = items.map((item: {product_id: string, quantity: number, price: number}) => ({
-      order_id: order.id,
-      product_id: item.product_id,
-      quantity: item.quantity,
-      unit_price: item.price
-    }));
-
-    const { error: itemsError } = await supabase
-      .from('order_items')
-      .insert(orderItems);
-
-    if (itemsError) {
-      console.error('Error adding order items:', itemsError);
-      // Rollback order creation
-      await supabase
-        .from('orders')
-        .delete()
-        .eq('id', order.id);
-      
-      return res.status(500).json({
-        success: false,
-        error: 'Error adding order items'
-      });
-    }
-    
-    console.log('Added order items');
+    // Order items are created by OrderService.createOrder
+    console.log('Order items created by OrderService');
     
     // Clear the user's cart
     console.log('Clearing cart...');
@@ -694,13 +731,13 @@ export const createOrder = async (req: Request, res: Response) => {
     }
 
     // Schedule order processing (status update to 'processing' after 5 minutes)
-    scheduleOrderProcessing(order.id);
-    console.log(`Order ${order.id} scheduled for automatic processing after 5 minutes`);
+    scheduleOrderProcessing(result.id);
+    console.log(`Order ${result.id} scheduled for automatic processing after 5 minutes`);
 
     res.status(201).json({
       success: true,
       data: {
-        order_id: order.id
+        order_id: result.id
       }
     });
   } catch (error) {
@@ -849,66 +886,24 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     
     const isSalesDashboardOrder = !!customer;
     
-    // If status is being changed from 'pending' to next stage and inventory hasn't been updated yet,
-    // reduce product stock counts
-    const isMovingFromPending = currentOrder.status === 'pending' && status !== 'pending' && status !== 'cancelled';
+    // Use OrderService to update order status (handles inventory updates)
+    const orderService = new OrderService(req.companyId!);
+        
+    // Update order status using OrderService
+    await orderService.updateOrderStatus(id, status, {
+      trackingNumber: tracking_number,
+      estimatedDelivery: estimated_delivery,
+      notes,
+      paymentStatus: dbPaymentStatus || payment_status,
+      paymentMethod: payment_method,
+    });
     
-    if (isMovingFromPending && !currentOrder.inventory_updated) {
-      console.log(`Order ${id} status changed from pending to ${status}. Reducing inventory...`);
-      console.log(`Is sales dashboard order: ${isSalesDashboardOrder}`);
-      
-      const orderItems = currentOrder.order_items;
-      
-      if (orderItems && orderItems.length > 0) {
-        // Import warehouse inventory utilities
-        const { updateWarehouseStock, getDefaultWarehouseId } = await import('../utils/warehouseInventory');
-        
-        // Get default warehouse if needed
-        const defaultWarehouseId = await getDefaultWarehouseId(req.companyId);
-        
-        // Process each item and release reserved stock (deduct from reserved_stock)
-        const { releaseReservedStock } = await import('../utils/warehouseInventory');
-        
-        for (const item of orderItems) {
-          try {
-            // Use warehouse_id from order item, or default warehouse
-            const warehouseId = item.warehouse_id || defaultWarehouseId;
-            
-            if (!warehouseId) {
-              console.error(`No warehouse_id found for order item ${item.id} and no default warehouse available`);
-              continue;
-            }
-            
-            // Release reserved stock (deduct from reserved_stock when order is processed)
-            // For sales dashboard orders, allow negative reserved stock
-            // For regular orders, prevent negative reserved stock
-            const result = await releaseReservedStock(
-              item.product_id,
-              warehouseId,
-              item.quantity,
-              req.companyId,
-              isSalesDashboardOrder, // Allow negative for sales orders
-              true // Use admin client to bypass RLS for system operations
-            );
-            
-            console.log(`Reserved stock released for product ${item.product_id} in warehouse ${warehouseId}: -${item.quantity} (Sales order: ${isSalesDashboardOrder}, New reserved_stock: ${result.reserved_stock})`);
-          } catch (err) {
-            console.error(`Error processing item ${item.product_id}:`, err);
-          }
-        }
-        
-        // Mark inventory as updated
-        updateData.inventory_updated = true;
-      }
-    }
-    
-    // Update order
-    const { data, error } = await supabase
+    // Fetch updated order
+    const { data, error } = await supabaseAdmin
       .from('orders')
-      .update(updateData)
+      .select('*')
       .eq('id', id)
       .eq('company_id', req.companyId)
-      .select()
       .single();
     
     if (error) {
@@ -1217,73 +1212,20 @@ export const cancelOrder = async (req: Request, res: Response) => {
     
     console.log(`Cancelling order ${id} by user ${userId} (effective role ${effectiveRoleForCancellation})`);
     
-    // Update order status to cancelled
-    const { data: updatedOrder, error: updateError } = await supabase
+    // Use OrderService to cancel order (handles inventory restoration)
+    const orderService = new OrderService(req.companyId!);
+    await orderService.cancelOrder(id);
+    
+    // Fetch updated order
+    const { data: updatedOrder, error: updateError } = await supabaseAdmin
       .from('orders')
-      .update({
-        status: 'cancelled',
-        inventory_updated: false, // Reset inventory_updated flag
-        updated_at: new Date()
-      })
+      .select('*')
       .eq('id', id)
       .eq('company_id', req.companyId)
-      .select()
       .single();
     
     if (updateError) {
       throw new ApiError(400, updateError.message);
-    }
-    
-    // Get the order items
-    const orderItems = order.order_items;
-    
-    if (orderItems && orderItems.length > 0) {
-      // Import warehouse inventory utilities
-      const { restoreReservedStock, updateWarehouseStock, getDefaultWarehouseId } = await import('../utils/warehouseInventory');
-      
-      // Get default warehouse if needed
-      const defaultWarehouseId = await getDefaultWarehouseId(req.companyId);
-      
-      for (const item of orderItems) {
-        try {
-          // Use warehouse_id from order item, or default warehouse
-          const warehouseId = item.warehouse_id || defaultWarehouseId;
-          
-          if (!warehouseId) {
-            console.error(`No warehouse_id found for order item ${item.id} and no default warehouse available`);
-            continue;
-          }
-          
-          if (order.inventory_updated) {
-            // Order was already processed (stock deducted from reserved_stock)
-            // Add stock back to stock_count
-            const restoredStockCount = await updateWarehouseStock(
-              item.product_id,
-              warehouseId,
-              item.quantity, // Positive to restore stock
-              req.companyId,
-              false, // Don't allow negative
-              true // Use admin client to bypass RLS for system operations
-            );
-            
-            console.log(`Stock restored for product ${item.product_id} in warehouse ${warehouseId}: +${item.quantity} (Order was processed, New stock: ${restoredStockCount})`);
-          } else {
-            // Order was still pending (stock is in reserved_stock)
-            // Restore reserved stock back to available stock (move from reserved_stock to stock_count)
-            const result = await restoreReservedStock(
-              item.product_id,
-              warehouseId,
-              item.quantity,
-              req.companyId,
-              true // Use admin client to bypass RLS for system operations
-            );
-            
-            console.log(`Reserved stock restored for product ${item.product_id} in warehouse ${warehouseId}: +${item.quantity} (Order was pending, New stock: ${result.stock_count}, New reserved_stock: ${result.reserved_stock})`);
-          }
-        } catch (err) {
-          console.error(`Error restoring stock for item ${item.product_id}:`, err);
-        }
-      }
     }
     
     // After updating the order status to cancelled, update the associated credit period if it exists
@@ -1360,15 +1302,28 @@ export const getSalesOrders = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Company context is required' });
     }
     
-    const sales_executive_id = req.user?.id;
-    console.log('Fetching orders for sales executive:', sales_executive_id);
+    const userId = req.user?.id;
+    const userRoles = req.user?.roles || [];
+    const isAdmin = userRoles.includes('admin');
+    const isSales = userRoles.includes('sales');
+    
+    if (!isAdmin && !isSales) {
+      return res.status(403).json({ error: 'Admin or Sales access required' });
+    }
+    
+    console.log('Fetching orders for user:', userId, 'isAdmin:', isAdmin, 'isSales:', isSales);
 
-    // Get all customers for this sales executive (filtered by company_id)
-    const { data: customers, error: customersError } = await supabase
+    // Get all customers - filter by sales_executive_id only if user is sales (not admin)
+    let customerQuery = supabase
       .from('customers')
-      .select('id, user_id, name')
-      .eq('sales_executive_id', sales_executive_id)
+      .select('id, user_id, name, sales_executive_id')
       .eq('company_id', req.companyId);
+    
+    if (isSales && !isAdmin) {
+      customerQuery = customerQuery.eq('sales_executive_id', userId);
+    }
+    
+    const { data: customers, error: customersError } = await customerQuery;
 
     if (customersError) {
       console.error('Error fetching customers:', customersError);
@@ -1392,7 +1347,26 @@ export const getSalesOrders = async (req: Request, res: Response) => {
         *,
         order_items (
           *,
-          product:products (*)
+          product:products (*),
+          variant:product_variants (
+            id,
+            name,
+            sku,
+            price:product_prices!price_id (
+              sale_price,
+              mrp_price
+            ),
+            brand:brands (
+              id,
+              name,
+              logo_url
+            ),
+            tax:taxes (
+              id,
+              name,
+              rate
+            )
+          )
         ),
         credit_periods (*)
       `)
@@ -1454,13 +1428,26 @@ export const getSalesDashboardStats = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Company context is required' });
     }
     
-    const sales_executive_id = req.user?.id;
-    // Get all customers for this sales executive (filtered by company_id)
-    const { data: customers, error: customersError } = await supabase
+    const userId = req.user?.id;
+    const userRoles = req.user?.roles || [];
+    const isAdmin = userRoles.includes('admin');
+    const isSales = userRoles.includes('sales');
+    
+    if (!isAdmin && !isSales) {
+      return res.status(403).json({ error: 'Admin or Sales access required' });
+    }
+    
+    // Get all customers - filter by sales_executive_id only if user is sales (not admin)
+    let customerQuery = supabase
       .from('customers')
       .select('id, user_id, name, current_credit')
-      .eq('sales_executive_id', sales_executive_id)
       .eq('company_id', req.companyId);
+    
+    if (isSales && !isAdmin) {
+      customerQuery = customerQuery.eq('sales_executive_id', userId);
+    }
+    
+    const { data: customers, error: customersError } = await customerQuery;
     if (customersError) {
       console.error('Error fetching customers:', customersError);
       return res.status(500).json({ error: 'Failed to fetch customers' });
@@ -1470,9 +1457,10 @@ export const getSalesDashboardStats = async (req: Request, res: Response) => {
     // Get all orders for these customers (filtered by company_id)
     const { data: orders, error: ordersError } = await supabase
       .from('orders')
-      .select('id, user_id, total_amount, status, created_at')
+      .select('id, user_id, total_amount, status, created_at, order_type')
       .in('user_id', customerUserIds)
-      .eq('company_id', req.companyId);
+      .eq('company_id', req.companyId)
+      .eq('order_type', 'sales');
     if (ordersError) {
       console.error('Error fetching orders:', ordersError);
       return res.status(500).json({ error: 'Failed to fetch orders' });
@@ -1513,7 +1501,15 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Company context is required' });
     }
     
-    const sales_executive_id = req.user?.id;
+    const userId = req.user?.id;
+    const userRoles = req.user?.roles || [];
+    const isAdmin = userRoles.includes('admin');
+    const isSales = userRoles.includes('sales');
+    
+    if (!isAdmin && !isSales) {
+      return res.status(403).json({ error: 'Admin or Sales access required' });
+    }
+    
     const { period = '30' } = req.query; // Default to last 30 days
     const days = parseInt(period as string, 10);
 
@@ -1522,12 +1518,17 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get all customers for this sales executive (filtered by company_id)
-    const { data: customers, error: customersError } = await supabase
+    // Get all customers - filter by sales_executive_id only if user is sales (not admin)
+    let customerQuery = supabase
       .from('customers')
       .select('id, user_id, name, current_credit, credit_limit')
-      .eq('sales_executive_id', sales_executive_id)
       .eq('company_id', req.companyId);
+    
+    if (isSales && !isAdmin) {
+      customerQuery = customerQuery.eq('sales_executive_id', userId);
+    }
+    
+    const { data: customers, error: customersError } = await customerQuery;
 
     if (customersError) {
       console.error('Error fetching customers:', customersError);
@@ -1573,9 +1574,12 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
     // Get all orders for these customers within the date range (filtered by company_id)
     const { data: orders, error: ordersError } = await supabase
       .from('orders')
-      .select('id, user_id, total_amount, status, payment_status, payment_method, created_at')
+      .select(
+        'id, user_id, total_amount, status, payment_status, payment_method, created_at, order_type'
+      )
       .in('user_id', customerUserIds)
       .eq('company_id', req.companyId)
+      .eq('order_type', 'sales')
       .gte('created_at', startDate.toISOString())
       .lte('created_at', endDate.toISOString())
       .order('created_at', { ascending: false });
@@ -1708,11 +1712,25 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
     const totalLimit = customers?.reduce((sum, c) => sum + parseFloat(c.credit_limit || '0'), 0) || 0;
     const utilizationRate = totalLimit > 0 ? (totalCredit / totalLimit) * 100 : 0;
 
-    // Get top products (need to fetch order items) (filtered by company_id)
+    // Get top products (need to fetch order items with variant pricing) (filtered by company_id)
     const productOrderIds = filteredOrders.map(o => o.id);
     const { data: orderItems, error: itemsError } = await supabase
       .from('order_items')
-      .select('product_id, quantity, price, product:products(name)')
+      .select(`
+        product_id,
+        variant_id,
+        quantity,
+        unit_price,
+        product:products(name),
+        variant:product_variants (
+          id,
+          name,
+          price:product_prices!price_id (
+            sale_price,
+            mrp_price
+          )
+        )
+      `)
       .in('order_id', productOrderIds)
       .eq('company_id', req.companyId);
 
@@ -1721,6 +1739,17 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
       orderItems.forEach(item => {
         const productId = item.product_id;
         const productName = (item.product as any)?.name || 'Unknown Product';
+        
+        // Use variant pricing if available, otherwise fallback to unit_price
+        let itemPrice = item.unit_price || 0;
+        const variant = Array.isArray(item.variant) ? item.variant[0] : item.variant;
+        if (variant?.price) {
+          const price = Array.isArray(variant.price) ? variant.price[0] : variant.price;
+          if (price) {
+            itemPrice = parseFloat(price.sale_price?.toString() || price.mrp_price?.toString() || '0');
+          }
+        }
+        
         if (!productSales[productId]) {
           productSales[productId] = {
             name: productName,
@@ -1729,7 +1758,7 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
           };
         }
         productSales[productId].quantity += item.quantity || 0;
-        productSales[productId].revenue += (item.quantity || 0) * parseFloat(item.price || '0');
+        productSales[productId].revenue += (item.quantity || 0) * itemPrice;
       });
     }
 
@@ -1753,17 +1782,22 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
 
     // Get current active sales target (filtered by company_id)
     const today = new Date().toISOString().split('T')[0];
-    const { data: currentTarget } = await supabase
+    let targetQuery = supabase
       .from('sales_targets')
       .select('*')
-      .eq('sales_executive_id', sales_executive_id)
       .eq('company_id', req.companyId)
       .eq('is_active', true)
       .lte('period_start', today)
       .gte('period_end', today)
       .order('period_start', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
+    
+    // Filter by sales_executive_id only if user is sales (not admin)
+    if (isSales && !isAdmin && userId) {
+      targetQuery = targetQuery.eq('sales_executive_id', userId);
+    }
+    
+    const { data: currentTarget } = await targetQuery.single();
 
     let targetProgress = null;
     if (currentTarget) {
@@ -1817,5 +1851,261 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error in getSalesAnalytics:', error);
     res.status(500).json({ error: 'Failed to fetch sales analytics' });
+  }
+};
+
+// Create return order
+export const createReturnOrder = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
+
+    const { original_order_id, items, reason } = req.body;
+
+    if (!original_order_id) {
+      throw new ApiError(400, 'original_order_id is required');
+    }
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      throw new ApiError(400, 'At least one return item is required');
+    }
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    const userId = req.user.id;
+    const userRoles = req.user?.roles || [];
+    const isAdmin = userRoles.includes('admin');
+    const isSales = userRoles.includes('sales');
+
+    // Fetch original order with order_items
+    const { data: originalOrder, error: orderError } = await supabaseAdmin
+      .from('orders')
+      .select(`
+        *,
+        order_items (
+          id,
+          product_id,
+          variant_id,
+          quantity,
+          unit_price,
+          warehouse_id
+        )
+      `)
+      .eq('id', original_order_id)
+      .eq('company_id', req.companyId)
+      .single();
+
+    if (orderError || !originalOrder) {
+      throw new ApiError(404, 'Original order not found');
+    }
+
+    // Validate original order
+    if (originalOrder.order_type !== 'sales') {
+      throw new ApiError(400, 'Can only return sales orders');
+    }
+
+    if (originalOrder.status === 'cancelled') {
+      throw new ApiError(400, 'Cannot return a cancelled order');
+    }
+
+    // Permission check
+    let hasPermission = false;
+    if (isAdmin || isSales) {
+      // Admin/sales can return any order
+      hasPermission = true;
+    } else {
+      // Customer can only return their own orders
+      if (originalOrder.user_id === userId) {
+        hasPermission = true;
+      }
+    }
+
+    if (!hasPermission) {
+      throw new ApiError(403, 'You do not have permission to return this order');
+    }
+
+    // Validate return items
+    const originalItemsMap = new Map();
+    (originalOrder.order_items || []).forEach((item: any) => {
+      const key = `${item.product_id}_${item.variant_id || 'default'}`;
+      if (!originalItemsMap.has(key)) {
+        originalItemsMap.set(key, []);
+      }
+      originalItemsMap.get(key).push(item);
+    });
+
+    // Track quantities returned per item (for partial returns)
+    const returnedQuantities = new Map<string, number>();
+
+    // Check for existing returns for this order
+    const { data: existingReturns } = await supabaseAdmin
+      .from('orders')
+      .select('id, order_items(product_id, variant_id, quantity)')
+      .eq('original_order_id', original_order_id)
+      .eq('company_id', req.companyId)
+      .eq('order_type', 'return')
+      .neq('status', 'cancelled');
+
+    // Calculate already returned quantities
+    existingReturns?.forEach((returnOrder: any) => {
+      (returnOrder.order_items || []).forEach((item: any) => {
+        const key = `${item.product_id}_${item.variant_id || 'default'}`;
+        const current = returnedQuantities.get(key) || 0;
+        returnedQuantities.set(key, current + (item.quantity || 0));
+      });
+    });
+
+    // Validate each return item
+    const validatedItems: Array<{
+      productId: string;
+      variantId: string;
+      quantity: number;
+      unitPrice: number;
+      outletId: string | null;
+    }> = [];
+
+    for (const returnItem of items) {
+      if (!returnItem.product_id) {
+        throw new ApiError(400, 'Each return item must have product_id');
+      }
+
+      if (!returnItem.quantity || returnItem.quantity <= 0) {
+        throw new ApiError(400, 'Each return item must have a positive quantity');
+      }
+
+      // Find matching original item
+      const variantId = returnItem.variant_id || null;
+      const key = `${returnItem.product_id}_${variantId || 'default'}`;
+      const matchingOriginalItems = originalItemsMap.get(key) || [];
+
+      if (matchingOriginalItems.length === 0) {
+        throw new ApiError(400, `Item with product_id ${returnItem.product_id} and variant_id ${variantId || 'default'} not found in original order`);
+      }
+
+      // Calculate total original quantity for this product+variant
+      const totalOriginalQuantity = matchingOriginalItems.reduce(
+        (sum: number, item: any) => sum + (item.quantity || 0),
+        0
+      );
+
+      // Calculate already returned quantity
+      const alreadyReturned = returnedQuantities.get(key) || 0;
+
+      // Calculate available quantity for return
+      const availableForReturn = totalOriginalQuantity - alreadyReturned;
+
+      if (returnItem.quantity > availableForReturn) {
+        throw new ApiError(409, `Return quantity ${returnItem.quantity} exceeds available quantity ${availableForReturn} for product ${returnItem.product_id}`);
+      }
+
+      // Get variant ID (use provided or get default)
+      let finalVariantId: string;
+      if (variantId) {
+        finalVariantId = variantId;
+      } else {
+        // Get default variant
+        const productService = new ProductService(req.companyId);
+        const defaultVariant = await productService.getDefaultVariant(returnItem.product_id);
+        finalVariantId = defaultVariant.id;
+      }
+
+      // Use first matching original item's price and warehouse
+      const originalItem = matchingOriginalItems[0];
+      validatedItems.push({
+        productId: returnItem.product_id,
+        variantId: finalVariantId,
+        quantity: returnItem.quantity,
+        unitPrice: originalItem.unit_price,
+        outletId: originalItem.warehouse_id || originalOrder.outlet_id,
+      });
+
+      // Update returned quantities map
+      const currentReturned = returnedQuantities.get(key) || 0;
+      returnedQuantities.set(key, currentReturned + returnItem.quantity);
+    }
+
+    // Check for duplicate items (same product_id + variant_id)
+    const itemKeys = new Set();
+    for (const item of validatedItems) {
+      const key = `${item.productId}_${item.variantId}`;
+      if (itemKeys.has(key)) {
+        throw new ApiError(400, `Duplicate return item: product_id ${item.productId}, variant_id ${item.variantId}`);
+      }
+      itemKeys.add(key);
+    }
+
+    // Calculate return amount
+    const returnAmount = validatedItems.reduce(
+      (sum, item) => sum + (item.quantity * item.unitPrice),
+      0
+    );
+
+    // Create return order using OrderService
+    const orderService = new OrderService(req.companyId);
+
+    const returnOrderItems = validatedItems.map(item => ({
+      productId: item.productId,
+      variantId: item.variantId,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      outletId: item.outletId || undefined,
+    }));
+
+    const returnNotes = reason
+      ? `Return for order ${original_order_id}. Reason: ${reason}`
+      : `Return for order ${original_order_id}`;
+
+    const result = await orderService.createOrder(
+      {
+        items: returnOrderItems,
+        shippingAddressId: originalOrder.shipping_address_id,
+        billingAddressId: originalOrder.billing_address_id,
+        paymentMethod: originalOrder.payment_method,
+        paymentStatus: 'pending',
+        totalAmount: returnAmount,
+        notes: returnNotes,
+      },
+      {
+        userId: originalOrder.user_id, // Keep same user as original order
+        outletId: originalOrder.outlet_id,
+        industryContext: originalOrder.industry_context || 'retail',
+        orderType: 'return',
+        orderSource: originalOrder.order_source || 'ecommerce',
+        fulfillmentType: originalOrder.fulfillment_type || 'delivery',
+        originalOrderId: original_order_id,
+      }
+    );
+
+    // Fetch complete return order
+    const returnOrder = await orderService.getOrderById(result.id);
+
+    res.status(201).json({
+      success: true,
+      data: {
+        ...returnOrder,
+        original_order: {
+          id: originalOrder.id,
+          order_number: originalOrder.order_number,
+          total_amount: originalOrder.total_amount,
+          status: originalOrder.status,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Error in createReturnOrder:', error);
+    if (error instanceof ApiError) {
+      res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Error creating return order',
+      });
+    }
   }
 }; 

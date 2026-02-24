@@ -12,13 +12,13 @@ import {
   getFollowUpReminders,
   getAgingLeads
 } from '../controllers/leadsController';
-import { protect, isSalesExecutive } from '../middleware/auth';
+import { protect, requireRole } from '../middleware/auth';
 
 const router = express.Router();
 
-// All routes require authentication and sales executive role
+// All routes require authentication and admin or sales role
 router.use(protect);
-router.use(isSalesExecutive);
+router.use(requireRole(['admin', 'sales']));
 
 // Lead statistics
 router.get('/stats', getLeadStats);

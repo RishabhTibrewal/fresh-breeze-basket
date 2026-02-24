@@ -132,32 +132,37 @@ export default function CreatePurchaseInvoice() {
   }, [invoiceToEdit, isEditMode]);
 
   // Calculate amounts from GRN and load items (only in create mode)
+  // Only use accepted quantity for invoicing (rejected items should not be invoiced)
   useEffect(() => {
     if (!isEditMode && selectedGRN && selectedGRN.goods_receipt_items) {
-      const items = selectedGRN.goods_receipt_items.map((item: any) => {
-        const quantity = item.quantity_accepted || item.quantity_received || 0;
-        const unitPrice = item.unit_price || 0;
-        const taxPercentage = item.tax_percentage || item.products?.tax || 0;
-        const taxAmount = (quantity * unitPrice * taxPercentage) / 100;
-        const lineTotal = (quantity * unitPrice) + taxAmount;
-        
-        return {
-          product_id: item.product_id,
-          product_name: item.products?.name || 'Product',
-          product_code: item.product_code || item.products?.product_code || '',
-          hsn_code: item.hsn_code || item.products?.hsn_code || '',
-          quantity,
-          unit: item.unit || item.products?.unit_type || 'piece',
-          unit_price: unitPrice,
-          tax_percentage: taxPercentage,
-          tax_amount: taxAmount,
-          discount_amount: 0,
-          line_total: lineTotal,
-        };
-      });
+      const items = selectedGRN.goods_receipt_items
+        .filter((item: any) => (item.quantity_accepted || 0) > 0) // Only include items with accepted quantity
+        .map((item: any) => {
+          // Use only accepted quantity - rejected items should not be invoiced
+          const quantity = item.quantity_accepted || 0;
+          const unitPrice = item.unit_price || 0;
+          const taxPercentage = item.tax_percentage || item.products?.tax || 0;
+          const taxAmount = (quantity * unitPrice * taxPercentage) / 100;
+          const lineTotal = (quantity * unitPrice) + taxAmount;
+          
+          return {
+            product_id: item.product_id,
+            product_name: item.products?.name || 'Product',
+            product_code: item.product_code || item.products?.product_code || '',
+            hsn_code: item.hsn_code || item.products?.hsn_code || '',
+            quantity,
+            unit: item.unit || item.products?.unit_type || 'piece',
+            unit_price: unitPrice,
+            tax_percentage: taxPercentage,
+            tax_amount: taxAmount,
+            discount_amount: 0,
+            line_total: lineTotal,
+            goods_receipt_item_id: item.id, // Include GRN item ID for traceability
+          };
+        });
       setInvoiceItems(items);
       
-      // Calculate totals
+      // Calculate totals based on accepted quantities only
       const calculatedSubtotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
       const calculatedTax = items.reduce((sum, item) => sum + item.tax_amount, 0);
       setSubtotal(calculatedSubtotal);

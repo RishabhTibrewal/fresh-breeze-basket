@@ -1,64 +1,208 @@
 ---
-description: Backend development rules for the Fresh Breeze Basket e-commerce application, focusing on API design, security, database interactions, and business logic implementation.
+description: Backend development rules for Multi-Tenant ERP/POS system using Supabase, focusing on RBAC, multi-tenancy, database design, and RPC functions.
 globs: 
+  - "**/*.sql"
+  - "**/supabase/**/*"
 alwaysApply: false
 ---
-description: Backend development rules for the Fresh Breeze Basket e-commerce application, focusing on API design, security, database interactions, and business logic implementation.
 
+# Backend Rules - Multi-Tenant ERP with Supabase
+
+## Auto-Attach Paths
 auto_attach:
   paths:
-    - backend/**/*.js
-    - backend/**/*.ts
-    - backend/models/**/*.js
-    - backend/models/**/*.ts
-    - backend/controllers/**/*.js
-    - backend/controllers/**/*.ts
-    - backend/routes/**/*.js
-    - backend/routes/**/*.ts
-    - backend/middleware/**/*.js
-    - backend/middleware/**/*.ts
-    - backend/services/**/*.js
-    - backend/services/**/*.ts
-    - backend/utils/**/*.js
-    - backend/utils/**/*.ts
+    - "**/*.sql"
+    - "**/supabase/**/*"
+    - "**/migrations/**/*"
+    - "**/database/**/*"
+    - "**/schema/**/*"
 
-goals:
-  - Implement secure and efficient RESTful API endpoints
-  - Establish robust database models and relationships
-  - Create middleware for authentication, validation, and error handling
-  - Develop business logic services for e-commerce operations
-  - Ensure proper error handling and validation across all endpoints
+## Goals
+- Implement secure multi-tenant architecture with company isolation
+- Establish granular RBAC (Role-Based Access Control) system
+- Create efficient RPC functions for permission checks
+- Ensure Row Level Security (RLS) on all tenant-scoped tables
+- Design scalable database schema for ERP modules
 
-rules:
-  - Structure project following MVC architecture pattern
-  - Implement input validation using middleware (express-validator/joi)
-  - Use environment variables for all configuration settings
-  - Implement JWT authentication with proper token refresh mechanism
-  - Create middleware for role-based access control
-  - Implement database transactions for multi-step operations
-  - Follow RESTful API naming conventions
-  - Return consistent API response format across all endpoints
-  - Implement proper HTTP status codes for different scenarios
-  - Use async/await for handling asynchronous operations
-  - Implement proper error handling with try/catch blocks
-  - Create database indexes for frequently queried fields
-  - Implement rate limiting for public API endpoints
-  - Use parameterized queries to prevent SQL injection
-  - Implement logging for API requests and errors
-  - Create separate services for external API integrations (payment, shipping)
-  - Implement data pagination for list endpoints
-  - Use compression middleware for response optimization
+## Core Rules
 
-context:
-  - Backend is built with Express.js in the backend/ directory
-  - Database uses MongoDB/PostgreSQL (specify which one you're using)
-  - Authentication relies on JWT tokens with refresh token rotation
-  - Payment processing integrates with Stripe API
-  - Order processing includes inventory management
-  - API must handle concurrent requests efficiently
-  - User data requires GDPR compliance measures
-  - Backend serves as API only, not rendering views
-  - File uploads are stored in cloud storage (S3/similar)
-  - Email notifications are sent for order updates
-  - Scheduled tasks handle abandoned carts and inventory updates
-  - API documentation is generated using Swagger/OpenAPI
+### 1. Multi-Tenancy
+- **ALWAYS** include `company_id` in tenant-scoped tables
+- **ALWAYS** create composite indexes on `(company_id, <key_field>)`
+- **ALWAYS** add RLS policies to enforce company isolation
+- **NEVER** allow cross-company data access
+- Use subdomain-based tenant identification
+
+### 2. RBAC Implementation
+- Permissions follow `module.action` format (e.g., `sales.read`, `inventory.write`)
+- Users can have multiple roles per company
+- Roles are linked to permissions via `role_permissions` table
+- Company-level module enablement via `company_modules` table
+- Permission check = Company Module Enabled + User Has Permission
+
+### 3. Database Design
+- Use UUIDs for all primary keys
+- Add `created_at` and `updated_at` to all tables
+- Foreign keys must have `ON DELETE CASCADE` or `ON DELETE SET NULL`
+- Create indexes on frequently queried fields
+- Use JSONB for flexible settings/metadata
+- Never use VARCHAR, use TEXT for strings
+
+### 4. RPC Functions
+- Create helper functions for complex permission checks
+- Use `SECURITY DEFINER` for system-level functions
+- Prefix all RPC functions with domain (e.g., `get_user_permissions`)
+- Return TABLE types for list functions
+- Always validate input parameters
+
+### 5. Row Level Security (RLS)
+- Enable RLS on ALL tenant-scoped tables
+- Create policies for SELECT, INSERT, UPDATE, DELETE separately
+- Use `auth.uid()` to get current user ID
+- Join with `user_roles` to enforce company scope
+- Allow service role to bypass RLS
+
+### 6. Migrations
+- Use sequential timestamps for migration files
+- Include rollback statements
+- Test migrations on staging first
+- Document breaking changes
+- Never modify existing migrations, create new ones
+
+## Required Tables
+
+### Core Tables
+- `companies` - Tenant/company records
+- `roles` - System roles (admin, sales, accounts, etc.)
+- `permissions` - Granular permissions (sales.read, inventory.write)
+- `user_roles` - User → Role → Company mapping
+- `role_permissions` - Role → Permission mapping
+- `company_modules` - Company → Module enablement
+
+### Module Tables
+Each module should have:
+- Main entity table (e.g., `sales_orders`, `products`)
+- Related lookup tables (e.g., `customers`, `categories`)
+- Transaction/history tables (e.g., `stock_movements`)
+
+## Standard Table Structure
+
+```sql
+CREATE TABLE module_entities (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  -- entity fields
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_by UUID REFERENCES auth.users(id),
+  updated_by UUID REFERENCES auth.users(id)
+);
+
+-- Indexes
+CREATE INDEX idx_module_entities_company ON module_entities(company_id);
+CREATE INDEX idx_module_entities_created_at ON module_entities(created_at);
+
+-- RLS
+ALTER TABLE module_entities ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY module_entities_select ON module_entities
+  FOR SELECT
+  USING (
+    company_id IN (
+      SELECT ur.company_id 
+      FROM user_roles ur 
+      WHERE ur.user_id = auth.uid()
+    )
+  );
+```
+
+## Standard RPC Function
+
+```sql
+CREATE OR REPLACE FUNCTION get_entity_list(
+  p_company_id UUID,
+  p_limit INT DEFAULT 20,
+  p_offset INT DEFAULT 0
+)
+RETURNS TABLE (...) AS $$
+BEGIN
+  -- Validate user access
+  IF NOT EXISTS (
+    SELECT 1 FROM user_roles 
+    WHERE user_id = auth.uid() 
+      AND company_id = p_company_id
+  ) THEN
+    RAISE EXCEPTION 'Access denied';
+  END IF;
+  
+  RETURN QUERY
+  SELECT ... FROM ... 
+  WHERE company_id = p_company_id
+  LIMIT p_limit OFFSET p_offset;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+## Permission Check Pattern
+
+```sql
+-- Check if user has permission
+CREATE OR REPLACE FUNCTION user_has_permission(
+  p_user_id UUID,
+  p_company_id UUID,
+  p_permission_code TEXT
+)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1
+    FROM user_roles ur
+    JOIN role_permissions rp ON ur.role_id = rp.role_id
+    JOIN permissions p ON rp.permission_id = p.id
+    LEFT JOIN company_modules cm 
+      ON cm.company_id = p_company_id 
+      AND cm.module_code = p.module
+    WHERE ur.user_id = p_user_id
+      AND ur.company_id = p_company_id
+      AND p.code = p_permission_code
+      AND (cm.is_enabled = true OR cm.id IS NULL)
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+## Context
+- Backend uses **Supabase (Postgres 15+)**
+- Authentication via **Supabase Auth**
+- Multi-tenancy via **subdomain + company_id**
+- RBAC with **granular permissions**
+- Modules: E-commerce, Sales, Inventory, Procurement, Accounting, Reports, POS
+- Each company can enable/disable modules
+- Users can have multiple roles per company
+- All data queries are company-scoped
+
+## Performance Considerations
+- Create indexes on `company_id` for all tenant tables
+- Use composite indexes for common query patterns
+- Implement pagination (LIMIT/OFFSET) on list queries
+- Use materialized views for complex reports
+- Cache permission checks in application layer
+- Use connection pooling (Supavisor)
+
+## Security Checklist
+- ✅ RLS enabled on all tenant tables
+- ✅ Company isolation verified
+- ✅ Permission checks before data access
+- ✅ Input validation in RPC functions
+- ✅ Sensitive data encrypted at rest
+- ✅ Audit logs for critical operations
+- ✅ Rate limiting on RPC endpoints
+
+## Common Pitfalls to Avoid
+- ❌ Forgetting company_id in WHERE clauses
+- ❌ Missing RLS policies on new tables
+- ❌ Hardcoding company IDs
+- ❌ Using SELECT * in production queries
+- ❌ Not indexing foreign keys
+- ❌ Allowing NULL on company_id
+- ❌ Cross-company JOIN queries

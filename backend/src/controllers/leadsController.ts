@@ -21,19 +21,27 @@ export const getLeads = async (req: Request, res: Response) => {
       throw new AppError('Company context is required', 400);
     }
     
-    const sales_executive_id = req.user?.id;
-    const { stage, priority, source, search } = req.query;
-
-    if (!sales_executive_id) {
-      throw new AppError('Sales executive ID is required', 400);
+    const userId = req.user?.id;
+    const userRoles = req.user?.roles || [];
+    const isAdmin = userRoles.includes('admin');
+    const isSales = userRoles.includes('sales');
+    
+    if (!isAdmin && !isSales) {
+      throw new AppError('Admin or Sales access required', 403);
     }
+    
+    const { stage, priority, source, search } = req.query;
 
     let query = supabase
       .from('leads')
       .select('*')
-      .eq('sales_executive_id', sales_executive_id)
       .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
+    
+    // Filter by sales_executive_id only if user is sales (not admin)
+    if (isSales && !isAdmin) {
+      query = query.eq('sales_executive_id', userId);
+    }
 
     // Apply filters
     if (stage && typeof stage === 'string' && LEAD_STAGES.includes(stage as LeadStage)) {

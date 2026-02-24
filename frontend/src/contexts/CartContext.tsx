@@ -1,18 +1,21 @@
 import React, { createContext, useContext, useReducer, useState, useEffect, useCallback, useRef } from 'react';
-import { Product } from '@/api/products';
-import { toast } from '@/hooks/use-toast';
+import { Product, ProductVariant } from '@/api/products';
+import { toast } from 'sonner';
 import { cartService } from '@/api/cart';
 import { useAuth } from '@/contexts/AuthContext';
 
 // Define cart item type
 interface CartItem {
-  id: string;
-  name: string;
-  price: number;
-  sale_price?: number;
+  id: string; // Product ID
+  variant_id: string; // REQUIRED: Variant ID
+  name: string; // Product name
+  variant_name: string; // Variant name
+  variant_sku?: string | null; // Variant SKU
+  price: number; // MRP price
+  sale_price?: number; // Sale price
   unit: number;
   unit_type?: string;
-  image?: string;
+  image?: string; // Variant image or product image
   quantity: number;
 }
 
@@ -25,9 +28,9 @@ interface CartState {
 
 // Define cart actions
 type CartAction =
-  | { type: 'ADD_ITEM'; payload: { product: Product; quantity: number; cartItemId: string } }
+  | { type: 'ADD_ITEM'; payload: { product: Product; variant: ProductVariant; quantity: number; cartItemId: string } }
   | { type: 'REMOVE_ITEM'; payload: string }
-  | { type: 'UPDATE_QUANTITY'; payload: { id: string; quantity: number } }
+  | { type: 'UPDATE_QUANTITY'; payload: { id: string; variant_id: string; quantity: number } }
   | { type: 'CLEAR_CART' };
 
 // Create the initial state
@@ -41,9 +44,9 @@ const initialState: CartState = {
 const CartContext = createContext<{
   state: CartState;
   dispatch: React.Dispatch<CartAction>;
-  addToCart: (product: Product, quantity: number) => void;
-  removeFromCart: (id: string) => void;
-  updateQuantity: (id: string, quantity: number) => void;
+  addToCart: (product: Product, variant: ProductVariant, quantity: number) => void;
+  removeFromCart: (id: string, variant_id: string) => void;
+  updateQuantity: (id: string, variant_id: string, quantity: number) => void;
   clearCart: () => void;
   isCartOpen: boolean;
   setIsCartOpen: (isOpen: boolean) => void;
@@ -78,21 +81,34 @@ const calculateCartTotals = (items: CartItem[]): { totalItems: number; subtotal:
 const cartReducer = (state: CartState, action: CartAction): CartState => {
   switch (action.type) {
     case 'ADD_ITEM': {
-      const { product, quantity, cartItemId } = action.payload;
+      const { product, variant, quantity, cartItemId } = action.payload;
       
-      const qty = typeof quantity === 'string' ? parseInt(quantity, 10) : quantity;
-      const existingItem = state.items.find(item => item.id === product.id);
+      if (!variant || !variant.id) {
+        toast.error('Variant selection is required');
+        return state;
+      }
 
-      // Map snake_case fields for CartItem
-      const salePrice = product.sale_price && product.sale_price > 0 ? Number(product.sale_price) : null;
-      const image = (product as any).image !== undefined ? (product as any).image : (product as any).image_url;
+      const qty = typeof quantity === 'string' ? parseInt(quantity, 10) : quantity;
+      // Find existing item by product ID AND variant ID
+      const existingItem = state.items.find(
+        item => item.id === product.id && item.variant_id === variant.id
+      );
+
+      // Use variant price, fallback to product price
+      const variantPrice = variant.price;
+      const mrpPrice = variantPrice?.mrp_price || product.price || 0;
+      const salePrice = variantPrice?.sale_price || product.sale_price || null;
       
-      // Make sure unit has a valid value
-      const unit = product.unit && Number(product.unit) > 0 ? Number(product.unit) : 1;
+      // Use variant image, fallback to product image
+      const image = variant.image_url || product.image_url || undefined;
+      
+      // Use variant unit info
+      const unit = variant.unit && Number(variant.unit) > 0 ? Number(variant.unit) : 1;
+      const unitType = variant.unit_type || product.unit_type;
       
       if (existingItem) {
         const updatedItems = state.items.map(item =>
-          item.id === product.id
+          item.id === product.id && item.variant_id === variant.id
             ? { ...item, quantity: item.quantity + qty }
             : item
         );
@@ -106,11 +122,14 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
 
       const newItem: CartItem = {
         id: product.id,
+        variant_id: variant.id,
         name: product.name,
-        price: product.price,
+        variant_name: variant.name,
+        variant_sku: variant.sku,
+        price: mrpPrice,
         sale_price: salePrice,
         unit: unit,
-        unit_type: product.unit_type,
+        unit_type: unitType,
         image: image,
         quantity: Number(qty),
       };
@@ -125,7 +144,11 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
     }
 
     case 'REMOVE_ITEM': {
-      const updatedItems = state.items.filter(item => item.id !== action.payload);
+      // Remove item by product ID and variant ID combination
+      const [productId, variantId] = action.payload.split('|');
+      const updatedItems = state.items.filter(
+        item => !(item.id === productId && item.variant_id === variantId)
+      );
       return {
         ...state,
         items: updatedItems,
@@ -135,13 +158,15 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
     }
 
     case 'UPDATE_QUANTITY': {
-      const { id, quantity } = action.payload;
+      const { id, variant_id, quantity } = action.payload;
       if (quantity <= 0) {
-        return cartReducer(state, { type: 'REMOVE_ITEM', payload: id });
+        return cartReducer(state, { type: 'REMOVE_ITEM', payload: `${id}|${variant_id}` });
       }
 
       const updatedItems = state.items.map(item =>
-        item.id === id ? { ...item, quantity } : item
+        item.id === id && item.variant_id === variant_id
+          ? { ...item, quantity }
+          : item
       );
       return {
         ...state,
@@ -185,18 +210,69 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (parsed && parsed.items) {
           dispatch({ type: 'CLEAR_CART' });
           parsed.items.forEach((item: any) => {
+            // Skip old cart items without variant_id (migration from old format)
+            if (!item.variant_id) {
+              console.warn('Skipping old cart item without variant_id:', item);
+              return;
+            }
+
             const quantity = typeof item.quantity === 'string' ? parseInt(item.quantity, 10) : item.quantity;
             
-            // Fix the cart item before dispatching
-            const fixedItem = {
-              ...item,
-              // Only set sale_price if it exists and is greater than 0
-              sale_price: item.sale_price && Number(item.sale_price) > 0 ? Number(item.sale_price) : null,
-              // Make sure unit has a valid value
-              unit: item.unit && Number(item.unit) > 0 ? Number(item.unit) : 1
+            // Create minimal Product object from cart item
+            const product: Product = {
+              id: item.id,
+              name: item.name,
+              description: null,
+              category_id: null,
+              slug: '',
+              is_active: true,
+              nutritional_info: null,
+              origin: null,
+              brand_id: null,
+              product_code: null,
+              created_at: '',
+              updated_at: '',
+            };
+
+            // Create minimal ProductVariant from cart item
+            const variant: ProductVariant = {
+              id: item.variant_id,
+              product_id: item.id,
+              name: item.variant_name || item.name,
+              sku: item.variant_sku || null,
+              is_default: false,
+              is_active: true,
+              is_featured: false,
+              image_url: item.image || null,
+              unit: item.unit || null,
+              unit_type: item.unit_type || null,
+              best_before: null,
+              hsn: null,
+              badge: null,
+              brand_id: null,
+              tax_id: null,
+              price_id: '',
+              price: item.price || item.sale_price ? {
+                id: '',
+                product_id: null,
+                variant_id: item.variant_id,
+                outlet_id: null,
+                price_type: 'default',
+                mrp_price: item.price || 0,
+                sale_price: item.sale_price || item.price || 0,
+                brand_id: null,
+                valid_from: new Date().toISOString(),
+                valid_until: null,
+                company_id: '',
+                created_at: '',
+                updated_at: '',
+              } : undefined,
+              company_id: '',
+              created_at: '',
+              updated_at: '',
             };
             
-            dispatch({ type: 'ADD_ITEM', payload: { product: fixedItem, quantity, cartItemId: item.id } });
+            dispatch({ type: 'ADD_ITEM', payload: { product, variant, quantity, cartItemId: item.id } });
           });
         }
       } catch (e) {
@@ -247,32 +323,65 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }));
         
         const quantity = typeof item.quantity === 'string' ? parseInt(item.quantity, 10) : item.quantity;
-        dispatch({ type: 'ADD_ITEM', payload: { 
-          product: {
-            id: item.products.id,
-            name: item.products.name || 'Unknown Product',
-            price: Number(item.products.price),
-            sale_price: item.products.sale_price && Number(item.products.sale_price) > 0 ? Number(item.products.sale_price) : null,
-            unit: item.products.unit && Number(item.products.unit) > 0 ? Number(item.products.unit) : 1,
-            unit_type: item.products.unit_type || '',
-            image_url: item.products.image_url,
-            description: item.products.description || '',
-            category_id: item.products.category_id || '',
-            slug: item.products.slug || '',
-            is_featured: item.products.is_featured || false,
-            is_active: item.products.is_active || false,
+        
+        // Create minimal Product and Variant from backend cart item
+        // Note: Backend cart items may not have full variant data, so we create minimal objects
+        const product: Product = {
+          id: item.products.id,
+          name: item.products.name || 'Unknown Product',
+          description: item.products.description || null,
+          category_id: item.products.category_id || null,
+          slug: item.products.slug || '',
+          is_active: item.products.is_active || false,
+          nutritional_info: null,
+          origin: null,
+          brand_id: null,
+          product_code: item.products.product_code || null,
+          created_at: '',
+          updated_at: '',
+        };
+
+        // Create minimal variant - backend may not provide full variant data
+        const variant: ProductVariant = {
+          id: item.variant_id || item.products.id, // Fallback to product ID if no variant_id
+          product_id: item.products.id,
+          name: item.variant_name || item.products.name || 'Default Variant',
+          sku: item.variant_sku || null,
+          is_default: true,
+          is_active: true,
+          is_featured: false,
+          image_url: item.products.image_url || null,
+          unit: item.products.unit || null,
+          unit_type: item.products.unit_type || null,
+          best_before: null,
+          hsn: null,
+          badge: null,
+          brand_id: null,
+          tax_id: null,
+          price_id: '',
+          price: item.products.price || item.products.sale_price ? {
+            id: '',
+            product_id: null,
+            variant_id: item.variant_id || item.products.id,
+            outlet_id: null,
+            price_type: 'default',
+            mrp_price: Number(item.products.price) || 0,
+            sale_price: item.products.sale_price ? Number(item.products.sale_price) : Number(item.products.price) || 0,
+            brand_id: null,
+            valid_from: new Date().toISOString(),
+            valid_until: null,
+            company_id: '',
             created_at: '',
             updated_at: '',
-            stock_count: 0,
-            nutritional_info: '',
-            origin: '',
-            best_before: '',
-            badge: '',
-            additional_images: [],
-            product_code: item.products.product_code || null,
-            hsn_code: item.products.hsn_code || null,
-            tax: item.products.tax || null
-          }, 
+          } : undefined,
+          company_id: '',
+          created_at: '',
+          updated_at: '',
+        };
+        
+        dispatch({ type: 'ADD_ITEM', payload: { 
+          product,
+          variant, 
           quantity,
           cartItemId: item.id
         } });
@@ -284,15 +393,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Check if error is auth-related
       if (e.response?.status === 401 || e.response?.status === 403) {
-        toast({ 
-          title: 'Authentication Error', 
-          description: 'Please login again to access your cart' 
-        });
+        toast.error('Authentication Error: Please login again to access your cart');
       } else {
-        toast({ 
-          title: 'Error', 
-          description: 'Failed to load cart from server' 
-        });
+        toast.error('Failed to load cart from server');
       }
     } finally {
       setIsSyncing(false);
@@ -308,11 +411,17 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const parsed = JSON.parse(local);
         if (parsed && parsed.items) {
           for (const item of parsed.items) {
-            console.log(`Adding item ${item.id} with quantity ${item.quantity} to backend cart`);
+            // Skip old cart items without variant_id (migration from old format)
+            if (!item.variant_id) {
+              console.warn('Skipping old cart item without variant_id during merge:', item);
+              continue;
+            }
+            
+            console.log(`Adding item ${item.id} (variant: ${item.variant_id}) with quantity ${item.quantity} to backend cart`);
             // Ensure quantity is a number and use correct productId
             const quantity = typeof item.quantity === 'string' ? parseInt(item.quantity, 10) : item.quantity;
-            // Product ID is stored in id field in the local cart
-            await cartService.addItem(item.id, quantity);
+            // Product ID is stored in id field, variant_id is required
+            await cartService.addItem(item.id, quantity, item.variant_id);
           }
         }
         localStorage.removeItem('cart');
@@ -380,24 +489,33 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Synchronize each local item with backend
       for (const item of state.items) {
         const productId = item.id;
+        const variantId = item.variant_id;
         const quantity = item.quantity;
         
-        // Check if this product exists in backend cart
+        // Skip items without variant_id (shouldn't happen, but safety check)
+        if (!variantId) {
+          console.warn('Skipping cart item without variant_id during sync:', item);
+          continue;
+        }
+        
+        // Check if this product+variant combination exists in backend cart
+        // Note: Backend might not support variant-based lookup, so we check by product_id
+        // This is a simplified sync - full variant-aware sync would require backend support
         if (backendProductMap.has(productId)) {
           const backendItem = backendProductMap.get(productId);
           
           // Update quantity if different
           if (backendItem.quantity !== quantity) {
-            console.log(`Updating quantity for ${productId} from ${backendItem.quantity} to ${quantity}`);
+            console.log(`Updating quantity for ${productId} (variant: ${variantId}) from ${backendItem.quantity} to ${quantity}`);
             await cartService.updateItemQuantity(backendItem.cartItemId, quantity);
           }
           
           // Remove from map to track what's been processed
           backendProductMap.delete(productId);
         } else {
-          // Product doesn't exist in backend, add it
-          console.log(`Adding new product ${productId} with quantity ${quantity} to backend`);
-          await cartService.addItem(productId, quantity);
+          // Product doesn't exist in backend, add it with variant
+          console.log(`Adding new product ${productId} (variant: ${variantId}) with quantity ${quantity} to backend`);
+          await cartService.addItem(productId, quantity, variantId);
         }
       }
       
@@ -413,55 +531,58 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Cart synchronized with backend successfully');
     } catch (error) {
       console.error('Error syncing cart with backend:', error);
-    toast({
-        title: 'Sync Error', 
-        description: 'Failed to sync cart with server' 
-      });
+      toast.error('Failed to sync cart with server');
     } finally {
       setIsSyncing(false);
     }
   };
 
   // Modify cart operations to work locally for logged-in users too
-  const addToCart = async (product: Product, quantity: number) => {
+  const addToCart = async (product: Product, variant: ProductVariant, quantity: number) => {
+    if (!variant || !variant.id) {
+      toast.error('Please select a variant before adding to cart');
+      return;
+    }
+
     if (user) {
       try {
         // Start syncing immediately
         setIsSyncing(true);
         
         // Add locally first (for immediate feedback)
-        dispatch({ type: 'ADD_ITEM', payload: { product, quantity, cartItemId: '' } });
+        dispatch({ type: 'ADD_ITEM', payload: { product, variant, quantity, cartItemId: '' } });
         
-        // Send to backend immediately
-        await cartService.addItem(product.id, quantity);
+        // Send to backend immediately - backend API should accept variant_id
+        await cartService.addItem(product.id, quantity, variant.id);
         
         // Backend and local state are now consistent for this operation,
         // so avoid an extra GET /cart here to reduce network chatter.
         setPendingChanges(false);
-        toast({ title: 'Added to cart', description: `${quantity} × ${product.name} added to your cart` });
-      } catch (e) {
-        toast({ title: 'Error', description: 'Failed to add to cart' });
+        toast.success(`${quantity} × ${product.name} (${variant.name}) added to your cart`);
+      } catch (e: any) {
+        toast.error(e.message || 'Failed to add to cart');
       } finally {
         setIsSyncing(false);
       }
     } else {
-      // Local cart for guests (unchanged)
-      dispatch({ type: 'ADD_ITEM', payload: { product, quantity, cartItemId: '' } });
-      toast({ title: 'Added to cart', description: `${quantity} × ${product.name} added to your cart` });
+      // Local cart for guests
+      dispatch({ type: 'ADD_ITEM', payload: { product, variant, quantity, cartItemId: '' } });
+      toast.success(`${quantity} × ${product.name} (${variant.name}) added to your cart`);
     }
   };
 
-  const removeFromCart = async (id: string) => {
+  const removeFromCart = async (id: string, variant_id: string) => {
     if (user) {
       try {
         // Start syncing immediately
         setIsSyncing(true);
         
         // Remove locally first (for immediate feedback)
-        dispatch({ type: 'REMOVE_ITEM', payload: id });
+        dispatch({ type: 'REMOVE_ITEM', payload: `${id}|${variant_id}` });
         
-        // Find the cart item ID from product ID
-        const cartItemId = cartItemIds[id];
+        // Find the cart item ID from product ID and variant ID combination
+        const itemKey = `${id}|${variant_id}`;
+        const cartItemId = cartItemIds[itemKey];
         if (cartItemId) {
           // Remove from backend immediately
           await cartService.removeItem(cartItemId);
@@ -469,7 +590,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Remove from cartItemIds mapping
           setCartItemIds(prev => {
             const newMapping = {...prev};
-            delete newMapping[id];
+            delete newMapping[itemKey];
             return newMapping;
           });
         }
@@ -477,28 +598,29 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Local state and backend are now consistent for this item,
         // so skip a full cart reload to prevent extra GET /cart calls.
         setPendingChanges(false);
-        toast({ title: 'Removed from cart', description: 'Item removed from your cart' });
-      } catch (e) {
-        toast({ title: 'Error', description: 'Failed to remove item from cart' });
+        toast.success('Item removed from your cart');
+      } catch (e: any) {
+        toast.error(e.message || 'Failed to remove item from cart');
       } finally {
         setIsSyncing(false);
       }
     } else {
-      dispatch({ type: 'REMOVE_ITEM', payload: id });
+      dispatch({ type: 'REMOVE_ITEM', payload: `${id}|${variant_id}` });
     }
   };
 
-  const updateQuantity = async (id: string, quantity: number) => {
+  const updateQuantity = async (id: string, variant_id: string, quantity: number) => {
     if (user) {
       try {
         // Start syncing immediately
         setIsSyncing(true);
         
         // Update locally first (for immediate feedback)
-        dispatch({ type: 'UPDATE_QUANTITY', payload: { id, quantity } });
+        dispatch({ type: 'UPDATE_QUANTITY', payload: { id, variant_id, quantity } });
         
-        // Find the cart item ID from product ID
-        const cartItemId = cartItemIds[id];
+        // Find the cart item ID from product ID and variant ID combination
+        const itemKey = `${id}|${variant_id}`;
+        const cartItemId = cartItemIds[itemKey];
         if (cartItemId) {
           // If quantity is 0, remove the item
           if (quantity <= 0) {
@@ -507,7 +629,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Remove from cartItemIds mapping
             setCartItemIds(prev => {
               const newMapping = {...prev};
-              delete newMapping[id];
+              delete newMapping[itemKey];
               return newMapping;
             });
           } else {
@@ -519,13 +641,13 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // We know the backend update succeeded, and local state already
         // reflects the new quantity, so avoid an extra GET /cart here.
         setPendingChanges(false);
-      } catch (e) {
-        toast({ title: 'Error', description: 'Failed to update item quantity' });
+      } catch (e: any) {
+        toast.error(e.message || 'Failed to update item quantity');
       } finally {
         setIsSyncing(false);
       }
     } else {
-      dispatch({ type: 'UPDATE_QUANTITY', payload: { id, quantity } });
+      dispatch({ type: 'UPDATE_QUANTITY', payload: { id, variant_id, quantity } });
     }
   };
 
@@ -545,9 +667,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCartItemIds({});
         
         setPendingChanges(false);
-        toast({ title: 'Cart cleared', description: 'Your cart has been cleared' });
+        toast.success('Your cart has been cleared');
       } catch (e) {
-        toast({ title: 'Error', description: 'Failed to clear cart' });
+        toast.error('Failed to clear cart');
       } finally {
         setIsSyncing(false);
       }

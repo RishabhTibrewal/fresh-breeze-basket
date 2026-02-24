@@ -5,7 +5,8 @@ import {
   getGoodsReceiptById,
   updateGoodsReceipt,
   receiveGoods,
-  completeGoodsReceipt
+  completeGoodsReceipt,
+  deleteGoodsReceipt
 } from '../controllers/goodsReceipts';
 import { protect, requireWarehouseManager, requireAccountsOrAdmin, adminOnly } from '../middleware/auth';
 import {
@@ -28,5 +29,7 @@ router.put('/:id', adminOnly, validateGRNStatusTransition, updateGoodsReceipt);
 router.post('/:id/receive', adminOnly, validateGRNStatusTransition, receiveGoods);
 // Accounts or admin can complete/approve GRN
 router.post('/:id/complete', requireAccountsOrAdmin, validateGRNStatusTransition, completeGoodsReceipt);
+// Delete GRN - authorization handled in controller based on status
+router.delete('/:id', deleteGoodsReceipt);
 
 export default router;

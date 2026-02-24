@@ -3,7 +3,7 @@ import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
-import { getDefaultWarehouseId, updateWarehouseStock } from '../utils/warehouseInventory';
+import { ProductService } from '../services/core/ProductService';
 
 // Get all products with optional filtering
 export const getProducts = async (req: Request, res: Response) => {
@@ -11,9 +11,15 @@ export const getProducts = async (req: Request, res: Response) => {
     if (!req.companyId) {
       throw new ApiError(400, 'Company context is required');
     }
-    const { category, minPrice, maxPrice, inStock, sortBy, limit, page } = req.query;
+    const { category, minPrice, maxPrice, inStock, sortBy, limit, page, format } = req.query;
     
     const client = supabaseAdmin || supabase;
+    
+    // Check if legacy format requested
+    const useLegacyFormat = format === 'legacy';
+    
+    if (useLegacyFormat) {
+      // Legacy format - return flat product array (backward compatibility)
     let query = client.from('products').select('*');
 
     if (req.companyId) {
@@ -31,10 +37,102 @@ export const getProducts = async (req: Request, res: Response) => {
     
     if (maxPrice) {
       query = query.lte('price', maxPrice);
+      }
+      
+      if (inStock === 'true') {
+        query = query.gt('stock_count', 0);
+      }
+      
+      // Apply sorting
+      if (sortBy === 'price_asc') {
+        query = query.order('price', { ascending: true });
+      } else if (sortBy === 'price_desc') {
+        query = query.order('price', { ascending: false });
+      } else {
+        query = query.order('created_at', { ascending: false });
+      }
+      
+      // Apply pagination only if limit is provided
+      if (limit) {
+        const pageSize = parseInt(limit as string);
+        const pageNumber = parseInt(page as string) || 1;
+        const start = (pageNumber - 1) * pageSize;
+        query = query.range(start, start + pageSize - 1);
+      }
+      
+      const { data, error, count } = await query;
+      
+      if (error) {
+        throw new ApiError(400, error.message);
+      }
+      
+      return res.status(200).json({
+        success: true,
+        count,
+        data,
+        deprecated: true,
+        message: 'Legacy format. Use default format to get variants information.'
+      });
+    }
+    
+    // New format - include variants with prices, brand, tax
+    let query = client
+      .from('products')
+      .select(`
+        *,
+        brand:brands (
+          id,
+          name,
+          logo_url
+        ),
+        variants:product_variants (
+          id,
+          name,
+          sku,
+          is_default,
+          is_active,
+          is_featured,
+          image_url,
+          unit,
+          unit_type,
+          best_before,
+          hsn,
+          badge,
+          price:product_prices!price_id (
+            id,
+            sale_price,
+            mrp_price,
+            price_type
+          ),
+          brand:brands (
+            id,
+            name,
+            logo_url
+          ),
+          tax:taxes (
+            id,
+            name,
+            rate
+          )
+        )
+      `);
+
+    if (req.companyId) {
+      query = query.eq('company_id', req.companyId);
+    }
+    
+    // Apply filters
+    if (category) {
+      query = query.eq('category_id', category);
+    }
+    
+    // Price filtering now applies to variant prices
+    // Note: This filters products that have at least one variant matching the price range
+    if (minPrice || maxPrice) {
+      // We'll filter in application logic after fetching
     }
     
     // Note: stock_count filtering is deprecated - use warehouse_inventory for accurate stock
-    // Keeping this for backward compatibility but it may not reflect accurate multi-warehouse stock
     if (inStock === 'true') {
       query = query.gt('stock_count', 0);
     }
@@ -62,10 +160,39 @@ export const getProducts = async (req: Request, res: Response) => {
       throw new ApiError(400, error.message);
     }
     
+    // Process products to include default_variant_id and filter by price if needed
+    const processedProducts = (data || []).map((product: any) => {
+      const variants = product.variants || [];
+      const defaultVariant = variants.find((v: any) => v.is_default === true);
+      
+      // Filter variants by price if minPrice/maxPrice specified
+      let filteredVariants = variants;
+      if (minPrice || maxPrice) {
+        filteredVariants = variants.filter((v: any) => {
+          const salePrice = v.price?.sale_price || 0;
+          if (minPrice && salePrice < parseFloat(minPrice as string)) return false;
+          if (maxPrice && salePrice > parseFloat(maxPrice as string)) return false;
+          return true;
+        });
+      }
+      
+      return {
+        ...product,
+        variants: filteredVariants,
+        default_variant_id: defaultVariant?.id || null,
+      };
+    }).filter((product: any) => {
+      // If price filter was applied and no variants match, exclude product
+      if ((minPrice || maxPrice) && product.variants.length === 0) {
+        return false;
+      }
+      return true;
+    });
+    
     res.status(200).json({
       success: true,
       count,
-      data
+      data: processedProducts
     });
   } catch (error) {
     if (error instanceof ApiError) {
@@ -79,6 +206,7 @@ export const getProducts = async (req: Request, res: Response) => {
 export const getProductById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const { include } = req.query;
     
     if (!req.companyId) {
       return res.status(400).json({
@@ -92,10 +220,99 @@ export const getProductById = async (req: Request, res: Response) => {
     
     const client = supabaseAdmin || supabase;
 
-    // First get the product with its category
+    // Check if variants should be included (default: yes)
+    const includeVariants = include !== 'false';
+
+    if (!includeVariants) {
+      // Legacy format - return product without variants
+      const { data: product, error: productError } = await client
+        .from('products')
+        .select('*, categories(*)')
+        .eq('id', id)
+        .eq('company_id', req.companyId)
+        .single();
+      
+      if (productError || !product) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            message: `Product with ID '${id}' not found or does not belong to your company`,
+            code: 404
+          }
+        });
+      }
+
+      // Get product images
+      const { data: images, error: imagesError } = await client
+        .from('product_images')
+        .select('*')
+        .eq('product_id', id)
+        .is('variant_id', null)
+        .eq('company_id', req.companyId)
+        .order('display_order', { ascending: true });
+
+      if (imagesError) {
+        throw new ApiError(400, imagesError.message);
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          ...product,
+          additionalImages: images?.map(img => img.image_url) || []
+        },
+        deprecated: true,
+        message: 'Legacy format. Use default format (include !== false) to get variants information.'
+      });
+    }
+
+    // New format - include variants with prices, brand, tax, images
     const { data: product, error: productError } = await client
       .from('products')
-      .select('*, categories(*)')
+      .select(`
+        *,
+        categories (*),
+        brand:brands (
+          id,
+          name,
+          logo_url
+        ),
+        variants:product_variants (
+          id,
+          name,
+          sku,
+          is_default,
+          is_active,
+          is_featured,
+          image_url,
+          unit,
+          unit_type,
+          best_before,
+          hsn,
+          badge,
+          price:product_prices!price_id (
+            id,
+            sale_price,
+            mrp_price,
+            price_type
+          ),
+          brand:brands (
+            id,
+            name,
+            logo_url
+          ),
+          tax:taxes (
+            id,
+            name,
+            rate
+          ),
+          variant_images:product_images!variant_id (
+            id,
+            image_url,
+            display_order
+          )
+        )
+      `)
       .eq('id', id)
       .eq('company_id', req.companyId)
       .single();
@@ -104,33 +321,62 @@ export const getProductById = async (req: Request, res: Response) => {
       return res.status(404).json({
         success: false,
         error: {
-          message: 'Product not found',
+          message: `Product with ID '${id}' not found or does not belong to your company`,
           code: 404
         }
       });
     }
 
-    // Then get the product images
-    const { data: images, error: imagesError } = await client
+    // Get product-level images (not variant-specific)
+    const { data: productImages, error: imagesError } = await client
       .from('product_images')
       .select('*')
       .eq('product_id', id)
+      .is('variant_id', null)
       .eq('company_id', req.companyId)
       .order('display_order', { ascending: true });
 
     if (imagesError) {
-      throw new ApiError(400, imagesError.message);
+      console.error('Error fetching product images:', imagesError);
+      // Don't fail, just log
     }
 
-    // Combine product data with images
-    const productWithImages = {
-      ...product,
-      additionalImages: images?.map(img => img.image_url) || []
+    // Process variants - keep variant_images in the response
+    const variants = (product.variants || []).map((variant: any) => ({
+      ...variant,
+      // Keep variant_images as is (don't rename to images)
+      variant_images: variant.variant_images || [],
+    }));
+
+    // Find default variant
+    const defaultVariant = variants.find((v: any) => v.is_default === true);
+
+    // Structure response according to plan
+    const response = {
+      product: {
+        id: product.id,
+        name: product.name,
+        description: product.description,
+        category_id: product.category_id,
+        price: product.price,
+        sale_price: product.sale_price,
+        slug: product.slug,
+        is_active: product.is_active,
+        stock_count: product.stock_count,
+        brand_id: product.brand_id,
+        brand: product.brand,
+        category: product.categories,
+        created_at: product.created_at,
+        updated_at: product.updated_at,
+      },
+      variants: variants, // Keep variant_images in each variant
+      images: productImages?.map(img => img.image_url) || [],
+      default_variant_id: defaultVariant?.id || null,
     };
     
     res.status(200).json({
       success: true,
-      data: productWithImages
+      data: response
     });
   } catch (error) {
     if (error instanceof ApiError) {
@@ -154,6 +400,7 @@ export const getProductById = async (req: Request, res: Response) => {
 };
 
 // Create a new product (admin only)
+// Uses ProductService which automatically creates DEFAULT variant
 export const createProduct = async (req: Request, res: Response) => {
   try {
     const { 
@@ -176,7 +423,9 @@ export const createProduct = async (req: Request, res: Response) => {
       badge,
       product_code,
       hsn_code,
-      tax
+      tax,
+      brand_id, // Product-level brand
+      variants // Optional: array of variant objects with variant-level fields
     } = req.body;
     
     if (!req.companyId) {
@@ -184,100 +433,62 @@ export const createProduct = async (req: Request, res: Response) => {
     }
 
     // Validate required fields
-    if (!name || !price) {
-      throw new ApiError(400, 'Please provide all required fields');
+    if (!name) {
+      throw new ApiError(400, 'Product name is required');
     }
     
-    // Generate a slug if not provided
-    const productSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
+    // Use ProductService to create product with automatic DEFAULT variant
+    const productService = new ProductService(req.companyId);
+    
+    const initialStock = parseInt(stock_count, 10) || 0;
 
-    // Extract JWT from Authorization header
-    const userJwt = req.headers.authorization?.replace('Bearer ', '');
-    if (!userJwt) {
-      throw new ApiError(401, 'Missing user token');
-    }
-    // Create a Supabase client with the user's JWT
-    const supabaseUrl = process.env.SUPABASE_URL!;
-    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY!;
-    const supabaseWithAuth = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: `Bearer ${userJwt}` } }
-    });
+    // Price is optional - defaults to 0 if not provided (pricing is managed at variant level)
+    // If variants are provided with prices, those will be used
+    const productPrice = price !== undefined && price !== null ? parseFloat(price) : 0;
 
-    const { data, error } = await supabaseWithAuth
-      .from('products')
-      .insert({
+    // Note: Deprecated product-level fields (image_url, is_featured, unit, unit_type, 
+    // best_before, tax, hsn_code, badge) are still accepted for backward compatibility
+    // but will be applied to the DEFAULT variant
+    const result = await productService.createProduct(
+      {
         name,
         description,
-        price,
-        sale_price: sale_price || null,
-        category_id: category_id || null,
-        image_url: image_url || null,
-        slug: productSlug,
-        is_featured: is_featured || false,
-        is_active: is_active !== undefined ? is_active : true,
-        // Stock is managed in warehouse_inventory; keep product.stock_count at 0
-        stock_count: 0,
-        unit_type: unit_type || 'piece',
-        nutritional_info: nutritional_info || null,
-        origin: origin || null,
-        best_before: best_before || null,
-        unit: unit || null,
-        badge: badge || null,
-        product_code: product_code || null,
-        hsn_code: hsn_code || null,
-        tax: tax !== undefined && tax !== null && tax !== '' ? parseFloat(tax) : null,
-        company_id: req.companyId
-      })
-      .select();
-    
-    if (error) {
-      throw new ApiError(400, error.message);
-    }
-    
-    const createdProduct = data[0];
-
-    // Resolve warehouse for initial inventory
-    const initialStock = parseInt(stock_count, 10) || 0;
-    let selectedWarehouseId = warehouse_id;
-    if (selectedWarehouseId) {
-      const { data: warehouse, error: warehouseError } = await supabaseWithAuth
-        .from('warehouses')
-        .select('id, is_active')
-        .eq('id', selectedWarehouseId)
-        .single();
-
-      if (warehouseError || !warehouse || !warehouse.is_active) {
-        await supabaseWithAuth.from('products').delete().eq('id', createdProduct.id);
-        throw new ApiError(400, 'Selected warehouse is invalid or inactive');
-      }
-    } else {
-      const defaultWarehouseId = await getDefaultWarehouseId(req.companyId);
-      if (!defaultWarehouseId) {
-        // Rollback product creation to avoid inconsistent state
-        await supabaseWithAuth.from('products').delete().eq('id', createdProduct.id);
-        throw new ApiError(500, 'Default warehouse not found for stock initialization');
-      }
-      selectedWarehouseId = defaultWarehouseId;
-    }
-
-    try {
-      // Upsert inventory even when initialStock is 0
-      await updateWarehouseStock(createdProduct.id, selectedWarehouseId, initialStock, req.companyId, false, true);
-    } catch (inventoryError) {
-      // Rollback product creation to avoid inconsistent state
-      await supabaseWithAuth.from('products').delete().eq('id', createdProduct.id);
-      throw new ApiError(500, 'Failed to initialize warehouse inventory for product');
-    }
+        price: productPrice,
+        sale_price,
+        category_id,
+        image_url, // Deprecated: will be applied to DEFAULT variant
+        slug,
+        is_featured, // Deprecated: will be applied to DEFAULT variant
+        is_active,
+        unit_type, // Deprecated: will be applied to DEFAULT variant
+        nutritional_info,
+        origin,
+        best_before, // Deprecated: will be applied to DEFAULT variant
+        unit, // Deprecated: will be applied to DEFAULT variant
+        badge, // Deprecated: will be applied to DEFAULT variant
+        product_code,
+        hsn_code, // Deprecated: will be applied to DEFAULT variant as 'hsn'
+        tax, // Deprecated: will be applied to DEFAULT variant
+        brand_id, // Product-level brand
+      },
+      variants, // Optional variants array - can include variant-level fields
+      warehouse_id || null,
+      initialStock
+    );
 
     res.status(201).json({
       success: true,
-      data: createdProduct
+      data: {
+        ...result.product,
+        default_variant: result.defaultVariant,
+        variants: result.variants,
+      }
     });
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof ApiError) {
       throw error;
     }
-    throw new ApiError(500, 'Error creating product');
+    throw new ApiError(500, error.message || 'Error creating product');
   }
 };
 
@@ -404,6 +615,25 @@ export const updateProduct = async (req: Request, res: Response) => {
         }
       }
     }
+    if ('brand_id' in req.body && req.body.brand_id !== undefined) {
+      // Validate brand_id if provided
+      if (req.body.brand_id) {
+        const { data: brand, error: brandError } = await supabase
+          .from('brands')
+          .select('id')
+          .eq('id', req.body.brand_id)
+          .eq('company_id', req.companyId)
+          .single();
+
+        if (brandError || !brand) {
+          throw new ApiError(
+            404,
+            `Brand with ID '${req.body.brand_id}' not found or does not belong to your company. Please select a valid brand.`
+          );
+        }
+      }
+      updateData.brand_id = req.body.brand_id || null;
+    }
     
     console.log('Prepared update data:', updateData);
     
@@ -434,6 +664,16 @@ export const updateProduct = async (req: Request, res: Response) => {
     if (fetchUpdateError || !updatedProduct) {
       console.error('Error fetching updated product:', fetchUpdateError);
       throw new ApiError(500, 'Failed to fetch updated product');
+    }
+
+    // Ensure default variant exists after update
+    const productService = new ProductService(req.companyId);
+    try {
+      const productPrice = updatedProduct.price || 0;
+      await productService.ensureDefaultVariant(id, productPrice);
+    } catch (variantError) {
+      // Log but don't fail the update if variant creation fails
+      console.error('Error ensuring default variant after product update:', variantError);
     }
 
     // Verify critical numeric fields if they were updated
@@ -516,22 +756,31 @@ export const deleteProduct = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+    
     // Check if product exists
     const { data: existingProduct, error: fetchError } = await supabase
       .from('products')
       .select('*')
       .eq('id', id)
+      .eq('company_id', req.companyId)
       .single();
     
     if (fetchError || !existingProduct) {
-      throw new ApiError(404, 'Product not found');
+      throw new ApiError(
+        404,
+        `Product with ID '${id}' not found or does not belong to your company`
+      );
     }
     
-    // Delete product
+    // Delete product (cascade will delete variants and prices)
     const { error } = await supabase
       .from('products')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('company_id', req.companyId);
     
     if (error) {
       throw new ApiError(400, error.message);
@@ -546,5 +795,367 @@ export const deleteProduct = async (req: Request, res: Response) => {
       throw error;
     }
     throw new ApiError(500, 'Error deleting product');
+  }
+};
+
+// Get all variants for a product
+export const getProductVariants = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    const client = supabaseAdmin || supabase;
+
+    // Verify product exists
+    const { data: product, error: productError } = await client
+      .from('products')
+      .select('id, name')
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .single();
+
+    if (productError || !product) {
+      throw new ApiError(
+        404,
+        `Product with ID '${id}' not found or does not belong to your company`
+      );
+    }
+
+    // Get all variants with prices, brand, tax, images
+    const { data: variants, error: variantsError } = await client
+      .from('product_variants')
+      .select(`
+        *,
+        price:product_prices!price_id (
+          id,
+          sale_price,
+          mrp_price,
+          price_type
+        ),
+        brand:brands (
+          id,
+          name,
+          logo_url
+        ),
+        tax:taxes (
+          id,
+          name,
+          rate
+        ),
+        variant_images:product_images!variant_id (
+          id,
+          image_url,
+          display_order
+        )
+      `)
+      .eq('product_id', id)
+      .eq('company_id', req.companyId)
+      .order('is_default', { ascending: false })
+      .order('created_at', { ascending: true });
+
+    if (variantsError) {
+      throw new ApiError(500, `Failed to fetch variants: ${variantsError.message}`);
+    }
+
+    res.status(200).json({
+      success: true,
+      data: variants || [],
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      res.status(error.statusCode).json({
+        success: false,
+        error: {
+          message: error.message,
+          code: error.statusCode,
+        },
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: {
+          message: 'An unexpected error occurred while fetching variants',
+          code: 500,
+        },
+      });
+    }
+  }
+};
+
+// Get single variant by ID
+export const getVariantById = async (req: Request, res: Response) => {
+  try {
+    const { variantId } = req.params;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    const client = supabaseAdmin || supabase;
+
+    const { data: variant, error: variantError } = await client
+      .from('product_variants')
+      .select(`
+        *,
+        product:products (
+          id,
+          name,
+          description
+        ),
+        price:product_prices!price_id (
+          id,
+          sale_price,
+          mrp_price,
+          price_type
+        ),
+        brand:brands (
+          id,
+          name,
+          logo_url
+        ),
+        tax:taxes (
+          id,
+          name,
+          rate
+        ),
+        variant_images:product_images!variant_id (
+          id,
+          image_url,
+          display_order
+        )
+      `)
+      .eq('id', variantId)
+      .eq('company_id', req.companyId)
+      .single();
+
+    if (variantError || !variant) {
+      throw new ApiError(
+        404,
+        `Variant with ID '${variantId}' not found for product '${variant?.product?.name || 'unknown'}'. Ensure variant belongs to the product and your company.`
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      data: variant,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      res.status(error.statusCode).json({
+        success: false,
+        error: {
+          message: error.message,
+          code: error.statusCode,
+        },
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: {
+          message: 'An unexpected error occurred while fetching variant',
+          code: 500,
+        },
+      });
+    }
+  }
+};
+
+// Create a new variant for a product
+export const createVariant = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params; // product_id
+    const {
+      name,
+      sku,
+      sale_price,
+      mrp_price,
+      image_url,
+      is_featured,
+      is_active,
+      unit,
+      unit_type,
+      best_before,
+      tax_id,
+      hsn,
+      badge,
+      brand_id,
+    } = req.body;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    if (!name || name.trim() === '') {
+      throw new ApiError(400, 'Variant name is required');
+    }
+
+    // Validate pricing if provided
+    if (sale_price !== undefined && mrp_price !== undefined) {
+      if (sale_price > mrp_price) {
+        throw new ApiError(
+          400,
+          `Invalid pricing for variant '${name}': sale_price (${sale_price}) cannot be greater than mrp_price (${mrp_price}). MRP must be equal to or greater than sale price.`
+        );
+      }
+    }
+
+    const productService = new ProductService(req.companyId);
+    const variant = await productService.createVariant(id, {
+      name,
+      sku: sku === '' ? null : sku,
+      sale_price,
+      mrp_price,
+      image_url: image_url === '' ? null : image_url,
+      is_featured,
+      is_active,
+      unit,
+      unit_type,
+      best_before: best_before === '' ? null : best_before,
+      tax_id: tax_id === '' ? null : tax_id,
+      hsn: hsn === '' ? null : hsn,
+      badge: badge === '' ? null : badge,
+      brand_id: brand_id === '' ? null : brand_id,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: variant,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      res.status(error.statusCode).json({
+        success: false,
+        error: {
+          message: error.message,
+          code: error.statusCode,
+        },
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: {
+          message: 'An unexpected error occurred while creating variant',
+          code: 500,
+        },
+      });
+    }
+  }
+};
+
+// Update a variant
+export const updateVariant = async (req: Request, res: Response) => {
+  try {
+    const { variantId } = req.params;
+    const {
+      name,
+      sku,
+      sale_price,
+      mrp_price,
+      image_url,
+      is_featured,
+      is_active,
+      unit,
+      unit_type,
+      best_before,
+      tax_id,
+      hsn,
+      badge,
+      brand_id,
+    } = req.body;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    // Validate pricing if both provided
+    if (sale_price !== undefined && mrp_price !== undefined) {
+      if (sale_price > mrp_price) {
+        throw new ApiError(
+          400,
+          `Invalid pricing: sale_price (${sale_price}) cannot be greater than mrp_price (${mrp_price}). MRP must be equal to or greater than sale price.`
+        );
+      }
+    }
+
+    const productService = new ProductService(req.companyId);
+    const variant = await productService.updateVariant(variantId, {
+      name,
+      sku: sku === '' ? null : sku,
+      sale_price,
+      mrp_price,
+      image_url: image_url === '' ? null : image_url,
+      is_featured,
+      is_active,
+      unit,
+      unit_type,
+      best_before: best_before === '' ? null : best_before,
+      tax_id: tax_id === '' ? null : tax_id,
+      hsn: hsn === '' ? null : hsn,
+      badge: badge === '' ? null : badge,
+      brand_id: brand_id === '' ? null : brand_id,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: variant,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      res.status(error.statusCode).json({
+        success: false,
+        error: {
+          message: error.message,
+          code: error.statusCode,
+        },
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: {
+          message: 'An unexpected error occurred while updating variant',
+          code: 500,
+        },
+      });
+    }
+  }
+};
+
+// Delete a variant
+export const deleteVariant = async (req: Request, res: Response) => {
+  try {
+    const { variantId } = req.params;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    const productService = new ProductService(req.companyId);
+    await productService.deleteVariant(variantId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Variant deleted successfully',
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      res.status(error.statusCode).json({
+        success: false,
+        error: {
+          message: error.message,
+          code: error.statusCode,
+        },
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: {
+          message: 'An unexpected error occurred while deleting variant',
+          code: 500,
+        },
+      });
+    }
   }
 };

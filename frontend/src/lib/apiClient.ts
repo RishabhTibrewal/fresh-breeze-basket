@@ -104,6 +104,12 @@ apiClient.interceptors.request.use(
       }
     }
     
+    // List of public endpoints that don't require authentication
+    const publicEndpoints = ['/categories', '/products'];
+    const isPublicEndpoint = publicEndpoints.some(endpoint => 
+      config.url?.includes(endpoint)
+    );
+    
     // Check localStorage first for token (faster than Supabase API call)
     const cachedToken = localStorage.getItem('supabase_token');
     
@@ -136,7 +142,8 @@ apiClient.interceptors.request.use(
       } catch (e) {
         console.error('Error parsing token:', e);
       }
-    } else {
+    } else if (!isPublicEndpoint) {
+      // Only try to get session for non-public endpoints
       // If no cached token, get it from Supabase
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
@@ -248,8 +255,20 @@ apiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     
+    // List of public endpoints that don't require authentication
+    const publicEndpoints = ['/categories', '/products'];
+    const isPublicEndpoint = publicEndpoints.some(endpoint => 
+      originalRequest.url?.includes(endpoint)
+    );
+    
     // Check if we should attempt a retry
     if (error.response?.status === 401 && !originalRequest._retry) {
+      // For public endpoints, don't redirect to auth - just reject the error
+      if (isPublicEndpoint) {
+        console.log('Public endpoint failed with 401, not redirecting to auth');
+        return Promise.reject(error);
+      }
+      
       // Prevent redirect loops by checking if we're already redirecting
       if (isRedirectingToAuth) {
         console.log('Already redirecting to auth page, skipping duplicate redirect');

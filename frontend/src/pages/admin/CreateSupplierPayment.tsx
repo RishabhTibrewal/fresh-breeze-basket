@@ -40,10 +40,19 @@ export default function CreateSupplierPayment() {
   const [transactionId, setTransactionId] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Fetch invoices
-  const { data: invoices = [] } = useQuery({
+  // Fetch unpaid invoices only (status: pending, partial, or overdue)
+  // Exclude paid and cancelled invoices
+  const { data: allInvoices = [] } = useQuery({
     queryKey: ['purchase-invoices'],
-    queryFn: () => purchaseInvoicesService.getAll({ status: 'pending' }),
+    queryFn: () => purchaseInvoicesService.getAll(),
+  });
+
+  // Filter to show only unpaid invoices (pending, partial, overdue)
+  // Also filter out invoices with zero balance
+  const invoices = allInvoices.filter((invoice: any) => {
+    const isUnpaid = invoice.status !== 'paid' && invoice.status !== 'cancelled';
+    const hasBalance = (invoice.total_amount - invoice.paid_amount) > 0;
+    return isUnpaid && hasBalance;
   });
 
   // Fetch selected invoice

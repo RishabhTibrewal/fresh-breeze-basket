@@ -12,9 +12,16 @@ export interface Supplier {
   state?: string;
   country?: string;
   postal_code?: string;
-  tax_id?: string;
+  gst_no?: string;
   payment_terms?: string;
   notes?: string;
+  opening_balance?: number;
+  closing_balance?: number;
+  vendor_name?: string;
+  trade_name?: string;
+  legal_name?: string;
+  udyam_registration_number?: string;
+  pan_number?: string;
   is_active: boolean;
   created_by?: string;
   created_at: string;
@@ -29,6 +36,12 @@ export interface SupplierBankAccount {
   account_number?: string;
   ifsc_code?: string;
   account_holder_name?: string;
+  bank_address?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postal_code?: string;
+  pin_code?: string;
   is_primary: boolean;
   created_at: string;
 }
@@ -44,9 +57,17 @@ export interface CreateSupplierData {
   state?: string;
   country?: string;
   postal_code?: string;
-  tax_id?: string;
+  gst_no?: string;
   payment_terms?: string;
   notes?: string;
+  opening_balance?: number;
+  closing_balance?: number;
+  vendor_name?: string;
+  trade_name?: string;
+  legal_name?: string;
+  udyam_registration_number?: string;
+  pan_number?: string;
+  is_active?: boolean;
   bank_accounts?: Omit<SupplierBankAccount, 'id' | 'supplier_id' | 'created_at'>[];
 }
 

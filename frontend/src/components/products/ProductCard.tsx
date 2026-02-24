@@ -1,47 +1,96 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ShoppingCart, Heart, Minus, Plus } from 'lucide-react';
-import { Product } from '@/api/products';
+import { ShoppingCart, Heart, Minus, Plus, ChevronDown } from 'lucide-react';
+import { Product, ProductVariant } from '@/api/products';
 import { cn } from '@/lib/utils';
 import { useCart } from '@/contexts/CartContext';
 import { Badge } from '@/components/ui/badge';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
+import { VariantSelector } from './VariantSelector';
+import { PriceDisplay } from './PriceDisplay';
+import { StockDisplay } from '@/components/inventory/StockDisplay';
+import { useIsMobile } from '@/hooks/use-mobile';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
 
 interface ProductCardProps {
   product: Product;
-  bulkStockData?: { warehouses: any[], total_stock: number };
 }
 
-const ProductCard: React.FC<ProductCardProps> = ({ product, bulkStockData }) => {
-  const { state: cartState, addToCart, updateQuantity } = useCart();
+const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
+  const { state: cartState, addToCart, updateQuantity, removeFromCart } = useCart();
+  const isMobile = useIsMobile();
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
+  const [showVariantSelector, setShowVariantSelector] = useState(false);
+
+  // Get active variants
+  const activeVariants = product.variants?.filter(v => v.is_active) || [];
   
-  const cartItem = cartState.items.find(item => item.id === product.id);
+  // Select default variant or first active variant
+  React.useEffect(() => {
+    if (!selectedVariantId && activeVariants.length > 0) {
+      const defaultVariant = activeVariants.find(v => v.is_default) || activeVariants[0];
+      setSelectedVariantId(defaultVariant.id);
+    }
+  }, [activeVariants, selectedVariantId]);
+
+  const selectedVariant = activeVariants.find(v => v.id === selectedVariantId);
+  
+  // Find cart item by product ID and variant ID
+  const cartItem = cartState.items.find(
+    item => item.id === product.id && item.variant_id === selectedVariantId
+  );
   const quantityInCart = cartItem ? cartItem.quantity : 0;
 
-  // Use ONLY warehouse inventory stock - no fallback to product.stock_count
-  const actualStock = bulkStockData?.total_stock ?? 0;
+  // Get stock for selected variant
+  const variantStock = selectedVariant ? (
+    <StockDisplay
+      productId={product.id}
+      variantId={selectedVariant.id}
+      format="compact"
+    />
+  ) : null;
 
   const handleInitialAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (actualStock > 0) {
-      addToCart(product, 1);
-      toast({ title: "Added to Cart", description: `1 x ${product.name} added.` });
+    
+    if (!selectedVariant) {
+      if (activeVariants.length > 1) {
+        setShowVariantSelector(true);
+        toast.error('Please select a variant');
+      } else {
+        toast.error('No variant available');
+      }
+      return;
+    }
+
+    // Check variant stock
+    if (selectedVariant.price && selectedVariant.price.sale_price !== undefined) {
+      addToCart(product, selectedVariant, 1);
+      toast.success(`Added ${product.name} (${selectedVariant.name}) to cart`);
     } else {
-      toast({ title: "Out of Stock", description: `${product.name} is currently unavailable.`, variant: "destructive" });
+      toast.error('Variant price not available');
     }
   };
 
   const handleDecreaseQuantity = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (cartItem && product) {
+    if (cartItem && selectedVariant) {
       const newQuantity = cartItem.quantity - 1;
-      updateQuantity(product.id, newQuantity);
       if (newQuantity > 0) {
-        toast({ title: "Cart Updated", description: `${product.name} quantity set to ${newQuantity}.` });
+        updateQuantity(product.id, selectedVariant.id, newQuantity);
+        toast.success(`Updated quantity to ${newQuantity}`);
       } else {
-        toast({ title: "Item Removed", description: `${product.name} removed from cart.` });
+        removeFromCart(product.id, selectedVariant.id);
+        toast.success('Removed from cart');
       }
     }
   };
@@ -49,29 +98,34 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, bulkStockData }) => 
   const handleIncreaseQuantity = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (cartItem && product) {
-      if (cartItem.quantity + 1 > actualStock) {
-        toast({ title: "Not Enough Stock", description: `Only ${actualStock} items available.`, variant: "destructive" });
-        return;
-      }
-      updateQuantity(product.id, cartItem.quantity + 1);
-      toast({ title: "Cart Updated", description: `${product.name} quantity set to ${cartItem.quantity + 1}.` });
+    if (cartItem && selectedVariant) {
+      updateQuantity(product.id, selectedVariant.id, cartItem.quantity + 1);
+      toast.success(`Updated quantity to ${cartItem.quantity + 1}`);
     }
   };
+
+  // Get display image (variant image or product image)
+  const displayImage = selectedVariant?.image_url || product.image_url || '/placeholder.svg';
+  
+  // Get display badge (variant badge or product badge)
+  const displayBadge = selectedVariant?.badge || product.badge;
+
+  // Price from variant
+  const variantPrice = selectedVariant?.price;
 
   return (
     <div className="product-card flex flex-col bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow h-full">
       <Link to={`/products/${product.id}`} className="relative overflow-hidden group">
         <div className="relative aspect-square overflow-hidden rounded-lg">
           <img
-            src={product.image_url}
+            src={displayImage}
             alt={product.name}
             className="h-full w-full object-cover object-center"
           />
-          {product.badge && (
+          {displayBadge && (
             <div className="absolute left-2 top-2">
               <Badge variant="secondary" className="text-xs">
-                {product.badge}
+                {displayBadge}
               </Badge>
             </div>
           )}
@@ -79,28 +133,83 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, bulkStockData }) => 
       </Link>
       
       <div className="p-2 sm:p-3 flex-grow flex flex-col">
-        <div className="text-xs text-gray-500 mb-0.5">Origin: {product.origin}</div>
+        <div className="text-xs text-gray-500 mb-0.5">{product.origin || ''}</div>
         <Link to={`/products/${product.id}`} className="hover:text-primary">
           <h3 className="font-semibold text-sm sm:text-base mb-1.5 line-clamp-2">{product.name}</h3>
         </Link>
-        
-        <div className="mt-auto">
-          <div className="flex items-baseline mb-2">
-            {product.sale_price ? (
-              <>
-                <span className="text-accent-sale font-bold text-sm sm:text-base">₹ {product.sale_price.toFixed(2)}</span>
-                <span className="ml-1.5 text-gray-500 line-through text-xs">₹ {product.price.toFixed(2)}</span>
-                <span className="ml-1 text-xs text-gray-600">/{product.unit_type}</span>
-              </>
+
+        {/* Variant Selector */}
+        {activeVariants.length > 1 && (
+          <div className="mb-2">
+            {isMobile ? (
+              <Sheet open={showVariantSelector} onOpenChange={setShowVariantSelector}>
+                <SheetTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs h-8"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShowVariantSelector(true);
+                    }}
+                  >
+                    {selectedVariant?.name || 'Select Variant'}
+                    <ChevronDown className="h-3 w-3 ml-1" />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="bottom" className="h-[80vh]">
+                  <SheetHeader>
+                    <SheetTitle>Select Variant</SheetTitle>
+                  </SheetHeader>
+                  <VariantSelector
+                    variants={activeVariants}
+                    selectedVariantId={selectedVariantId}
+                    onSelect={(id) => {
+                      setSelectedVariantId(id);
+                      setShowVariantSelector(false);
+                    }}
+                    productId={product.id}
+                    showStock
+                  />
+                </SheetContent>
+              </Sheet>
             ) : (
-              <>
-                <span className="font-bold text-sm sm:text-base">₹ {product.price.toFixed(2)}</span>
-                <span className="ml-1 text-xs text-gray-600">/{product.unit_type}</span>
-              </>
+              <VariantSelector
+                variants={activeVariants}
+                selectedVariantId={selectedVariantId}
+                onSelect={setSelectedVariantId}
+                productId={product.id}
+                showStock={false}
+              />
             )}
           </div>
-          
-          {actualStock > 0 ? (
+        )}
+
+        {selectedVariant && (
+          <>
+            {/* Price Display */}
+            <div className="mb-2">
+              {variantPrice ? (
+                <PriceDisplay
+                  mrpPrice={variantPrice.mrp_price}
+                  salePrice={variantPrice.sale_price}
+                  size="sm"
+                />
+              ) : (
+                <span className="text-sm text-muted-foreground">Price not available</span>
+              )}
+            </div>
+
+            {/* Stock Display */}
+            <div className="mb-2 text-xs text-muted-foreground">
+              {variantStock}
+            </div>
+          </>
+        )}
+        
+        <div className="mt-auto">
+          {selectedVariant && variantPrice ? (
             quantityInCart === 0 ? (
               <div className="flex space-x-1.5">
                 <button 
@@ -127,8 +236,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, bulkStockData }) => 
                   <span className="w-10 text-center text-sm font-medium text-gray-700 tabular-nums">{quantityInCart}</span>
                   <button 
                     onClick={handleIncreaseQuantity}
-                    className="w-8 h-8 flex items-center justify-center hover:bg-gray-50 border-l text-primary disabled:text-gray-400"
-                    disabled={quantityInCart >= actualStock}
+                    className="w-8 h-8 flex items-center justify-center hover:bg-gray-50 border-l text-primary"
                   >
                     <Plus className="h-3 w-3" />
                   </button>
@@ -141,7 +249,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, bulkStockData }) => 
           ) : (
             <div className="text-center py-2 flex flex-col items-center">
               <Badge variant="outline" className="text-sm text-red-600 border-red-600">
-                Out of Stock
+                {activeVariants.length === 0 ? 'No Variants' : 'Select Variant'}
               </Badge>
               <button className="mt-2 bg-gray-100 hover:bg-gray-200 rounded-md p-1.5 transition-colors">
                 <Heart className="h-3 w-3 text-gray-600" />

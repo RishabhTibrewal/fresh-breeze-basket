@@ -1,6 +1,8 @@
 import { supabase } from '../config/supabase';
 import { supabaseAdmin } from '../lib/supabase';
-import { updateWarehouseStock, getDefaultWarehouseId } from './warehouseInventory';
+import { getDefaultWarehouseId } from './warehouseInventory';
+import { ProductService } from '../services/core/ProductService';
+import { InventoryService } from '../services/core/InventoryService';
 
 /**
  * Updates an order status to 'processing' after a specified delay
@@ -129,20 +131,28 @@ export const scheduleOrderProcessing = (orderId: string, delayMinutes: number = 
               continue;
             }
             
-            const { releaseReservedStock } = await import('./warehouseInventory');
+            // Get default variant for the product
+            const productService = new ProductService(order.company_id);
+            let variantId: string;
+            try {
+              const defaultVariant = await productService.getDefaultVariant(item.product_id);
+              variantId = defaultVariant.id;
+            } catch (variantError) {
+              console.error(`Error getting default variant for product ${item.product_id}:`, variantError);
+              continue; // Skip this item if we can't get the variant
+            }
             
-            // For sales dashboard orders, allow negative reserved stock
-            // For regular orders, prevent negative reserved stock
-            const result = await releaseReservedStock(
+            // Release reserved stock using InventoryService
+            // Note: InventoryService.releaseStock() always prevents negative reserved stock
+            const inventoryService = new InventoryService(order.company_id);
+            await inventoryService.releaseStock(
               item.product_id,
               warehouseId,
               item.quantity,
-              order.company_id,
-              isSalesDashboardOrder, // Allow negative for sales orders
-              true // Use admin client for scheduled jobs
+              variantId
             );
             
-            console.log(`Reserved stock released for product ${item.product_id} in warehouse ${warehouseId}: -${item.quantity} (Sales order: ${isSalesDashboardOrder}, New reserved_stock: ${result.reserved_stock})`);
+            console.log(`Reserved stock released for product ${item.product_id} variant ${variantId} in warehouse ${warehouseId}: -${item.quantity} (Sales order: ${isSalesDashboardOrder})`);
           } catch (err) {
             console.error(`Error processing item ${item.product_id}:`, err);
           }

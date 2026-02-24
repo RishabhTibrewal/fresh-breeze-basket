@@ -21,6 +21,7 @@ export interface WarehouseInventory {
   id: string;
   warehouse_id: string;
   product_id: string;
+  variant_id: string; // MANDATORY: Every inventory entry references a variant
   stock_count: number;
   reserved_stock: number;
   location?: string;
@@ -30,15 +31,45 @@ export interface WarehouseInventory {
     id: string;
     name: string;
     description?: string;
-    price: number;
-    image_url?: string;
-    unit_type?: string;
+    price?: number; // Deprecated: use variant price
+    image_url?: string; // Deprecated: use variant image_url
+    unit_type?: string; // Deprecated: use variant unit_type
   };
   warehouses?: {
     id: string;
     name: string;
     code: string;
     is_active: boolean;
+  };
+  variant?: {
+    id: string;
+    name: string;
+    sku: string | null;
+    is_default: boolean;
+    is_active: boolean;
+    is_featured: boolean;
+    image_url: string | null;
+    unit: number | null;
+    unit_type: string;
+    best_before: string | null;
+    hsn: string | null;
+    badge: string | null;
+    price?: {
+      id: string;
+      sale_price: number;
+      mrp_price: number;
+      price_type: string;
+    };
+    brand?: {
+      id: string;
+      name: string;
+      logo_url: string | null;
+    };
+    tax?: {
+      id: string;
+      name: string;
+      rate: number;
+    };
   };
 }
 

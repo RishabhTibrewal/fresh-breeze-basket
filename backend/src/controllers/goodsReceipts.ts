@@ -3,6 +3,8 @@ import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError, ValidationError, AuthorizationError } from '../middleware/error';
 import { updateWarehouseStock } from '../utils/warehouseInventory';
 import { hasAnyRole, hasWarehouseAccess } from '../utils/roles';
+import { ProductService } from '../services/core/ProductService';
+import { InventoryService } from '../services/core/InventoryService';
 
 /**
  * Generate GRN number (e.g., GRN-2024-001)
@@ -166,6 +168,7 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
     }
 
     // Calculate total received amount and validate quantities
+    // Note: We calculate based on accepted quantity, not received quantity
     let total_received_amount = 0;
     for (const item of items) {
       if (!item.purchase_order_item_id) {
@@ -202,7 +205,29 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
         );
       }
 
-      const line_total = item.quantity_received * item.unit_price;
+      // Calculate accepted quantity (same logic as in receiptItems mapping)
+      let quantity_accepted: number;
+      if (item.quantity_accepted !== undefined && item.quantity_accepted !== null) {
+        quantity_accepted = item.quantity_accepted;
+        if (quantity_accepted > item.quantity_received) {
+          throw new ValidationError(
+            `Quantity accepted (${quantity_accepted}) cannot exceed quantity received (${item.quantity_received}) for item ${item.purchase_order_item_id}`
+          );
+        }
+      } else if (item.quantity_rejected !== undefined && item.quantity_rejected !== null) {
+        quantity_accepted = item.quantity_received - item.quantity_rejected;
+        if (quantity_accepted < 0) {
+          throw new ValidationError(
+            `Quantity rejected (${item.quantity_rejected}) cannot exceed quantity received (${item.quantity_received}) for item ${item.purchase_order_item_id}`
+          );
+        }
+      } else {
+        // Default: all received items are accepted
+        quantity_accepted = item.quantity_received;
+      }
+
+      // Calculate line total based on accepted quantity only
+      const line_total = quantity_accepted * item.unit_price;
       total_received_amount += line_total;
     }
 
@@ -252,13 +277,48 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
     // Create goods receipt items with product details
     const receiptItems = items.map((item: any) => {
       const product = productsMap.get(item.product_id);
+      const quantity_received = item.quantity_received;
+      
+      // Ensure quantity_accepted + quantity_rejected = quantity_received
+      // If both are provided, validate they add up correctly
+      // Otherwise, default to all accepted (accepted = received, rejected = 0)
+      let quantity_accepted: number;
+      let quantity_rejected: number;
+      
+      if (item.quantity_accepted !== undefined && item.quantity_accepted !== null) {
+        quantity_accepted = item.quantity_accepted;
+        // If accepted is provided, calculate rejected to ensure they add up
+        quantity_rejected = quantity_received - quantity_accepted;
+        
+        // Validate that rejected is not negative
+        if (quantity_rejected < 0) {
+          throw new ValidationError(
+            `Quantity accepted (${quantity_accepted}) cannot exceed quantity received (${quantity_received}) for item ${item.purchase_order_item_id}`
+          );
+        }
+      } else if (item.quantity_rejected !== undefined && item.quantity_rejected !== null) {
+        quantity_rejected = item.quantity_rejected;
+        quantity_accepted = quantity_received - quantity_rejected;
+        
+        // Validate that accepted is not negative
+        if (quantity_accepted < 0) {
+          throw new ValidationError(
+            `Quantity rejected (${quantity_rejected}) cannot exceed quantity received (${quantity_received}) for item ${item.purchase_order_item_id}`
+          );
+        }
+      } else {
+        // Default: all received items are accepted
+        quantity_accepted = quantity_received;
+        quantity_rejected = 0;
+      }
+      
       return {
         goods_receipt_id: goodsReceipt.id,
         purchase_order_item_id: item.purchase_order_item_id,
         product_id: item.product_id,
-        quantity_received: item.quantity_received,
-        quantity_accepted: item.quantity_accepted || item.quantity_received,
-        quantity_rejected: item.quantity_rejected || 0,
+        quantity_received: quantity_received,
+        quantity_accepted: quantity_accepted,
+        quantity_rejected: quantity_rejected,
         unit_price: item.unit_price,
         batch_number: item.batch_number,
         expiry_date: item.expiry_date,
@@ -584,13 +644,43 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
 
         const receiptItems = items.map((item: any) => {
           const product = productsMap.get(item.product_id);
+          const quantity_received = item.quantity_received;
+          
+          // Ensure quantity_accepted + quantity_rejected = quantity_received
+          let quantity_accepted: number;
+          let quantity_rejected: number;
+          
+          if (item.quantity_accepted !== undefined && item.quantity_accepted !== null) {
+            quantity_accepted = item.quantity_accepted;
+            quantity_rejected = quantity_received - quantity_accepted;
+            
+            if (quantity_rejected < 0) {
+              throw new ValidationError(
+                `Quantity accepted (${quantity_accepted}) cannot exceed quantity received (${quantity_received}) for item ${item.purchase_order_item_id}`
+              );
+            }
+          } else if (item.quantity_rejected !== undefined && item.quantity_rejected !== null) {
+            quantity_rejected = item.quantity_rejected;
+            quantity_accepted = quantity_received - quantity_rejected;
+            
+            if (quantity_accepted < 0) {
+              throw new ValidationError(
+                `Quantity rejected (${quantity_rejected}) cannot exceed quantity received (${quantity_received}) for item ${item.purchase_order_item_id}`
+              );
+            }
+          } else {
+            // Default: all received items are accepted
+            quantity_accepted = quantity_received;
+            quantity_rejected = 0;
+          }
+          
           return {
             goods_receipt_id: id,
             purchase_order_item_id: item.purchase_order_item_id,
             product_id: item.product_id,
-            quantity_received: item.quantity_received,
-            quantity_accepted: item.quantity_accepted || item.quantity_received,
-            quantity_rejected: item.quantity_rejected || 0,
+            quantity_received: quantity_received,
+            quantity_accepted: quantity_accepted,
+            quantity_rejected: quantity_rejected,
             unit_price: item.unit_price,
             batch_number: item.batch_number,
             expiry_date: item.expiry_date,
@@ -613,10 +703,10 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
           throw new ApiError(500, 'Failed to update goods receipt items');
         }
 
-        // Recalculate total
+        // Recalculate total based on accepted quantity only
         let total_received_amount = 0;
-        for (const item of items) {
-          total_received_amount += item.quantity_received * item.unit_price;
+        for (const item of receiptItems) {
+          total_received_amount += item.quantity_accepted * item.unit_price;
         }
 
         await adminClient
@@ -786,6 +876,7 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
     }
 
     // Update items and warehouse inventory
+    const productService = new ProductService(req.companyId);
     for (const item of items) {
       const { product_id, quantity_accepted, warehouse_id, purchase_order_item_id } = item;
 
@@ -793,12 +884,32 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
         continue; // Skip invalid items
       }
 
+      // Get default variant for the product
+      let variantId: string;
+      try {
+        const defaultVariant = await productService.getDefaultVariant(product_id);
+        variantId = defaultVariant.id;
+      } catch (variantError) {
+        console.error(`Error getting default variant for product ${product_id}:`, variantError);
+        continue; // Skip this item if we can't get the variant
+      }
+
+      // Convert quantity_accepted to number if it's a string
+      const quantity = typeof quantity_accepted === 'string' 
+        ? parseFloat(quantity_accepted) 
+        : quantity_accepted;
+
+      if (isNaN(quantity) || quantity <= 0) {
+        continue; // Skip invalid quantities
+      }
+
       // Update warehouse inventory (add stock)
       try {
         await updateWarehouseStock(
           product_id,
           warehouse_id,
-          quantity_accepted,
+          variantId,
+          quantity,
           req.companyId,
           false, // Don't allow negative
           true // Use admin client
@@ -1026,21 +1137,45 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
       }
     }
 
-    // Update warehouse inventory for all accepted items and update PO received quantities
+    // Update warehouse inventory & PO received quantities for accepted items,
+    // and create PURCHASE stock movements for auditability
+    const productService = new ProductService(req.companyId);
+    const inventoryService = new InventoryService(req.companyId);
+    const purchaseMovementItems: Array<{
+      productId: string;
+      variantId: string;
+      outletId: string;
+      quantity: number;
+    }> = [];
+
     for (const item of itemsList) {
       if (item.quantity_accepted > 0) {
+        // Get default variant for the product
+        let variantId: string;
         try {
-          await updateWarehouseStock(
-            item.product_id,
-            goodsReceipt.warehouse_id,
-            item.quantity_accepted,
-            req.companyId,
-            false,
-            true
-          );
-        } catch (stockError) {
-          console.error(`Error updating stock for product ${item.product_id}:`, stockError);
+          const defaultVariant = await productService.getDefaultVariant(item.product_id);
+          variantId = defaultVariant.id;
+        } catch (variantError) {
+          console.error(`Error getting default variant for product ${item.product_id}:`, variantError);
+          continue; // Skip this item if we can't get the variant
         }
+
+        // Convert quantity_accepted to number if needed
+        const quantity = typeof item.quantity_accepted === 'string'
+          ? parseFloat(item.quantity_accepted)
+          : item.quantity_accepted;
+
+        if (!quantity || isNaN(quantity) || quantity <= 0) {
+          continue;
+        }
+
+        // Queue purchase movement (InventoryService will handle stock_movements + inventory)
+        purchaseMovementItems.push({
+          productId: item.product_id,
+          variantId,
+          outletId: goodsReceipt.warehouse_id,
+          quantity,
+        });
 
         // Update received quantity in purchase order item
         const { data: poiData } = await adminClient
@@ -1052,8 +1187,8 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
           .single();
 
         if (poiData) {
-          const newReceivedQuantity = (poiData.received_quantity || 0) + item.quantity_accepted;
-          
+          const newReceivedQuantity = (poiData.received_quantity || 0) + quantity;
+
           await adminClient
             .schema('procurement')
             .from('purchase_order_items')
@@ -1062,6 +1197,11 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
             .eq('company_id', req.companyId);
         }
       }
+    }
+
+    // Create PURCHASE stock movements and update warehouse_inventory based on movements
+    if (purchaseMovementItems.length > 0) {
+      await inventoryService.handlePurchaseStockMovement(id, purchaseMovementItems);
     }
 
     // Update GRN status
@@ -1122,6 +1262,173 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
       success: true,
       message: 'Goods receipt completed and inventory updated',
       data: updatedGRN
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Delete goods receipt
+ * - If status is 'completed', only admin can delete
+ * - If status is 'pending', warehouse managers, accounts, or admin can delete
+ */
+export const deleteGoodsReceipt = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ValidationError('User ID is required');
+    }
+
+    const adminClient = supabaseAdmin || supabase;
+    
+    // First, fetch the GRN to check its status
+    const { data: goodsReceipt, error: grnError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipts')
+      .select('*')
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .single();
+
+    if (grnError || !goodsReceipt) {
+      throw new ApiError(404, 'Goods receipt not found');
+    }
+
+    // Check authorization based on status
+    if (goodsReceipt.status === 'completed') {
+      // Only admin can delete completed GRNs
+      const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
+      if (!isAdmin) {
+        throw new AuthorizationError('Only administrators can delete completed goods receipts');
+      }
+    } else if (goodsReceipt.status === 'pending') {
+      // Warehouse managers, accounts, or admin can delete pending GRNs
+      const hasPermission = await hasAnyRole(userId, req.companyId, ['admin', 'accounts', 'warehouse_manager']);
+      if (!hasPermission) {
+        throw new AuthorizationError('You do not have permission to delete this goods receipt');
+      }
+    } else {
+      // For other statuses (inspected, approved, rejected), only admin can delete
+      const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
+      if (!isAdmin) {
+        throw new AuthorizationError('Only administrators can delete goods receipts in this status');
+      }
+    }
+
+    // Check if there's a related invoice
+    const { data: relatedInvoice } = await adminClient
+      .schema('procurement')
+      .from('purchase_invoices')
+      .select('id')
+      .eq('goods_receipt_id', id)
+      .eq('company_id', req.companyId)
+      .maybeSingle();
+
+    if (relatedInvoice) {
+      throw new ValidationError('Cannot delete goods receipt that has an associated invoice. Please delete the invoice first.');
+    }
+
+    // If GRN is completed, we need to reverse inventory updates
+    if (goodsReceipt.status === 'completed') {
+      // Fetch GRN items to reverse inventory
+      const { data: items } = await adminClient
+        .schema('procurement')
+        .from('goods_receipt_items')
+        .select('product_id, quantity_accepted, purchase_order_item_id')
+        .eq('goods_receipt_id', id)
+        .eq('company_id', req.companyId);
+
+      if (items && items.length > 0) {
+        // Reverse inventory updates (subtract accepted quantities)
+        const productService = new ProductService(req.companyId);
+        for (const item of items) {
+          if (item.quantity_accepted > 0 && item.product_id && goodsReceipt.warehouse_id) {
+            // Get default variant for the product
+            let variantId: string;
+            try {
+              const defaultVariant = await productService.getDefaultVariant(item.product_id);
+              variantId = defaultVariant.id;
+            } catch (variantError) {
+              console.error(`Error getting default variant for product ${item.product_id}:`, variantError);
+              continue; // Skip this item if we can't get the variant
+            }
+
+            // Convert quantity_accepted to number if needed
+            const quantity = typeof item.quantity_accepted === 'string' 
+              ? parseFloat(item.quantity_accepted) 
+              : item.quantity_accepted;
+
+            try {
+              await updateWarehouseStock(
+                item.product_id,
+                goodsReceipt.warehouse_id,
+                variantId,
+                -quantity, // Negative to subtract
+                req.companyId,
+                true, // Allow negative for reversal
+                true // Use admin client
+              );
+            } catch (stockError) {
+              console.error(`Error reversing stock for product ${item.product_id}:`, stockError);
+              // Continue with other items
+            }
+          }
+
+          // Reverse PO received quantity
+          if (item.purchase_order_item_id && item.quantity_accepted > 0) {
+            const { data: poiData } = await adminClient
+              .schema('procurement')
+              .from('purchase_order_items')
+              .select('received_quantity')
+              .eq('id', item.purchase_order_item_id)
+              .eq('company_id', req.companyId)
+              .single();
+
+            if (poiData) {
+              const newReceivedQuantity = Math.max(0, (poiData.received_quantity || 0) - item.quantity_accepted);
+              await adminClient
+                .schema('procurement')
+                .from('purchase_order_items')
+                .update({ received_quantity: newReceivedQuantity })
+                .eq('id', item.purchase_order_item_id)
+                .eq('company_id', req.companyId);
+            }
+          }
+        }
+      }
+    }
+
+    // Delete GRN items first (cascade should handle this, but being explicit)
+    await adminClient
+      .schema('procurement')
+      .from('goods_receipt_items')
+      .delete()
+      .eq('goods_receipt_id', id)
+      .eq('company_id', req.companyId);
+
+    // Delete the GRN
+    const { error: deleteError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipts')
+      .delete()
+      .eq('id', id)
+      .eq('company_id', req.companyId);
+
+    if (deleteError) {
+      console.error('Error deleting goods receipt:', deleteError);
+      throw new ApiError(500, `Failed to delete goods receipt: ${deleteError.message}`);
+    }
+
+    res.json({
+      success: true,
+      message: 'Goods receipt deleted successfully'
     });
   } catch (error) {
     next(error);

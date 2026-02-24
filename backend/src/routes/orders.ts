@@ -3,6 +3,7 @@ import {
   getOrders,
   getOrderById,
   createOrder,
+  createReturnOrder,
   updateOrderStatus,
   getUserOrders,
   cancelOrder,
@@ -11,7 +12,7 @@ import {
   getSalesAnalytics
 } from '../controllers';
 import { getCurrentSalesTarget } from '../controllers/admin';
-import { protect, adminOnly } from '../middleware/auth';
+import { protect, requireRole } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -24,8 +25,11 @@ router.get('/sales/dashboard-stats', protect, getSalesDashboardStats);
 router.get('/sales/analytics', protect, getSalesAnalytics);
 router.get('/sales/current-target', protect, getCurrentSalesTarget);
 
-// Admin only routes
-router.get('/', protect, adminOnly, getOrders);
+// Return orders route - must be before /:id route to avoid route conflicts
+router.post('/returns', protect, createReturnOrder);
+
+// Admin or Sales routes - controller will filter data based on role
+router.get('/', protect, requireRole(['admin', 'sales']), getOrders);
 
 // Allow any authenticated user to get order by ID - controller will handle permissions
 router.get('/:id', protect, getOrderById);

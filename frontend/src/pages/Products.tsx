@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Filter, SlidersHorizontal, Search, X } from 'lucide-react';
-import { productsService } from '@/api/products';
+import { Product, productsService } from '@/api/products';
 import { categoriesService } from '@/api/categories';
-import { warehousesService } from '@/api/warehouses';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import ProductCard from '@/components/products/ProductCard';
@@ -99,25 +98,21 @@ export default function Products() {
     queryFn: productsService.getAll,
   });
 
-  // Fetch bulk stock data for all products to avoid individual API calls
-  const { data: bulkStockData = {} } = useQuery({
-    queryKey: ['bulk-product-stock', products?.map(p => p.id).join(',')],
-    queryFn: () => {
-      if (!products || products.length === 0) return {};
-      return warehousesService.getBulkProductStock(products.map(p => p.id));
-    },
-    enabled: !!products && products.length > 0,
-    staleTime: 30000, // Cache for 30 seconds
-  });
-
-  // Set max price based on the highest product price
+  // Set max price based on the highest variant price
   useEffect(() => {
     if (products && products.length > 0) {
-      const highestPrice = Math.ceil(
-        Math.max(...products.map(p => p.price))
+      const allVariantPrices = products.flatMap(p => 
+        (p.variants || [])
+          .filter(v => v.is_active)
+          .map(v => v.price?.mrp_price || v.price?.sale_price || 0)
+          .filter(p => p > 0)
       );
-      setMaxPrice(highestPrice);
-      setPriceRange([0, highestPrice]);
+      
+      if (allVariantPrices.length > 0) {
+        const highestPrice = Math.ceil(Math.max(...allVariantPrices));
+        setMaxPrice(highestPrice);
+        setPriceRange([0, highestPrice]);
+      }
     }
   }, [products]);
 
@@ -140,14 +135,32 @@ export default function Products() {
       const matchesCategory = selectedCategories.length === 0 || 
         selectedCategories.includes(product.category_id);
       
-      const matchesPrice = product.price >= priceRange[0] && product.price <= priceRange[1];
+      // Check price from variants
+      const activeVariants = product.variants?.filter(v => v.is_active) || [];
+      const variantPrices = activeVariants
+        .map(v => v.price?.sale_price || v.price?.mrp_price || 0)
+        .filter(p => p > 0);
+      
+      const minVariantPrice = variantPrices.length > 0 ? Math.min(...variantPrices) : 0;
+      const maxVariantPrice = variantPrices.length > 0 ? Math.max(...variantPrices) : 0;
+      
+      // Match if any variant price falls within range
+      const matchesPrice = variantPrices.length === 0 || 
+        (minVariantPrice <= priceRange[1] && maxVariantPrice >= priceRange[0]);
       
       const matchesSearch = !searchQuery || 
         product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (product.description && product.description.toLowerCase().includes(searchQuery.toLowerCase()));
+        (product.description && product.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        product.variants?.some(v => 
+          v.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          v.sku?.toLowerCase().includes(searchQuery.toLowerCase())
+        );
         
-      const matchesDiscount = !showDiscountedOnly || 
-        (product.sale_price && product.sale_price < product.price);
+      // Check if any variant has discount
+      const hasDiscount = activeVariants.some(v => 
+        v.price && v.price.sale_price < v.price.mrp_price
+      );
+      const matchesDiscount = !showDiscountedOnly || hasDiscount;
 
       return matchesCategory && matchesPrice && matchesSearch && matchesDiscount;
     });
@@ -155,18 +168,31 @@ export default function Products() {
 
   // Sort products
   const sortedProducts = React.useMemo(() => {
-    return [...(filteredProducts || [])].sort((a, b) => {
+    const productsToSort: Product[] = filteredProducts || [];
+    return [...productsToSort].sort((a, b) => {
+      // Helper to get min variant price
+      const getMinPrice = (product: Product) => {
+        const activeVariants = product.variants?.filter(v => v.is_active) || [];
+        const prices = activeVariants
+          .map(v => v.price?.sale_price || v.price?.mrp_price || 0)
+          .filter(p => p > 0);
+        return prices.length > 0 ? Math.min(...prices) : 0;
+      };
+
       switch (sortBy) {
         case 'price-low':
-          return (a.sale_price || a.price) - (b.sale_price || b.price);
+          return getMinPrice(a) - getMinPrice(b);
         case 'price-high':
-          return (b.sale_price || b.price) - (a.sale_price || a.price);
+          return getMinPrice(b) - getMinPrice(a);
         case 'name-asc':
           return a.name.localeCompare(b.name);
         case 'name-desc':
           return b.name.localeCompare(a.name);
         case 'featured':
-          return (b.is_featured ? 1 : 0) - (a.is_featured ? 1 : 0);
+          // Check if any variant is featured
+          const aFeatured = a.variants?.some(v => v.is_featured) ? 1 : 0;
+          const bFeatured = b.variants?.some(v => v.is_featured) ? 1 : 0;
+          return bFeatured - aFeatured;
         case 'newest':
         default:
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -420,7 +446,6 @@ export default function Products() {
                       <ProductCard 
                         key={product.id} 
                         product={product}
-                        bulkStockData={bulkStockData[product.id] as { warehouses: any[], total_stock: number } | undefined}
                       />
                     ))}
                   </div>

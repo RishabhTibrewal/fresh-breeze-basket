@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ordersService } from '@/api/orders';
 import { Button } from '@/components/ui/button';
@@ -25,19 +25,22 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
+import { Card, CardContent } from '@/components/ui/card';
 
 export default function AdminOrderList() {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [typeFilter, setTypeFilter] = useState<'all' | 'sales' | 'purchase' | 'return'>('all');
   const ordersPerPage = 10;
 
   const { data: ordersData, isLoading, isError, refetch } = useQuery({
-    queryKey: ['admin-orders', currentPage, searchTerm],
+    queryKey: ['admin-orders', currentPage, searchTerm, typeFilter],
     queryFn: async () => {
       try {
         const response = await ordersService.getAll({
           page: currentPage,
-          limit: ordersPerPage
+          limit: ordersPerPage,
+          order_type: typeFilter === 'all' ? undefined : typeFilter,
         });
         console.log('Fetched admin orders:', response);
         
@@ -164,19 +167,100 @@ export default function AdminOrderList() {
     return pageNumbers;
   };
 
+  const typeCounts = useMemo(() => {
+    const all = ordersData?.orders || [];
+    return {
+      total: all.length,
+      sales: all.filter((o: any) => o.order_type === 'sales').length,
+      returns: all.filter((o: any) => o.order_type === 'return').length,
+      purchase: all.filter((o: any) => o.order_type === 'purchase').length,
+    };
+  }, [ordersData]);
+
   return (
-    <div className="container mx-auto py-8 px-4">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-        <h1 className="text-2xl font-bold">Orders </h1>
-        <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+    <div className="container mx-auto py-8 px-4 space-y-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Orders</h1>
+          <p className="text-sm text-muted-foreground">
+            Central view of all sales, returns, and purchase orders.
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <Input
             placeholder="Search by Order ID, Status, or User..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full sm:w-[300px]"
+            className="w-full sm:w-[260px]"
           />
-          <Button onClick={() => refetch()}>Refresh</Button>
+          <Button variant="outline" onClick={() => refetch()}>Refresh</Button>
         </div>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Card>
+          <CardContent className="py-2 px-3">
+            <div className="text-xs text-muted-foreground">Total Orders</div>
+            <div className="text-lg font-semibold">{typeCounts.total}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-2 px-3">
+            <div className="text-xs text-muted-foreground">Sales</div>
+            <div className="text-lg font-semibold text-emerald-700">
+              {typeCounts.sales}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-2 px-3">
+            <div className="text-xs text-muted-foreground">Returns</div>
+            <div className="text-lg font-semibold text-red-700">
+              {typeCounts.returns}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-2 px-3">
+            <div className="text-xs text-muted-foreground">Purchase</div>
+            <div className="text-lg font-semibold text-blue-700">
+              {typeCounts.purchase}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Quick order_type filters */}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant={typeFilter === 'all' ? 'default' : 'outline'}
+          onClick={() => setTypeFilter('all')}
+        >
+          All
+        </Button>
+        <Button
+          size="sm"
+          variant={typeFilter === 'sales' ? 'default' : 'outline'}
+          onClick={() => setTypeFilter('sales')}
+        >
+          Sales
+        </Button>
+        <Button
+          size="sm"
+          variant={typeFilter === 'return' ? 'default' : 'outline'}
+          onClick={() => setTypeFilter('return')}
+        >
+          Returns
+        </Button>
+        <Button
+          size="sm"
+          variant={typeFilter === 'purchase' ? 'default' : 'outline'}
+          onClick={() => setTypeFilter('purchase')}
+        >
+          Purchase
+        </Button>
       </div>
       <div className="border rounded-md">
         <Table>
@@ -185,6 +269,8 @@ export default function AdminOrderList() {
               <TableHead>Order ID</TableHead>
               <TableHead>User</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead className="hidden md:table-cell">Source</TableHead>
               <TableHead>Total</TableHead>
               <TableHead>Date</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -217,6 +303,16 @@ export default function AdminOrderList() {
                   <TableCell>
                     <Badge variant={order.status === 'cancelled' ? 'destructive' : 'default'}>
                       {order.status || 'pending'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                      {(order as any).order_type || 'sales'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <Badge variant="outline">
+                      {(order as any).order_source || 'ecommerce'}
                     </Badge>
                   </TableCell>
                   <TableCell>

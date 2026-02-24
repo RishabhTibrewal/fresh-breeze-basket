@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { supabase } from '../config/supabase';
 import { Database } from '../types/database';
 import { getDefaultWarehouseId, findWarehouseWithStock } from '../utils/warehouseInventory';
+import { ProductService } from '../services/core/ProductService';
+import { InventoryService } from '../services/core/InventoryService';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -70,28 +72,37 @@ export const orderController = {
         });
       }
 
-      // Calculate order total amount
+      // Calculate order total amount using variant pricing
       console.log('Calculating order total for items:', items);
       let subtotal = 0;
+      const productServiceForPricing = new ProductService(req.companyId!);
+      
       for (const item of items as OrderItemInput[]) {
-        const { data: product, error: productError } = await supabase
-          .from('products')
-          .select('price, sale_price')
-          .eq('id', item.product_id)
-          .eq('company_id', req.companyId!)
-          .single();
-
-        if (productError) {
-          console.error('Product lookup error:', productError);
-          return res.status(404).json({ error: `Product ${item.product_id} not found: ${productError.message}` });
+        let priceToUse = 0;
+        
+        // If variant_id provided, use variant pricing
+        if ((item as any).variant_id) {
+          try {
+            priceToUse = await productServiceForPricing.getVariantPrice((item as any).variant_id);
+          } catch (variantError) {
+            console.error('Variant lookup error:', variantError);
+            return res.status(404).json({ 
+              error: `Variant ${(item as any).variant_id} not found: ${variantError instanceof Error ? variantError.message : 'Unknown error'}` 
+            });
         }
-
-        if (!product) {
-          return res.status(404).json({ error: `Product ${item.product_id} not found` });
+        } else {
+          // Default to DEFAULT variant pricing
+          try {
+            const defaultVariant = await productServiceForPricing.getDefaultVariant(item.product_id);
+            priceToUse = await productServiceForPricing.getVariantPrice(defaultVariant.id);
+          } catch (productError) {
+            console.error('Product/Variant lookup error:', productError);
+            return res.status(404).json({ 
+              error: `Product ${item.product_id} not found or has no default variant: ${productError instanceof Error ? productError.message : 'Unknown error'}` 
+            });
+          }
         }
         
-        // Use sale_price if available, otherwise use regular price
-        const priceToUse = product.sale_price || product.price;
         subtotal += priceToUse * item.quantity;
       }
 
@@ -174,6 +185,10 @@ export const orderController = {
         }
       }
 
+      // Determine fulfillment type for sales executive order
+      const fulfillmentType: 'delivery' | 'pickup' =
+        shipping_address_id ? 'delivery' : 'pickup';
+
       // Create order record data object for better logging
       const orderData = {
         user_id: customer.user_id,
@@ -184,7 +199,10 @@ export const orderController = {
         payment_method,
         total_amount: calculatedTotalAmount,
         notes,
-        payment_status: orderPaymentStatus
+        payment_status: orderPaymentStatus,
+        order_type: 'sales',
+        order_source: 'sales',
+        fulfillment_type: fulfillmentType
       };
       
       console.log('Order data being inserted:', JSON.stringify(orderData, null, 2));
@@ -204,28 +222,45 @@ export const orderController = {
       console.log('Order created successfully:', order);
       console.log('Creating order items for items:', JSON.stringify(items, null, 2));
 
-      // First get all product prices in one query for better performance (filtered by company_id)
-      const productIds = (items as OrderItemInput[]).map(item => item.product_id);
-      const { data: products, error: productsQueryError } = await supabase
-        .from('products')
-        .select('id, price, sale_price')
-        .in('id', productIds)
-        .eq('company_id', req.companyId!);
-
-      if (productsQueryError) {
-        console.error('Error fetching product prices:', productsQueryError);
-        // Rollback by deleting the order if products query fails
-        await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
-        return res.status(500).json({ error: `Failed to fetch product prices: ${productsQueryError.message}` });
+      // Get variant prices for all items (use DEFAULT variant if variant_id not provided)
+      const productPrices: Record<string, number> = {};
+      const variantIds: Record<string, string> = {}; // Track variant_id for each product_id
+      const productServiceForVariants = new ProductService(req.companyId!);
+      
+      for (const item of items as OrderItemInput[]) {
+        let variantId = (item as any).variant_id;
+        
+        // If no variant_id provided, get DEFAULT variant
+        if (!variantId) {
+          try {
+            const defaultVariant = await productServiceForVariants.getDefaultVariant(item.product_id);
+            variantId = defaultVariant.id;
+            variantIds[item.product_id] = variantId;
+          } catch (error) {
+            console.error('Error getting default variant:', error);
+            await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
+            return res.status(500).json({ 
+              error: `Failed to get default variant for product ${item.product_id}: ${error instanceof Error ? error.message : 'Unknown error'}` 
+            });
+          }
+        } else {
+          variantIds[item.product_id] = variantId;
+        }
+        
+        // Get variant price
+        try {
+          const variantPrice = await productServiceForVariants.getVariantPrice(variantId);
+          productPrices[item.product_id] = variantPrice;
+        } catch (error) {
+          console.error('Error getting variant price:', error);
+          await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
+          return res.status(500).json({ 
+            error: `Failed to get price for variant ${variantId}: ${error instanceof Error ? error.message : 'Unknown error'}` 
+          });
+        }
       }
 
-      // Map products to a dictionary for quick lookup
-      const productPrices: Record<string, number> = {};
-      products.forEach(product => {
-        productPrices[product.id] = product.sale_price || product.price;
-      });
-
-      console.log('Product prices for order items:', productPrices);
+      console.log('Variant prices for order items:', productPrices);
 
       // Check validity of items before trying to insert
       for (const item of items as OrderItemInput[]) {
@@ -250,25 +285,29 @@ export const orderController = {
 
       const defaultWarehouseId = defaultWarehouse?.id;
 
-      // Create order items with prices from products
+      // Create order items with variant prices and variant_id
       const orderItems = (items as OrderItemInput[]).map(item => {
-        // Use the price sent from frontend if available, otherwise fallback to product prices
+        // Use the price sent from frontend if available, otherwise fallback to variant prices
         const unitPrice = item.price || item.unit_price || productPrices[item.product_id];
         
         if (!unitPrice || isNaN(Number(unitPrice))) {
           console.error(`Missing or invalid price for product ${item.product_id}`, { 
             item_price: item.price,
             item_unit_price: item.unit_price,
-            product_price: productPrices[item.product_id],
+            variant_price: productPrices[item.product_id],
             item: item
           });
           throw new Error(`Missing price for product ${item.product_id}`);
         }
         
+        // Get variant_id (from request or from variantIds map)
+        const variantId = (item as any).variant_id || variantIds[item.product_id];
+        
         return {
           order_id: order.id,
           company_id: req.companyId!,
           product_id: item.product_id,
+          variant_id: variantId || null, // Include variant_id in order items
           quantity: item.quantity,
           unit_price: unitPrice,
           warehouse_id: item.warehouse_id || defaultWarehouseId || null
@@ -278,9 +317,10 @@ export const orderController = {
       console.log('Final order items to insert:', JSON.stringify(orderItems, null, 2));
 
       // Reserve stock for all order items (move from stock_count to reserved_stock)
-      const { reserveWarehouseStock, getDefaultWarehouseId: getDefaultWarehouseIdUtil } = await import('../utils/warehouseInventory');
-      const defaultWarehouseIdForReservation = await getDefaultWarehouseIdUtil();
+      const defaultWarehouseIdForReservation = await getDefaultWarehouseId(req.companyId!);
       
+      const productServiceForReservation = new ProductService(req.companyId!);
+      const inventoryService = new InventoryService(req.companyId!);
       const reservationErrors: string[] = [];
       for (const item of orderItems) {
         try {
@@ -290,15 +330,31 @@ export const orderController = {
             continue;
           }
           
-          await reserveWarehouseStock(
+          // Get variant_id (from order item or default variant)
+          let variantId: string | undefined = (item as any).variant_id || variantIds[item.product_id];
+          if (!variantId) {
+          try {
+              const defaultVariant = await productServiceForReservation.getDefaultVariant(item.product_id);
+            variantId = defaultVariant.id;
+          } catch (variantError) {
+            reservationErrors.push(`Failed to get default variant for product ${item.product_id}`);
+              continue;
+            }
+          }
+          
+          if (!variantId) {
+            reservationErrors.push(`No variant_id found for product ${item.product_id}`);
+            continue;
+          }
+          
+          await inventoryService.reserveStock(
             item.product_id,
             warehouseId,
             item.quantity,
-            req.companyId,
-            true // Use admin client to bypass RLS for system operations
+            variantId
           );
           
-          console.log(`Stock reserved for product ${item.product_id} in warehouse ${warehouseId}: ${item.quantity}`);
+          console.log(`Stock reserved for product ${item.product_id} variant ${variantId} in warehouse ${warehouseId}: ${item.quantity}`);
         } catch (err: any) {
           console.error(`Error reserving stock for product ${item.product_id}:`, err);
           reservationErrors.push(`Failed to reserve stock for product ${item.product_id}: ${err.message}`);
@@ -323,12 +379,26 @@ export const orderController = {
         console.error('Error creating order items:', itemsError);
         
         // Rollback stock reservations if order items creation fails
-        const { restoreReservedStock: restoreReservedStockUtil } = await import('../utils/warehouseInventory');
         for (const item of orderItems) {
           try {
             const warehouseId = item.warehouse_id || defaultWarehouseIdForReservation;
             if (warehouseId) {
-              await restoreReservedStockUtil(item.product_id, warehouseId, item.quantity, req.companyId, true); // Use admin client to bypass RLS
+              // Get default variant for the product
+              let variantId: string;
+              try {
+                const defaultVariant = await productServiceForReservation.getDefaultVariant(item.product_id);
+                variantId = defaultVariant.id;
+              } catch (variantError) {
+                console.error(`Error getting default variant for product ${item.product_id} during rollback:`, variantError);
+                continue; // Skip this item if we can't get the variant
+              }
+              
+              await inventoryService.releaseStock(
+                item.product_id,
+                warehouseId,
+                item.quantity,
+                variantId
+              );
             }
           } catch (err) {
             console.error(`Error rolling back reservation for product ${item.product_id}:`, err);
@@ -441,7 +511,26 @@ export const orderController = {
           *,
           order_items (
             *,
-            product:products (*)
+            product:products (*),
+            variant:product_variants (
+              id,
+              name,
+              sku,
+              price:product_prices!price_id (
+                sale_price,
+                mrp_price
+              ),
+              brand:brands (
+                id,
+                name,
+                logo_url
+              ),
+              tax:taxes (
+                id,
+                name,
+                rate
+              )
+            )
           ),
           credit_periods (*)
         `)
@@ -503,7 +592,26 @@ export const orderController = {
           *,
           order_items (
             *,
-            product:products (*)
+            product:products (*),
+            variant:product_variants (
+              id,
+              name,
+              sku,
+              price:product_prices!price_id (
+                sale_price,
+                mrp_price
+              ),
+              brand:brands (
+                id,
+                name,
+                logo_url
+              ),
+              tax:taxes (
+                id,
+                name,
+                rate
+              )
+            )
           )
         `)
         .eq('id', order_id)
@@ -639,7 +747,26 @@ export const orderController = {
           *,
           order_items (
             *,
-            product:products (*)
+            product:products (*),
+            variant:product_variants (
+              id,
+              name,
+              sku,
+              price:product_prices!price_id (
+                sale_price,
+                mrp_price
+              ),
+              brand:brands (
+                id,
+                name,
+                logo_url
+              ),
+              tax:taxes (
+                id,
+                name,
+                rate
+              )
+            )
           )
         `)
         .in('user_id', customerUserIds)

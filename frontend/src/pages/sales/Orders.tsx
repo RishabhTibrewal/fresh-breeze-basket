@@ -36,6 +36,7 @@ export default function Orders() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<'all' | 'sales' | 'return'>('all');
   
   // Get all orders for sales staff's customers
   const { 
@@ -84,8 +85,9 @@ export default function Orders() {
       
     const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
     const matchesPayment = paymentFilter === 'all' || order.payment_status === paymentFilter;
+    const matchesType = typeFilter === 'all' || order.order_type === typeFilter;
     
-    return matchesSearch && matchesStatus && matchesPayment;
+    return matchesSearch && matchesStatus && matchesPayment && matchesType;
   });
   
   // Log filtered orders when they change
@@ -186,8 +188,8 @@ export default function Orders() {
           </div>
         </CardHeader>
         
-        <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2 mb-3 sm:mb-4 min-w-0">
+        <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6 space-y-3 sm:space-y-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2 min-w-0">
             <div className="relative flex-1 min-w-0">
               <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
               <Input
@@ -222,6 +224,31 @@ export default function Orders() {
                 <SelectItem value="pending" className="text-sm">Pending</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Quick order_type filters */}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={typeFilter === 'all' ? 'default' : 'outline'}
+              onClick={() => setTypeFilter('all')}
+            >
+              All
+            </Button>
+            <Button
+              size="sm"
+              variant={typeFilter === 'sales' ? 'default' : 'outline'}
+              onClick={() => setTypeFilter('sales')}
+            >
+              Sales
+            </Button>
+            <Button
+              size="sm"
+              variant={typeFilter === 'return' ? 'default' : 'outline'}
+              onClick={() => setTypeFilter('return')}
+            >
+              Returns
+            </Button>
           </div>
           
           {/* Mobile Card View */}

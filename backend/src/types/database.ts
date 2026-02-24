@@ -56,44 +56,135 @@ export interface Category {
   updated_at: string;
 }
 
+export interface Brand {
+  id: string;
+  company_id: string;
+  name: string;
+  slug: string | null;
+  legal_name: string | null;
+  logo_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Tax {
+  id: string;
+  company_id: string;
+  name: string;
+  code: string;
+  rate: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Product {
   id: string;
   name: string;
   description: string | null;
   price: number;
   sale_price: number | null;
+  /** @deprecated Use product_variants.image_url instead */
   image_url: string | null;
   category_id: string | null;
   slug: string;
+  /** @deprecated Use product_variants.is_featured instead */
   is_featured: boolean;
+  /** Product-level activation control. If false, all variants are automatically inactive. Variants can only be active if product is active. */
   is_active: boolean;
   stock_count: number;
+  /** @deprecated Use product_variants.unit_type instead */
   unit_type: string;
   nutritional_info: string | null;
   origin: string | null;
+  /** @deprecated Use product_variants.best_before instead */
   best_before: string | null;
+  brand_id: string | null;
   created_at: string;
   updated_at: string;
+  /** @deprecated Use product_variants.unit instead */
   unit: number | null;
+  /** @deprecated Use product_variants.badge instead */
   badge: string | null;
+}
+
+export interface ProductVariant {
+  id: string;
+  product_id: string;
+  name: string;
+  sku: string | null;
+  price_id: string;
+  is_default: boolean;
+  image_url: string | null;
+  is_featured: boolean;
+  is_active: boolean;
+  unit: number | null;
+  unit_type: string;
+  best_before: string | null;
+  tax_id: string | null;
+  hsn: string | null;
+  badge: string | null;
+  brand_id: string | null;
+  company_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductPrice {
+  id: string;
+  product_id: string | null;
+  variant_id: string | null;
+  outlet_id: string | null;
+  price_type: string;
+  mrp_price: number;
+  sale_price: number;
+  brand_id: string | null;
+  valid_from: string;
+  valid_until: string | null;
+  company_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductImage {
+  id: string;
+  product_id: string | null;
+  variant_id: string | null;
+  image_url: string;
+  is_primary: boolean;
+  display_order: number;
+  company_id: string;
+  created_at: string;
 }
 
 export interface Order {
   id: string;
-  user_id: string;
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'canceled';
-  shipping_address_id: string;
-  billing_address_id: string;
-  payment_method: string;
-  subtotal: number;
-  shipping_fee: number;
-  tax: number;
-  total: number;
+  user_id: string | null;
+  company_id: string;
+  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  // Business semantics
+  order_type: 'sales' | 'purchase' | 'return';
+  order_source: 'ecommerce' | 'pos' | 'sales' | 'internal';
+  fulfillment_type: 'delivery' | 'pickup' | 'cash_counter';
+  original_order_id: string | null;
+  // Monetary fields
+  total_amount: number;
+  payment_method: string | null;
+  payment_status: string | null;
   payment_intent_id: string | null;
-  payment_status: 'pending' | 'paid' | 'failed';
+  // Addresses
+  shipping_address_id: string | null;
+  billing_address_id: string | null;
+  // Logistics
+  tracking_number?: string | null;
+  estimated_delivery?: string | null;
+  outlet_id?: string | null;
+  // Meta
   notes: string | null;
   created_at: string;
   updated_at: string;
+  inventory_updated?: boolean;
 }
 
 export interface OrderItem {

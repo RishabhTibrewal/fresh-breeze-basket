@@ -1,0 +1,500 @@
+---
+description: Integration rules for Multi-Tenant ERP system, covering frontend-backend communication, Supabase integration patterns, permission flows, and data synchronization.
+globs:
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+  - "**/*.sql"
+alwaysApply: true
+---
+
+# Integration Rules - Multi-Tenant ERP Frontend ↔ Backend
+
+## Goals
+- Establish secure communication between React frontend and Supabase backend
+- Implement consistent permission checking across UI and database
+- Create efficient data fetching patterns for multi-tenant architecture
+- Ensure real-time data synchronization where needed
+- Handle company context throughout the application
+
+## Core Integration Patterns
+
+### 1. Authentication Flow
+
+**Login → Company Detection → Permission Loading**
+
+```typescript
+// 1. User logs in
+const { data, error } = await supabase.auth.signInWithPassword({
+  email,
+  password
+});
+
+// 2. Extract company from subdomain
+const companyId = getCompanyFromSubdomain();
+
+// 3. Fetch user permissions
+const { data: permissions } = await supabase.rpc('get_user_permissions', {
+  p_user_id: data.user.id,
+  p_company_id: companyId
+});
+
+// 4. Fetch company-enabled modules
+const { data: modules } = await supabase.rpc('get_company_modules', {
+  p_company_id: companyId
+});
+
+// 5. Store in context/state
+setAuthState({ user, companyId, permissions, modules });
+```
+
+### 2. Permission Check Pattern
+
+**ALWAYS check permissions at TWO levels:**
+
+**Frontend (UI Level):**
+```typescript
+// Hide/show UI elements
+const canViewSales = useCanAccess('sales.read');
+
+{canViewSales && <SalesModule />}
+```
+
+**Backend (Database Level):**
+```sql
+-- RLS policy enforces permissions
+CREATE POLICY sales_orders_select ON sales_orders
+  FOR SELECT
+  USING (
+    company_id IN (
+      SELECT ur.company_id 
+      FROM user_roles ur
+      JOIN role_permissions rp ON ur.role_id = rp.role_id
+      JOIN permissions p ON rp.permission_id = p.id
+      WHERE ur.user_id = auth.uid()
+        AND p.code = 'sales.read'
+    )
+  );
+```
+
+**NEVER** rely on frontend checks alone!
+
+### 3. Data Fetching Patterns
+
+**Standard Query Pattern:**
+```typescript
+async function fetchSalesOrders(companyId: string) {
+  const { data, error } = await supabase
+    .from('sales_orders')
+    .select(`
+      *,
+      customer:customers(id, name, email),
+      items:order_items(*)
+    `)
+    .eq('company_id', companyId)  // ALWAYS filter by company
+    .order('created_at', { ascending: false })
+    .limit(20);
+    
+  if (error) throw error;
+  return data;
+}
+```
+
+**Custom Hook Pattern:**
+```typescript
+function useSalesOrders() {
+  const { companyId } = useAuth();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  
+  useEffect(() => {
+    if (!companyId) return;
+    
+    fetchSalesOrders(companyId)
+      .then(setData)
+      .catch(setError)
+      .finally(() => setLoading(false));
+  }, [companyId]);
+  
+  return { data, loading, error };
+}
+```
+
+**React Query Pattern (Recommended):**
+```typescript
+function useSalesOrders() {
+  const { companyId } = useAuth();
+  
+  return useQuery({
+    queryKey: ['sales-orders', companyId],
+    queryFn: () => fetchSalesOrders(companyId),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+```
+
+### 4. RPC Function Calls
+
+**Get User Permissions:**
+```typescript
+const { data, error } = await supabase.rpc('get_user_permissions', {
+  p_user_id: userId,
+  p_company_id: companyId
+});
+
+// Returns: [{ permission_code, module, action }]
+```
+
+**Check Single Permission:**
+```typescript
+const { data: hasPermission } = await supabase.rpc('user_has_permission', {
+  p_user_id: userId,
+  p_company_id: companyId,
+  p_permission_code: 'sales.write'
+});
+
+// Returns: boolean
+```
+
+**Get Company Modules:**
+```typescript
+const { data } = await supabase.rpc('get_company_modules', {
+  p_company_id: companyId
+});
+
+// Returns: [{ module_code, is_enabled, settings }]
+```
+
+### 5. Real-Time Subscriptions
+
+**Subscribe to Table Changes:**
+```typescript
+useEffect(() => {
+  const channel = supabase
+    .channel(`sales-orders-${companyId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'sales_orders',
+        filter: `company_id=eq.${companyId}`
+      },
+      (payload) => {
+        console.log('Change received!', payload);
+        refetchData();
+      }
+    )
+    .subscribe();
+    
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [companyId]);
+```
+
+### 6. File Uploads (Product Images, Attachments)
+
+**Upload to Supabase Storage:**
+```typescript
+async function uploadProductImage(file: File, companyId: string) {
+  const fileName = `${companyId}/${Date.now()}_${file.name}`;
+  
+  const { data, error } = await supabase.storage
+    .from('product-images')
+    .upload(fileName, file, {
+      cacheControl: '3600',
+      upsert: false
+    });
+    
+  if (error) throw error;
+  
+  // Get public URL
+  const { data: { publicUrl } } = supabase.storage
+    .from('product-images')
+    .getPublicUrl(fileName);
+    
+  return publicUrl;
+}
+```
+
+**Storage Bucket Structure:**
+```
+product-images/
+  ├── {company_id}/
+  │   ├── {timestamp}_{filename}
+  │   └── ...
+  
+invoices/
+  ├── {company_id}/
+  │   └── {year}/
+  │       └── {invoice_number}.pdf
+```
+
+### 7. Error Handling Strategy
+
+**Unified Error Handler:**
+```typescript
+class APIError extends Error {
+  code: string;
+  statusCode: number;
+  
+  constructor(message: string, code: string, statusCode: number) {
+    super(message);
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
+function handleSupabaseError(error: PostgrestError): APIError {
+  if (error.code === '23505') {
+    return new APIError('Record already exists', 'DUPLICATE', 409);
+  }
+  if (error.code === '23503') {
+    return new APIError('Related record not found', 'NOT_FOUND', 404);
+  }
+  return new APIError(error.message, error.code, 500);
+}
+```
+
+**Component Error Handling:**
+```typescript
+try {
+  await createSalesOrder(orderData);
+  toast.success('Order created successfully');
+  navigate('/sales/orders');
+} catch (error) {
+  const apiError = handleSupabaseError(error);
+  toast.error(apiError.message);
+  console.error('Order creation failed:', apiError);
+}
+```
+
+### 8. Multi-Tenant Data Isolation
+
+**CRITICAL RULES:**
+- **ALWAYS** include `company_id` in WHERE clauses
+- **NEVER** allow cross-company queries
+- **ALWAYS** validate company context before mutations
+
+**Query Example:**
+```typescript
+// ✅ CORRECT
+const { data } = await supabase
+  .from('products')
+  .select('*')
+  .eq('company_id', companyId);
+
+// ❌ WRONG - Missing company filter
+const { data } = await supabase
+  .from('products')
+  .select('*');
+```
+
+**Insert Example:**
+```typescript
+// ✅ CORRECT
+const { data } = await supabase
+  .from('sales_orders')
+  .insert({
+    ...orderData,
+    company_id: companyId,
+    created_by: userId
+  });
+
+// ❌ WRONG - Missing company_id
+const { data } = await supabase
+  .from('sales_orders')
+  .insert(orderData);
+```
+
+### 9. Optimistic Updates
+
+**Pattern for Better UX:**
+```typescript
+async function updateOrderStatus(orderId: string, status: string) {
+  // 1. Optimistically update UI
+  setOrders(prev => prev.map(order => 
+    order.id === orderId ? { ...order, status } : order
+  ));
+  
+  try {
+    // 2. Send update to backend
+    const { error } = await supabase
+      .from('sales_orders')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', orderId)
+      .eq('company_id', companyId);
+      
+    if (error) throw error;
+  } catch (error) {
+    // 3. Revert on error
+    refetchOrders();
+    toast.error('Failed to update status');
+  }
+}
+```
+
+### 10. Pagination & Infinite Scroll
+
+**Cursor-Based Pagination:**
+```typescript
+function useInfiniteOrders() {
+  const { companyId } = useAuth();
+  const [page, setPage] = useState(0);
+  const LIMIT = 20;
+  
+  const { data, hasNextPage } = useInfiniteQuery({
+    queryKey: ['orders', companyId],
+    queryFn: async ({ pageParam = 0 }) => {
+      const { data, error } = await supabase
+        .from('sales_orders')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .range(pageParam * LIMIT, (pageParam + 1) * LIMIT - 1);
+        
+      if (error) throw error;
+      return { data, nextPage: data.length === LIMIT ? pageParam + 1 : null };
+    },
+    getNextPageParam: (lastPage) => lastPage.nextPage,
+  });
+  
+  return { data, hasNextPage };
+}
+```
+
+### 11. Module KPI Fetching
+
+**Centralized KPI Service:**
+```typescript
+async function fetchModuleKPIs(moduleKey: string, companyId: string) {
+  const today = new Date().toISOString().split('T')[0];
+  
+  switch (moduleKey) {
+    case 'sales':
+      const [todayOrders, outstandingInvoices, revenue] = await Promise.all([
+        supabase.from('sales_orders')
+          .select('*', { count: 'exact', head: true })
+          .eq('company_id', companyId)
+          .gte('created_at', today),
+          
+        supabase.from('invoices')
+          .select('*', { count: 'exact', head: true })
+          .eq('company_id', companyId)
+          .eq('status', 'pending'),
+          
+        supabase.from('sales_orders')
+          .select('total_amount')
+          .eq('company_id', companyId)
+          .gte('created_at', getMonthStart())
+      ]);
+      
+      return {
+        todayOrders: todayOrders.count,
+        outstandingInvoices: outstandingInvoices.count,
+        monthlyRevenue: revenue.data.reduce((sum, o) => sum + o.total_amount, 0)
+      };
+      
+    // ... other modules
+  }
+}
+```
+
+### 12. Cache Invalidation
+
+**When to Invalidate:**
+```typescript
+import { useQueryClient } from '@tanstack/react-query';
+
+function useCreateOrder() {
+  const queryClient = useQueryClient();
+  const { companyId } = useAuth();
+  
+  return useMutation({
+    mutationFn: createOrder,
+    onSuccess: () => {
+      // Invalidate related queries
+      queryClient.invalidateQueries(['sales-orders', companyId]);
+      queryClient.invalidateQueries(['module-kpis', 'sales']);
+      queryClient.invalidateQueries(['dashboard-stats', companyId]);
+    }
+  });
+}
+```
+
+### 13. WebSocket Events (Optional - Advanced)
+
+**For Real-Time Notifications:**
+```typescript
+useEffect(() => {
+  const channel = supabase
+    .channel(`company-${companyId}`)
+    .on('broadcast', { event: 'new-order' }, (payload) => {
+      toast.info(`New order: ${payload.orderNumber}`);
+      refetchOrders();
+    })
+    .subscribe();
+    
+  return () => supabase.removeChannel(channel);
+}, [companyId]);
+```
+
+## Context Variables
+
+- Frontend: **React 18 + TypeScript + Vite**
+- Backend: **Supabase (Postgres + Auth + Storage + Realtime)**
+- Multi-tenancy: **Subdomain-based with company_id isolation**
+- Auth: **Supabase Auth with JWT**
+- Permissions: **RBAC with granular module permissions**
+- State Management: **React Context + React Query**
+- Real-time: **Supabase Realtime subscriptions**
+
+## Security Checklist
+
+- ✅ All queries include `company_id` filter
+- ✅ RLS policies enforce company isolation
+- ✅ Frontend permission checks prevent UI access
+- ✅ Backend RLS prevents data access
+- ✅ File uploads scoped to company
+- ✅ RPC functions validate company access
+- ✅ Sensitive data never logged to console
+- ✅ API errors don't expose internal details
+
+## Performance Best Practices
+
+- ✅ Use React Query for caching
+- ✅ Implement pagination on large lists
+- ✅ Use select() to fetch only needed columns
+- ✅ Create indexes on frequently queried fields
+- ✅ Batch related queries with Promise.all()
+- ✅ Use real-time selectively (not everywhere)
+- ✅ Implement optimistic updates for mutations
+- ✅ Lazy load modules and heavy components
+
+## Common Integration Pitfalls
+
+- ❌ Forgetting company_id in queries
+- ❌ Trusting frontend permission checks only
+- ❌ Not handling loading/error states
+- ❌ Over-fetching data with select('*')
+- ❌ Missing query invalidation after mutations
+- ❌ Not cleaning up subscriptions
+- ❌ Hardcoding company IDs
+- ❌ Exposing sensitive data in error messages
+- ❌ Not using TypeScript types for API responses
+- ❌ Skipping optimistic updates for better UX
+
+## Testing Integration Points
+
+- [ ] User can only see data for their company
+- [ ] Permission checks work in UI and database
+- [ ] Unauthorized access is properly blocked
+- [ ] Real-time updates work correctly
+- [ ] File uploads save to correct company folder
+- [ ] Cache invalidation works after mutations
+- [ ] Error handling provides user-friendly messages
+- [ ] Loading states display correctly
+- [ ] Pagination doesn't skip records
+- [ ] Multi-role users get merged permissions

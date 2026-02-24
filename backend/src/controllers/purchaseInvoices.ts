@@ -35,6 +35,52 @@ const generateInvoiceNumber = async (companyId: string): Promise<string> => {
 };
 
 /**
+ * Create a corresponding purchase order row in public.orders when a purchase
+ * invoice is generated. This is the \"final\" purchase order used for
+ * unified reporting across sales and purchase flows.
+ */
+const createPurchaseOrderFromInvoiceOrderRow = async (params: {
+  companyId: string;
+  userId: string;
+  goodsReceipt: any;
+  purchaseInvoice: any;
+}) => {
+  const { companyId, userId, goodsReceipt, purchaseInvoice } = params;
+
+  const adminClient = supabaseAdmin || supabase;
+
+  const { error } = await adminClient
+    .from('orders')
+    .insert({
+      user_id: userId,
+      company_id: companyId,
+      status: 'pending',
+      // Explicit purchase order semantics
+      order_type: 'purchase',
+      order_source: 'internal',
+      fulfillment_type: 'delivery',
+      // Map from invoice
+      total_amount: purchaseInvoice.total_amount,
+      shipping_address_id: null,
+      billing_address_id: null,
+      payment_method: null,
+      payment_status: 'pending',
+      notes:
+        purchaseInvoice.notes ||
+        `Purchase invoice ${purchaseInvoice.invoice_number} for GRN ${goodsReceipt.grn_number}`,
+      // Use GRN warehouse as outlet
+      outlet_id: goodsReceipt.warehouse_id,
+      inventory_updated: true,
+    })
+    .single();
+
+  if (error) {
+    console.error('Error creating purchase order entry from invoice:', error);
+    throw new ApiError(500, 'Failed to create purchase order from invoice');
+  }
+};
+
+/**
  * Auto-create invoice from completed GRN
  * Pre-populates invoice with GRN data
  */
@@ -169,9 +215,17 @@ export const createInvoiceFromGRN = async (req: Request, res: Response, next: Ne
     }
 
     // Create invoice items from GRN items
+    // Only use accepted quantity for invoicing (rejected items should not be invoiced)
     if (grnItems && grnItems.length > 0) {
       const invoiceItems = grnItems.map((grnItem: any) => {
-        const quantity = grnItem.quantity_accepted || grnItem.quantity_received || 0;
+        // Use only accepted quantity - rejected items should not be invoiced
+        const quantity = grnItem.quantity_accepted || 0;
+        
+        if (quantity <= 0) {
+          // Skip items with no accepted quantity
+          return null;
+        }
+        
         const unitPrice = grnItem.unit_price || 0;
         const taxPercentage = grnItem.tax_percentage || 0;
         const taxAmount = (quantity * unitPrice * taxPercentage) / 100;
@@ -192,7 +246,7 @@ export const createInvoiceFromGRN = async (req: Request, res: Response, next: Ne
           product_code: grnItem.product_code || '',
           company_id: req.companyId
         };
-      });
+      }).filter((item: any) => item !== null); // Remove null items (those with no accepted quantity)
 
       const { error: itemsError } = await adminClient
         .schema('procurement')
@@ -204,6 +258,14 @@ export const createInvoiceFromGRN = async (req: Request, res: Response, next: Ne
         // Don't fail the invoice creation, but log the error
       }
     }
+
+    // Also create a corresponding purchase order row in public.orders
+    await createPurchaseOrderFromInvoiceOrderRow({
+      companyId: req.companyId,
+      userId,
+      goodsReceipt,
+      purchaseInvoice,
+    });
 
     res.status(201).json({
       success: true,
@@ -359,6 +421,14 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
         throw new ApiError(500, `Failed to create invoice items: ${itemsError.message}`);
       }
     }
+
+    // After invoice creation, also create a corresponding purchase order row
+    await createPurchaseOrderFromInvoiceOrderRow({
+      companyId: req.companyId,
+      userId,
+      goodsReceipt,
+      purchaseInvoice,
+    });
 
     // Return the created invoice (relations can be fetched via getPurchaseInvoiceById if needed)
     res.status(201).json({

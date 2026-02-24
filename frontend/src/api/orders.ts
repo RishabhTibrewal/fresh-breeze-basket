@@ -63,6 +63,11 @@ export interface Order {
     country: string;
   };
   user_id?: string;
+  // Explicit order classification fields (may be undefined for older data)
+  order_type?: 'sales' | 'purchase' | 'return';
+  order_source?: 'ecommerce' | 'pos' | 'sales' | 'internal';
+  fulfillment_type?: 'delivery' | 'pickup' | 'cash_counter';
+  original_order_id?: string;
 }
 
 export interface CreateOrderData {
@@ -91,6 +96,19 @@ export interface CreateOrderData {
   billing_address_id: string;
   payment_method?: string;
   total_amount: number;
+  // Optional explicit fields – backend will infer sane defaults if omitted
+  fulfillment_type?: 'delivery' | 'pickup';
+  order_source?: 'ecommerce' | 'pos' | 'sales';
+}
+
+export interface CreateReturnOrderData {
+  original_order_id: string;
+  items: {
+    product_id: string;
+    variant_id?: string;
+    quantity: number;
+  }[];
+  reason?: string;
 }
 
 export interface OrdersResponse {
@@ -100,7 +118,17 @@ export interface OrdersResponse {
 }
 
 export const ordersService = {
-  async getAll(params?: { page?: number; limit?: number }): Promise<OrdersResponse> {
+  async getAll(params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    order_type?: 'sales' | 'purchase' | 'return';
+    order_source?: 'ecommerce' | 'pos' | 'sales' | 'internal';
+    fulfillment_type?: 'delivery' | 'pickup' | 'cash_counter';
+    original_order_id?: string;
+    from_date?: string;
+    to_date?: string;
+  }): Promise<OrdersResponse> {
     const { data } = await apiClient.get<OrdersResponse>('/orders', { params });
     
     // Added logging to debug the API response structure
@@ -322,5 +350,14 @@ export const ordersService = {
   async getSalesAnalytics(period: number = 30) {
     const { data } = await apiClient.get(`/orders/sales/analytics?period=${period}`);
     return data;
+  },
+
+  // Create a return order
+  async createReturn(orderData: CreateReturnOrderData): Promise<Order> {
+    const { data } = await apiClient.post<{ success: boolean, data: Order }>(
+      '/orders/returns', 
+      orderData
+    );
+    return data.data;
   }
 }; 

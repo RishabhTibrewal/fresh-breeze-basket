@@ -26,7 +26,7 @@ interface Customer {
 export const getCustomers = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
-    const userRole = req.user?.role;
+    const userRoles = req.user?.roles || [];
 
     if (!req.companyId) {
       throw new AppError('Company context is required', 400);
@@ -38,8 +38,11 @@ export const getCustomers = async (req: Request, res: Response) => {
       .select('*')
       .eq('company_id', req.companyId);
 
-    // If user is a sales executive, only show their customers
-    if (userRole === 'sales' && userId) {
+    // If user is a sales executive (and not admin), only show their customers
+    const isSales = userRoles.includes('sales');
+    const isAdmin = userRoles.includes('admin');
+    
+    if (isSales && !isAdmin && userId) {
       query = query.eq('sales_executive_id', userId);
     }
     // Admins can see all customers for their company
@@ -667,15 +670,27 @@ export const deleteCustomer = async (req: Request, res: Response) => {
 async function addCreditPeriod(req: Request, res: Response) {
   try {
     const { customer_id, amount, period, start_date, end_date, description } = req.body;
-    const sales_executive_id = req.user?.id;
+    const userId = req.user?.id;
+    const userRoles = req.user?.roles || [];
+    const isAdmin = userRoles.includes('admin');
+    const isSales = userRoles.includes('sales');
+    
+    if (!isAdmin && !isSales) {
+      return res.status(403).json({ error: 'Admin or Sales access required' });
+    }
 
-    // Verify the customer belongs to this sales executive and load credit info
-    const { data: customer, error: customerError } = await supabase
+    // Verify the customer exists and load credit info
+    let customerQuery = supabase
       .from('customers')
-      .select('id, credit_limit, current_credit')
-      .eq('id', customer_id)
-      .eq('sales_executive_id', sales_executive_id)
-      .single();
+      .select('id, credit_limit, current_credit, sales_executive_id')
+      .eq('id', customer_id);
+    
+    // Filter by sales_executive_id only if user is sales (not admin)
+    if (isSales && !isAdmin) {
+      customerQuery = customerQuery.eq('sales_executive_id', userId);
+    }
+    
+    const { data: customer, error: customerError } = await customerQuery.single();
 
     if (customerError || !customer) {
       throw customerError || new Error('Customer not found');
@@ -736,9 +751,16 @@ async function addCreditPeriod(req: Request, res: Response) {
 async function getCustomerCreditStatus(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const sales_executive_id = req.user?.id;
+    const userId = req.user?.id;
+    const userRoles = req.user?.roles || [];
+    const isAdmin = userRoles.includes('admin');
+    const isSales = userRoles.includes('sales');
+    
+    if (!isAdmin && !isSales) {
+      return res.status(403).json({ error: 'Admin or Sales access required' });
+    }
 
-    const { data: creditStatus, error } = await supabase
+    let query = supabase
       .from('customers')
       .select(`
         id,
@@ -757,9 +779,14 @@ async function getCustomerCreditStatus(req: Request, res: Response) {
           created_at
         )
       `)
-      .eq('id', id)
-      .eq('sales_executive_id', sales_executive_id)
-      .single();
+      .eq('id', id);
+    
+    // Filter by sales_executive_id only if user is sales (not admin)
+    if (isSales && !isAdmin) {
+      query = query.eq('sales_executive_id', userId);
+    }
+    
+    const { data: creditStatus, error } = await query.single();
 
     if (error) throw error;
 
@@ -1138,10 +1165,17 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
       throw new AppError('Company context is required', 400);
     }
     
-    const sales_executive_id = req.user?.id;
+    const userId = req.user?.id;
+    const userRoles = req.user?.roles || [];
+    const isAdmin = userRoles.includes('admin');
+    const isSales = userRoles.includes('sales');
+    
+    if (!isAdmin && !isSales) {
+      throw new AppError('Admin or Sales access required', 403);
+    }
 
     // Get all customers with their credit information (filtered by company_id)
-    const { data: customers, error } = await supabase
+    let query = supabase
       .from('customers')
       .select(`
         id,
@@ -1152,9 +1186,16 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
         current_credit,
         credit_period_days
       `)
-      .eq('sales_executive_id', sales_executive_id)
-      .eq('company_id', req.companyId)
-      .order('name');
+      .eq('company_id', req.companyId);
+    
+    // Filter by sales_executive_id only if user is sales (not admin)
+    if (isSales && !isAdmin) {
+      query = query.eq('sales_executive_id', userId);
+    }
+    
+    query = query.order('name');
+    
+    const { data: customers, error } = await query;
 
     if (error) {
       throw new AppError(`Error fetching customers: ${error.message}`, 500);
