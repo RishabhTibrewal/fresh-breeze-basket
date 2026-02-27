@@ -33,7 +33,7 @@ export const getCustomers = async (req: Request, res: Response) => {
     }
 
     // Build query - filter by company_id and sales_executive_id if user is a sales executive
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('customers')
       .select('*')
       .eq('company_id', req.companyId);
@@ -52,7 +52,7 @@ export const getCustomers = async (req: Request, res: Response) => {
     if (error) throw error;
 
     // Get all orders to calculate statistics (filtered by company_id)
-    const { data: allOrders, error: ordersError } = await supabase
+    const { data: allOrders, error: ordersError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select('id, user_id, total_amount, created_at, status')
       .eq('company_id', req.companyId);
@@ -113,7 +113,7 @@ export const getCustomerById = async (req: Request, res: Response) => {
     const { id } = req.params;
 
     // First, get the customer details
-    const { data: customer, error } = await supabase
+    const { data: customer, error } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('*')
       .eq('id', id)
@@ -124,7 +124,7 @@ export const getCustomerById = async (req: Request, res: Response) => {
     if (!customer) throw new AppError('Customer not found', 404);
 
     // Then separately get the order information (filtered by company_id)
-    const { data: orders, error: ordersError } = await supabase
+    const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select('id, total_amount, status')
       .eq('user_id', customer.user_id)
@@ -135,7 +135,7 @@ export const getCustomerById = async (req: Request, res: Response) => {
     }
 
     // Get credit periods information (filtered by company_id)
-    const { data: creditPeriods, error: creditError } = await supabase
+    const { data: creditPeriods, error: creditError } = await (supabaseAdmin || supabase)
       .from('credit_periods')
       .select('*')
       .eq('customer_id', id)
@@ -575,7 +575,7 @@ export const createCustomer = async (req: Request, res: Response) => {
     console.log('Customer payload:', customerPayload);
     
     // Create customer directly with the user_id
-    const { data: customer, error } = await supabase
+    const { data: customer, error } = await (supabaseAdmin || supabase)
       .from('customers')
       .insert(customerPayload)
       .select()
@@ -615,7 +615,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
       throw new AppError('Company context is required', 400);
     }
 
-    const { data: customer, error } = await supabase
+    const { data: customer, error } = await (supabaseAdmin || supabase)
       .from('customers')
       .update({
         name,
@@ -651,7 +651,7 @@ export const deleteCustomer = async (req: Request, res: Response) => {
       throw new AppError('Company context is required', 400);
     }
 
-    const { error } = await supabase
+    const { error } = await (supabaseAdmin || supabase)
       .from('customers')
       .delete()
       .eq('id', id)
@@ -680,7 +680,7 @@ async function addCreditPeriod(req: Request, res: Response) {
     }
 
     // Verify the customer exists and load credit info
-    let customerQuery = supabase
+    let customerQuery = (supabaseAdmin || supabase)
       .from('customers')
       .select('id, credit_limit, current_credit, sales_executive_id')
       .eq('id', customer_id);
@@ -715,7 +715,7 @@ async function addCreditPeriod(req: Request, res: Response) {
     }
 
     // Add credit period
-    const { data: creditPeriod, error: creditError } = await supabase
+    const { data: creditPeriod, error: creditError } = await (supabaseAdmin || supabase)
       .from('credit_periods')
       .insert({
         customer_id,
@@ -733,7 +733,7 @@ async function addCreditPeriod(req: Request, res: Response) {
 
     // Update customer's current credit (increment, don't reset)
     const newCurrentCredit = projectedCredit;
-    const { error: updateError } = await supabase
+    const { error: updateError } = await (supabaseAdmin || supabase)
       .from('customers')
       .update({ current_credit: newCurrentCredit })
       .eq('id', customer_id);
@@ -760,7 +760,7 @@ async function getCustomerCreditStatus(req: Request, res: Response) {
       return res.status(403).json({ error: 'Admin or Sales access required' });
     }
 
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('customers')
       .select(`
         id,
@@ -804,7 +804,7 @@ async function addCustomerAddress(req: Request, res: Response) {
     const sales_executive_id = req.user?.id;
 
     // Verify the customer belongs to this sales executive
-    const { data: customer, error: customerError } = await supabase
+    const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('id')
       .eq('id', customer_id)
@@ -813,7 +813,7 @@ async function addCustomerAddress(req: Request, res: Response) {
 
     if (customerError) throw customerError;
 
-    const { data: address, error: addressError } = await supabase
+    const { data: address, error: addressError } = await (supabaseAdmin || supabase)
       .from('addresses')
       .insert({
         user_id: customer_id,
@@ -904,7 +904,7 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
       // If user already exists, verify password and link to company
       if (createUserError.code === 'email_exists' || createUserError.message?.includes('already exists')) {
         console.log('User already exists, verifying password...');
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        const { data: signInData, error: signInError } = await (supabaseAdmin || supabase).auth.signInWithPassword({
           email,
           password
         });
@@ -1090,7 +1090,7 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
     }
     
     // First, get the customer details to get the user_id
-    const { data: customer, error: customerError } = await supabase
+    const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('user_id')
       .eq('id', customerId)
@@ -1120,7 +1120,7 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
     };
     
     // Create the address record
-    const { data: address, error: addressError } = await supabase
+    const { data: address, error: addressError } = await (supabaseAdmin || supabase)
       .from('addresses')
       .insert([newAddress])
       .select('*')
@@ -1136,7 +1136,7 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
     
     // If this address is marked as default, update other addresses of the same type
     if (address.is_default) {
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('addresses')
         .update({ is_default: false })
         .eq('user_id', customer.user_id)
@@ -1175,7 +1175,7 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
     }
 
     // Get all customers with their credit information (filtered by company_id)
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('customers')
       .select(`
         id,
@@ -1205,7 +1205,7 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
     const transformedCustomers = await Promise.all(
       customers.map(async (customer) => {
         // Get all credit periods for this customer (filtered by company_id)
-        const { data: creditPeriods, error: creditError } = await supabase
+        const { data: creditPeriods, error: creditError } = await (supabaseAdmin || supabase)
           .from('credit_periods')
           .select('amount, end_date, start_date, period')
           .eq('customer_id', customer.id)

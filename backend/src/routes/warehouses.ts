@@ -17,8 +17,8 @@ const router = express.Router();
 router.get('/', protect, getAllWarehouses);
 router.get('/:warehouseId', protect, getWarehouseById);
 router.get('/:warehouseId/inventory', protect, getWarehouseInventory);
-router.get('/products/:productId/stock', protect, getProductStockAcrossWarehouses);
-router.post('/products/bulk-stock', protect, getBulkProductStock);
+router.get('/products/:productId/stock', getProductStockAcrossWarehouses);
+router.post('/products/bulk-stock', getBulkProductStock);
 
 // Admin only routes
 router.post('/', protect, adminOnly, createWarehouse);

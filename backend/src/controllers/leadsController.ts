@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../db/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
 
 // Lead stages enum
@@ -32,7 +32,7 @@ export const getLeads = async (req: Request, res: Response) => {
     
     const { stage, priority, source, search } = req.query;
 
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('leads')
       .select('*')
       .eq('company_id', req.companyId)
@@ -101,7 +101,7 @@ export const getLeadById = async (req: Request, res: Response) => {
       throw new AppError('Sales executive ID is required', 400);
     }
 
-    const { data: lead, error } = await supabase
+    const { data: lead, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('*')
       .eq('id', id)
@@ -197,7 +197,7 @@ export const createLead = async (req: Request, res: Response) => {
       throw new AppError(`Invalid source. Must be one of: ${LEAD_SOURCES.join(', ')}`, 400);
     }
 
-    const { data: lead, error } = await supabase
+    const { data: lead, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .insert({
         sales_executive_id,
@@ -294,7 +294,7 @@ export const updateLead = async (req: Request, res: Response) => {
     } = req.body;
 
     // Check if lead exists and belongs to the sales executive (filtered by company_id)
-    const { data: existingLead, error: checkError } = await supabase
+    const { data: existingLead, error: checkError } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('id, sales_executive_id, converted_at, lost_at')
       .eq('id', id)
@@ -361,7 +361,7 @@ export const updateLead = async (req: Request, res: Response) => {
     // Handle note appending (not overwriting)
     if (append_note && typeof append_note === 'string' && append_note.trim()) {
       // Get current notes
-      const { data: currentLead, error: currentError } = await supabase
+      const { data: currentLead, error: currentError } = await (supabaseAdmin || supabase)
         .from('leads')
         .select('notes')
         .eq('id', id)
@@ -386,7 +386,7 @@ export const updateLead = async (req: Request, res: Response) => {
       updateData.notes = notes;
     }
 
-    const { data: lead, error } = await supabase
+    const { data: lead, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .update(updateData)
       .eq('id', id)
@@ -432,7 +432,7 @@ export const deleteLead = async (req: Request, res: Response) => {
     }
 
     // Check if lead exists and belongs to the sales executive (filtered by company_id)
-    const { data: existingLead, error: checkError } = await supabase
+    const { data: existingLead, error: checkError } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('id, sales_executive_id')
       .eq('id', id)
@@ -444,7 +444,7 @@ export const deleteLead = async (req: Request, res: Response) => {
       throw new AppError('Lead not found or access denied', 404);
     }
 
-    const { error } = await supabase
+    const { error } = await (supabaseAdmin || supabase)
       .from('leads')
       .delete()
       .eq('id', id)
@@ -490,7 +490,7 @@ export const logCall = async (req: Request, res: Response) => {
     }
 
     // Check if lead exists and belongs to the sales executive (filtered by company_id)
-    const { data: existingLead, error: checkError } = await supabase
+    const { data: existingLead, error: checkError } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('id, sales_executive_id, notes')
       .eq('id', id)
@@ -522,7 +522,7 @@ export const logCall = async (req: Request, res: Response) => {
         : newNote;
     }
 
-    const { data: lead, error } = await supabase
+    const { data: lead, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .update(updateData)
       .eq('id', id)
@@ -574,7 +574,7 @@ export const rescheduleFollowUp = async (req: Request, res: Response) => {
     }
 
     // Check if lead exists and belongs to the sales executive (filtered by company_id)
-    const { data: existingLead, error: checkError } = await supabase
+    const { data: existingLead, error: checkError } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('id, sales_executive_id')
       .eq('id', id)
@@ -586,7 +586,7 @@ export const rescheduleFollowUp = async (req: Request, res: Response) => {
       throw new AppError('Lead not found or access denied', 404);
     }
 
-    const { data: lead, error } = await supabase
+    const { data: lead, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .update({ next_follow_up })
       .eq('id', id)
@@ -633,7 +633,7 @@ export const markAsWon = async (req: Request, res: Response) => {
     }
 
     // Check if lead exists and belongs to the sales executive (filtered by company_id)
-    const { data: existingLead, error: checkError } = await supabase
+    const { data: existingLead, error: checkError } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('id, sales_executive_id, converted_at')
       .eq('id', id)
@@ -654,7 +654,7 @@ export const markAsWon = async (req: Request, res: Response) => {
       updateData.converted_at = new Date().toISOString();
     }
 
-    const { data: lead, error } = await supabase
+    const { data: lead, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .update(updateData)
       .eq('id', id)
@@ -700,7 +700,7 @@ export const getLeadStats = async (req: Request, res: Response) => {
       throw new AppError('Sales executive ID is required', 400);
     }
 
-    const { data: leads, error } = await supabase
+    const { data: leads, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('stage, priority, estimated_value')
       .eq('sales_executive_id', sales_executive_id)
@@ -775,7 +775,7 @@ export const getFollowUpReminders = async (req: Request, res: Response) => {
     today.setHours(0, 0, 0, 0);
     const todayISO = today.toISOString();
 
-    const { data: leads, error } = await supabase
+    const { data: leads, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('*')
       .eq('sales_executive_id', sales_executive_id)
@@ -837,7 +837,7 @@ export const getAgingLeads = async (req: Request, res: Response) => {
     // Get all leads that haven't been updated in the last X days and are not won/lost
     // Note: This uses updated_at as a proxy for when the stage was last changed.
     // For more accuracy, consider adding a stage_updated_at field.
-    const { data: leads, error } = await supabase
+    const { data: leads, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('*')
       .eq('sales_executive_id', sales_executive_id)

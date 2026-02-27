@@ -13,7 +13,7 @@ import { uploadsService, ProductImageUploadResponse } from '@/api/uploads';
 import { warehousesService, Warehouse } from '@/api/warehouses';
 import { pricesService } from '@/api/prices';
 import apiClient from '@/lib/apiClient';
-import { inventoryService } from '@/api/inventory';
+import { inventoryService, ProductWarehouseStock } from '@/api/inventory';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -168,6 +168,16 @@ export default function VariantForm() {
   const { data: warehouses = [] } = useQuery<Warehouse[]>({
     queryKey: ['warehouses'],
     queryFn: () => warehousesService.getAll(true), // Only active warehouses
+  });
+
+  // Load existing stock for this product+variant across warehouses
+  const { data: productInventory } = useQuery<{
+    warehouses: ProductWarehouseStock[];
+    total_stock: number;
+  }>({
+    queryKey: ['product-inventory', actualProductId],
+    queryFn: () => inventoryService.getInventoryByProductId(actualProductId!),
+    enabled: !!actualProductId,
   });
 
   // Fetch existing variant images in edit mode
@@ -1196,82 +1206,119 @@ export default function VariantForm() {
           </Card>
 
           {/* Stock Management */}
-          { (
-            <Card>
-              <CardHeader>
-                <CardTitle>{isEditMode ? 'Update Stock' : 'Initial Stock'}</CardTitle>
-                <FormDescription>
-                  {isEditMode 
-                    ? 'Update stock quantity for this variant in a warehouse'
-                    : 'Optionally set initial stock for this variant in a warehouse'}
-                </FormDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="warehouse_id"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Warehouse</FormLabel>
-                      <Select 
-                        onValueChange={(value) => field.onChange(value === 'none' ? null : value)} 
-                        value={field.value || 'none'}
+          <Card>
+            <CardHeader>
+              <CardTitle>Stock by Warehouse</CardTitle>
+              <FormDescription>
+                View current stock for this product across warehouses and optionally adjust stock for one warehouse.
+                For bulk or cross‑warehouse movements, use the Stock Adjustment / Stock Transfer screens.
+              </FormDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Existing stock table */}
+              {productInventory && productInventory.warehouses.length > 0 ? (
+                <div className="border rounded-md overflow-hidden">
+                  <div className="grid grid-cols-3 bg-muted px-3 py-2 text-xs font-medium">
+                    <div>Warehouse</div>
+                    <div className="text-center">Current Stock</div>
+                    <div className="text-right">Location</div>
+                  </div>
+                  {productInventory.warehouses.map((row) => {
+                    const warehouse = warehouses.find(w => w.id === row.warehouse_id);
+                    return (
+                      <div
+                        key={`${row.warehouse_id}-${row.variant_id || 'all'}`}
+                        className="grid grid-cols-3 px-3 py-2 text-xs border-t"
                       >
-                        <FormControl>
-                          <SelectTrigger className={isMobile ? 'h-12 text-base' : ''}>
-                            <SelectValue placeholder="Select warehouse (optional)" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="none">No Warehouse</SelectItem>
-                          {warehouses.map((warehouse) => (
-                            <SelectItem key={warehouse.id} value={warehouse.id}>
-                              {warehouse.name} {warehouse.code && `(${warehouse.code})`}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                        <div>
+                          <div className="font-medium">
+                            {warehouse?.name || row.warehouses?.name || 'Unknown'}
+                          </div>
+                          <div className="text-muted-foreground">
+                            {warehouse?.code || row.warehouses?.code || row.warehouse_id}
+                          </div>
+                        </div>
+                        <div className="text-center font-semibold">
+                          {row.stock_count ?? 0}
+                        </div>
+                        <div className="text-right text-muted-foreground">
+                          {row.location || '-'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No stock records found yet for this product.
+                </p>
+              )}
 
-                <FormField
-                  control={form.control}
-                  name="initial_stock"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Initial Stock Quantity</FormLabel>
+              {/* Single‑warehouse quick adjust (reuses existing fields) */}
+              <FormField
+                control={form.control}
+                name="warehouse_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Adjust Stock in Warehouse</FormLabel>
+                    <Select 
+                      onValueChange={(value) => field.onChange(value === 'none' ? null : value)} 
+                      value={field.value || 'none'}
+                    >
                       <FormControl>
-                        <Input
-                          type="number"
-                          min="0"
-                          step="1"
-                          placeholder="0"
-                          {...field}
-                          value={field.value ?? ''}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            // Ensure integer value
-                            const intValue = value === '' ? null : Math.floor(parseFloat(value) || 0);
-                            field.onChange(intValue);
-                          }}
-                          className={isMobile ? 'h-12 text-base' : ''}
-                          disabled={!form.watch('warehouse_id') || form.watch('warehouse_id') === 'none'}
-                        />
+                        <SelectTrigger className={isMobile ? 'h-12 text-base' : ''}>
+                          <SelectValue placeholder="Select warehouse (optional)" />
+                        </SelectTrigger>
                       </FormControl>
-                      <FormDescription>
-                        {form.watch('warehouse_id') && form.watch('warehouse_id') !== 'none'
-                          ? 'Enter the initial stock quantity for this warehouse'
-                          : 'Select a warehouse first to set initial stock'}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </CardContent>
-            </Card>
-          )}
+                      <SelectContent>
+                        <SelectItem value="none">No Warehouse</SelectItem>
+                        {warehouses.map((warehouse) => (
+                          <SelectItem key={warehouse.id} value={warehouse.id}>
+                            {warehouse.name} {warehouse.code && `(${warehouse.code})`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="initial_stock"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Set Stock Quantity (for selected warehouse)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="0"
+                        {...field}
+                        value={field.value ?? ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          // Ensure integer value
+                          const intValue = value === '' ? null : Math.floor(parseFloat(value) || 0);
+                          field.onChange(intValue);
+                        }}
+                        className={isMobile ? 'h-12 text-base' : ''}
+                        disabled={!form.watch('warehouse_id') || form.watch('warehouse_id') === 'none'}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {form.watch('warehouse_id') && form.watch('warehouse_id') !== 'none'
+                        ? 'Enter the desired stock count. A stock movement will be recorded to reconcile to this value.'
+                        : 'Select a warehouse above to adjust its stock.'}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>

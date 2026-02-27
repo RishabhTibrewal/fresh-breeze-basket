@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError, ValidationError } from '../middleware/error';
 
 /**
@@ -45,7 +45,7 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
     }
 
     // Create supplier
-    const { data: supplier, error: supplierError } = await supabase
+    const { data: supplier, error: supplierError } = await (supabaseAdmin || supabase)
       .from('suppliers')
       .insert({
         supplier_code,
@@ -98,7 +98,7 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
         company_id: req.companyId
       }));
 
-      const { error: bankError } = await supabase
+      const { error: bankError } = await (supabaseAdmin || supabase)
         .from('supplier_bank_accounts')
         .insert(bankAccountsData);
 
@@ -109,7 +109,7 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
     }
 
     // Fetch supplier with bank accounts
-    const { data: supplierWithBanks, error: fetchError } = await supabase
+    const { data: supplierWithBanks, error: fetchError } = await (supabaseAdmin || supabase)
       .from('suppliers')
       .select(`
         *,
@@ -143,7 +143,7 @@ export const getSuppliers = async (req: Request, res: Response, next: NextFuncti
       throw new ApiError(400, 'Company context is required');
     }
 
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('suppliers')
       .select(`
         *,
@@ -188,7 +188,7 @@ export const getSupplierById = async (req: Request, res: Response, next: NextFun
       throw new ApiError(400, 'Company context is required');
     }
 
-    const { data: supplier, error } = await supabase
+    const { data: supplier, error } = await (supabaseAdmin || supabase)
       .from('suppliers')
       .select(`
         *,
@@ -251,7 +251,7 @@ export const updateSupplier = async (req: Request, res: Response, next: NextFunc
     }
 
     // Update supplier
-    const { data: supplier, error: updateError } = await supabase
+    const { data: supplier, error: updateError } = await (supabaseAdmin || supabase)
       .from('suppliers')
       .update({
         supplier_code,
@@ -293,7 +293,7 @@ export const updateSupplier = async (req: Request, res: Response, next: NextFunc
     // Update bank accounts if provided
     if (bank_accounts && Array.isArray(bank_accounts)) {
       // Delete existing bank accounts
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('supplier_bank_accounts')
         .delete()
         .eq('supplier_id', id)
@@ -316,7 +316,7 @@ export const updateSupplier = async (req: Request, res: Response, next: NextFunc
           company_id: req.companyId
         }));
 
-        const { error: bankError } = await supabase
+        const { error: bankError } = await (supabaseAdmin || supabase)
           .from('supplier_bank_accounts')
           .insert(bankAccountsData);
 
@@ -328,7 +328,7 @@ export const updateSupplier = async (req: Request, res: Response, next: NextFunc
     }
 
     // Fetch supplier with bank accounts
-    const { data: supplierWithBanks, error: fetchError } = await supabase
+    const { data: supplierWithBanks, error: fetchError } = await (supabaseAdmin || supabase)
       .from('suppliers')
       .select(`
         *,
@@ -362,7 +362,7 @@ export const deleteSupplier = async (req: Request, res: Response, next: NextFunc
       throw new ApiError(400, 'Company context is required');
     }
 
-    const { data: supplier, error } = await supabase
+    const { data: supplier, error } = await (supabaseAdmin || supabase)
       .from('suppliers')
       .update({
         is_active: false,

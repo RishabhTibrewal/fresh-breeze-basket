@@ -80,6 +80,21 @@ interface ApiResponse<T> {
   count?: number;
 }
 
+export interface ProductWarehouseStock {
+  id: string;
+  warehouse_id: string;
+  product_id: string;
+  variant_id: string | null;
+  stock_count: number;
+  location?: string | null;
+  warehouses?: {
+    id: string;
+    name: string;
+    code: string;
+    is_active?: boolean;
+  };
+}
+
 export const inventoryService = {
   /**
    * Adjust stock to reconcile physical count with system count
@@ -113,6 +128,21 @@ export const inventoryService = {
     const { data: response } = await apiClient.get<ApiResponse<StockMovement[]>>('/inventory/movements', {
       params: filters,
     });
+    return response.data;
+  },
+
+  /**
+   * Get inventory for a specific product across all warehouses
+   * Backend: GET /api/inventory/:product_id
+   */
+  async getInventoryByProductId(productId: string): Promise<{
+    warehouses: ProductWarehouseStock[];
+    total_stock: number;
+  }> {
+    const { data: response } = await apiClient.get<ApiResponse<{
+      warehouses: ProductWarehouseStock[];
+      total_stock: number;
+    }>>(`/inventory/${productId}`);
     return response.data;
   },
 };

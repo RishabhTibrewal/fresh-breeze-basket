@@ -105,9 +105,11 @@ apiClient.interceptors.request.use(
     }
     
     // List of public endpoints that don't require authentication
-    const publicEndpoints = ['/categories', '/products'];
-    const isPublicEndpoint = publicEndpoints.some(endpoint => 
-      config.url?.includes(endpoint)
+    // Match URLs that START with /categories or /products (not /warehouses/products/...)
+    const isPublicEndpoint = !!(
+      config.url?.startsWith('/categories') ||
+      config.url?.startsWith('/products') ||
+      config.url?.startsWith('/warehouses/products/')  // stock endpoints are public for e-commerce
     );
     
     // Check localStorage first for token (faster than Supabase API call)
@@ -187,13 +189,32 @@ async function refreshSession() {
   lastRefreshAttempt = now;
   
   try {
-    // Create a new refresh promise
-    refreshPromise = supabase.auth.refreshSession();
-    const { data, error } = await refreshPromise;
+    // Get refresh_token from localStorage or Supabase client (getSession reads from localStorage, no network call)
+    const { data: { session } } = await supabase.auth.getSession();
+    const refreshToken = session?.refresh_token || localStorage.getItem('supabase_refresh_token');
+    
+    if (!refreshToken) {
+      console.error('No refresh token available');
+      // Clear session and redirect to auth
+      localStorage.removeItem('supabase_token');
+      localStorage.removeItem('supabase_refresh_token');
+      if (typeof window !== 'undefined' && !isRedirectingToAuth) {
+        isRedirectingToAuth = true;
+        setTimeout(() => {
+          window.location.href = '/auth';
+          isRedirectingToAuth = false;
+        }, 300);
+      }
+      return null;
+    }
+    
+    // Create a new refresh promise - call backend refresh endpoint
+    refreshPromise = apiClient.post('/auth/refresh', { refresh_token: refreshToken });
+    const { data: responseData, error } = await refreshPromise;
     
     if (error) {
       // Handle rate limit errors gracefully
-      if (error.message?.includes('rate limit') || error.status === 429) {
+      if (error.response?.status === 429 || error.message?.includes('rate limit')) {
         console.warn('Rate limit hit during session refresh, implementing backoff');
         // Exponential backoff: start with 1 minute, max 10 minutes
         refreshBackoffMs = Math.min(
@@ -201,6 +222,19 @@ async function refreshSession() {
           10 * 60 * 1000
         );
         // Don't throw error, just return null and let the request proceed with existing token
+        return null;
+      } else if (error.response?.status === 401) {
+        // Invalid or expired refresh token - clear session and redirect
+        console.error('Refresh token invalid or expired');
+        localStorage.removeItem('supabase_token');
+        localStorage.removeItem('supabase_refresh_token');
+        if (typeof window !== 'undefined' && !isRedirectingToAuth) {
+          isRedirectingToAuth = true;
+          setTimeout(() => {
+            window.location.href = '/auth';
+            isRedirectingToAuth = false;
+          }, 300);
+        }
         return null;
       } else {
         console.error('Error refreshing session:', error);
@@ -210,23 +244,48 @@ async function refreshSession() {
       }
     }
     
-    if (data?.session?.access_token) {
-      localStorage.setItem('supabase_token', data.session.access_token);
+    if (responseData?.data?.access_token && responseData?.data?.refresh_token) {
+      const { access_token, refresh_token } = responseData.data;
+      
+      // Update localStorage
+      localStorage.setItem('supabase_token', access_token);
+      localStorage.setItem('supabase_refresh_token', refresh_token);
+      
+      // Hydrate local Supabase client
+      await supabase.auth.setSession({
+        access_token,
+        refresh_token,
+      });
+      
       console.log('Session refreshed successfully');
       // Reset backoff on successful refresh
       refreshBackoffMs = 0;
-      return data.session;
+      
+      // Return session object for compatibility
+      const { data: { session: newSession } } = await supabase.auth.getSession();
+      return newSession;
     }
     
     return null;
   } catch (error: any) {
     console.error('Error during session refresh:', error);
     // Handle rate limit in catch block as well
-    if (error?.status === 429 || error?.message?.includes('rate limit')) {
+    if (error?.response?.status === 429 || error?.message?.includes('rate limit')) {
       refreshBackoffMs = Math.min(
         (refreshBackoffMs || 60000) * 2,
         10 * 60 * 1000
       );
+    } else if (error?.response?.status === 401) {
+      // Invalid token - clear and redirect
+      localStorage.removeItem('supabase_token');
+      localStorage.removeItem('supabase_refresh_token');
+      if (typeof window !== 'undefined' && !isRedirectingToAuth) {
+        isRedirectingToAuth = true;
+        setTimeout(() => {
+          window.location.href = '/auth';
+          isRedirectingToAuth = false;
+        }, 300);
+      }
     } else {
       refreshBackoffMs = 0;
     }
@@ -256,9 +315,10 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config;
     
     // List of public endpoints that don't require authentication
-    const publicEndpoints = ['/categories', '/products'];
-    const isPublicEndpoint = publicEndpoints.some(endpoint => 
-      originalRequest.url?.includes(endpoint)
+    const isPublicEndpoint = !!(
+      originalRequest.url?.startsWith('/categories') ||
+      originalRequest.url?.startsWith('/products') ||
+      originalRequest.url?.startsWith('/warehouses/products/')
     );
     
     // Check if we should attempt a retry
@@ -266,6 +326,17 @@ apiClient.interceptors.response.use(
       // For public endpoints, don't redirect to auth - just reject the error
       if (isPublicEndpoint) {
         console.log('Public endpoint failed with 401, not redirecting to auth');
+        return Promise.reject(error);
+      }
+
+      // If the request had no auth token to begin with, the user is simply
+      // not logged in — silently reject without redirecting to /auth.
+      // Only redirect if a token was present but rejected (expired session).
+      const hadAuthToken = !!(
+        originalRequest.headers?.Authorization ||
+        originalRequest.headers?.authorization
+      );
+      if (!hadAuthToken) {
         return Promise.reject(error);
       }
       
@@ -303,13 +374,20 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       
       try {
-        // Explicitly try to refresh the token
+        // Explicitly try to refresh the token using backend
         const session = await refreshSession();
         
         if (session?.access_token) {
           console.log('Session refreshed, retrying request');
           originalRequest.headers.Authorization = `Bearer ${session.access_token}`;
           return apiClient(originalRequest);
+        } else {
+          // If refresh failed, get token from localStorage as fallback
+          const cachedToken = localStorage.getItem('supabase_token');
+          if (cachedToken) {
+            originalRequest.headers.Authorization = `Bearer ${cachedToken}`;
+            return apiClient(originalRequest);
+          }
         }
       } catch (refreshError) {
         console.error('Error refreshing session:', refreshError);

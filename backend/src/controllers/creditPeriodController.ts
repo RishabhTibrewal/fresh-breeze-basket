@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
 
 // Get credit period by order ID
@@ -13,7 +13,7 @@ export const getCreditPeriodByOrderId = async (req: Request, res: Response) => {
     }
 
     // Query credit_periods table to find credit period associated with this order
-    const { data: creditPeriod, error } = await supabase
+    const { data: creditPeriod, error } = await (supabaseAdmin || supabase)
       .from('credit_periods')
       .select('*')
       .eq('order_id', orderId)
@@ -63,7 +63,7 @@ export const getCustomerCreditPeriods = async (req: Request, res: Response) => {
     }
 
     // Query credit_periods table to find all credit periods for this customer
-    const { data: creditPeriods, error } = await supabase
+    const { data: creditPeriods, error } = await (supabaseAdmin || supabase)
       .from('credit_periods')
       .select('*')
       .eq('customer_id', customerId)
@@ -123,7 +123,7 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
     }
 
     // Get current credit period data
-    const { data: currentCreditPeriod, error: fetchError } = await supabase
+    const { data: currentCreditPeriod, error: fetchError } = await (supabaseAdmin || supabase)
       .from('credit_periods')
       .select('*, orders!credit_periods_order_id_fkey(user_id)')
       .eq('id', creditPeriodId)
@@ -145,7 +145,7 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
     }
 
     // Find the customer record for this user
-    const { data: customer, error: customerError } = await supabase
+    const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('id, current_credit, credit_limit')
       .eq('user_id', userId)
@@ -198,7 +198,7 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
     console.log('Customer current credit before update:', customer.current_credit);
 
     // 1. Update credit period
-    const { data: updatedCreditPeriod, error: updateError } = await supabase
+    const { data: updatedCreditPeriod, error: updateError } = await (supabaseAdmin || supabase)
       .from('credit_periods')
       .update(updateData)
       .eq('id', creditPeriodId)
@@ -227,7 +227,7 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
       });
 
       // Explicitly convert types to avoid any type conversion issues
-      const { data: updatedCustomer, error: customerUpdateError } = await supabase
+      const { data: updatedCustomer, error: customerUpdateError } = await (supabaseAdmin || supabase)
         .from('customers')
         .update({ current_credit: newCreditAmount })
         .eq('id', customer.id)
@@ -258,7 +258,7 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
         console.log('Recording payment:', paymentRecord);
         
         // Check if payments table exists
-        const { count, error: tableCheckError } = await supabase
+        const { count, error: tableCheckError } = await (supabaseAdmin || supabase)
           .from('payments')
           .select('*', { count: 'exact', head: true });
         
@@ -268,7 +268,7 @@ export const updateCreditPeriodStatus = async (req: Request, res: Response) => {
           console.log('Payments table may not exist, skipping payment record');
         } else {
           // Table exists, insert the payment
-          const { error: paymentError } = await supabase
+          const { error: paymentError } = await (supabaseAdmin || supabase)
             .from('payments')
             .insert(paymentRecord);
             

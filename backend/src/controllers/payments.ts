@@ -46,7 +46,7 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     // If order_id is provided, update the order
     if (order_id && req.user?.id) {
       try {
-        await supabase
+        await (supabaseAdmin || supabase)
           .from('orders')
           .update({
             payment_intent_id: paymentIntent.id
@@ -87,7 +87,7 @@ export const getPaymentById = async (req: Request, res: Response) => {
     }
     
     // Get payment from database
-    const { data: payment, error: dbError } = await supabase
+    const { data: payment, error: dbError } = await (supabaseAdmin || supabase)
       .from('payments')
       .select('*')
       .eq('id', id)
@@ -100,7 +100,7 @@ export const getPaymentById = async (req: Request, res: Response) => {
     
     // Verify payment belongs to user by checking the order
     if (payment.order_id) {
-      const { data: order, error: orderError } = await supabase
+      const { data: order, error: orderError } = await (supabaseAdmin || supabase)
         .from('orders')
         .select('user_id')
         .eq('id', payment.order_id)
@@ -139,7 +139,7 @@ export const getPaymentHistory = async (req: Request, res: Response) => {
     }
     
     // Get user's orders first
-    const { data: orders, error: ordersError } = await supabase
+    const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select('id')
       .eq('user_id', userId)
@@ -152,7 +152,7 @@ export const getPaymentHistory = async (req: Request, res: Response) => {
     const orderIds = orders?.map(order => order.id) || [];
     
     // Get payments for user's orders
-    const { data: payments, error: paymentsError, count } = await supabase
+    const { data: payments, error: paymentsError, count } = await (supabaseAdmin || supabase)
       .from('payments')
       .select('*', { count: 'exact' })
       .in('order_id', orderIds)
@@ -517,7 +517,7 @@ export const linkPaymentToOrder = async (req: Request, res: Response) => {
     }
     
     // Verify the order belongs to the user
-    const { data: order, error: orderError } = await supabase
+    const { data: order, error: orderError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select('id, user_id, total_amount')
       .eq('id', order_id)
@@ -530,7 +530,7 @@ export const linkPaymentToOrder = async (req: Request, res: Response) => {
     }
     
     // First, try to find an existing payment record for this payment intent
-    const { data: existingPayment, error: findError } = await supabase
+    const { data: existingPayment, error: findError } = await (supabaseAdmin || supabase)
       .from('payments')
       .select('id, order_id, amount')
       .eq('stripe_payment_intent_id', payment_intent_id)
@@ -544,7 +544,7 @@ export const linkPaymentToOrder = async (req: Request, res: Response) => {
       if (!existingPayment.order_id) {
         console.log('Updating payment record with order_id:', order_id);
         
-        const { data: updatedPayment, error: updateError } = await supabase
+        const { data: updatedPayment, error: updateError } = await (supabaseAdmin || supabase)
           .from('payments')
           .update({ 
             order_id,
@@ -571,7 +571,7 @@ export const linkPaymentToOrder = async (req: Request, res: Response) => {
     }
     
     // Update the order with payment intent ID and status
-    const { error: orderUpdateError } = await supabase
+    const { error: orderUpdateError } = await (supabaseAdmin || supabase)
       .from('orders')
       .update({ 
         payment_intent_id,
@@ -624,7 +624,7 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
     }
 
     // Verify the order belongs to the user
-    const { data: order, error: orderError } = await supabase
+    const { data: order, error: orderError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select('id, user_id, total_amount')
       .eq('id', order_id)
@@ -644,7 +644,7 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
     }
 
     // Check if a payment record already exists for this order
-    const { data: existingPayment, error: checkError } = await supabase
+    const { data: existingPayment, error: checkError } = await (supabaseAdmin || supabase)
       .from('payments')
       .select('id, stripe_payment_intent_id')
       .eq('order_id', order_id)
@@ -658,7 +658,7 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       if (stripe_payment_intent_id && !existingPayment.stripe_payment_intent_id) {
         console.log('Updating existing payment record with stripe_payment_intent_id:', stripe_payment_intent_id);
         
-        const { error: updateError } = await supabase
+        const { error: updateError } = await (supabaseAdmin || supabase)
           .from('payments')
           .update({
             stripe_payment_intent_id: stripe_payment_intent_id,
@@ -676,7 +676,7 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       }
       
       // Update order payment status
-      const { error: orderUpdateError } = await supabase
+      const { error: orderUpdateError } = await (supabaseAdmin || supabase)
         .from('orders')
         .update({
           payment_status: 'paid',
@@ -755,14 +755,14 @@ export const createMissingPaymentRecords = async (req: Request, res: Response) =
     }
     
     // Only allow admins to run this (use RPC function which checks memberships)
-    const { data: isAdmin, error: rpcError } = await supabase.rpc('is_admin', { user_id: userId });
+    const { data: isAdmin, error: rpcError } = await (supabaseAdmin || supabase).rpc('is_admin', { user_id: userId });
     
     if (rpcError || !isAdmin) {
       throw new ApiError(403, 'Admin access required');
     }
 
     // Find orders that are marked as paid but don't have payment records
-    const { data: orders, error: ordersError } = await supabase
+    const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select(`
         id,
@@ -796,7 +796,7 @@ export const createMissingPaymentRecords = async (req: Request, res: Response) =
     for (const order of orders) {
       try {
         // Check if payment record already exists
-        const { data: existingPayment, error: checkError } = await supabase
+        const { data: existingPayment, error: checkError } = await (supabaseAdmin || supabase)
           .from('payments')
           .select('id')
           .eq('order_id', order.id)
@@ -814,7 +814,7 @@ export const createMissingPaymentRecords = async (req: Request, res: Response) =
         }
 
         // Create payment record
-        const { data: payment, error: paymentError } = await supabase
+        const { data: payment, error: paymentError } = await (supabaseAdmin || supabase)
           .from('payments')
           .insert({
             order_id: order.id,

@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabase } from '../config';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError, ValidationError } from '../middleware/error';
 
 export const addProductImage = async (req: Request, res: Response, next: NextFunction) => {
@@ -22,7 +22,7 @@ export const addProductImage = async (req: Request, res: Response, next: NextFun
 
     // If variant_id is provided, verify it exists and belongs to the company
     if (variant_id) {
-      const { data: variant, error: variantError } = await supabase
+      const { data: variant, error: variantError } = await (supabaseAdmin || supabase)
         .from('product_variants')
         .select('id, product_id')
         .eq('id', variant_id)
@@ -47,7 +47,7 @@ export const addProductImage = async (req: Request, res: Response, next: NextFun
 
     // If is_primary is true, unset other primary images for the same product/variant
     if (is_primary === true) {
-      let unsetPrimaryQuery = supabase
+      let unsetPrimaryQuery = (supabaseAdmin || supabase)
         .from('product_images')
         .update({ is_primary: false })
         .eq('company_id', req.companyId);
@@ -67,7 +67,7 @@ export const addProductImage = async (req: Request, res: Response, next: NextFun
       await unsetPrimaryQuery;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('product_images')
       .insert([
         {
@@ -110,7 +110,7 @@ export const getProductImages = async (req: Request, res: Response, next: NextFu
       ? variant_id 
       : null;
 
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('product_images')
       .select('*')
       .eq('company_id', req.companyId);
@@ -160,7 +160,7 @@ export const updateProductImage = async (req: Request, res: Response, next: Next
     }
 
     // First get the current image to check if display_order is changing
-    const { data: currentImage, error: fetchError } = await supabase
+    const { data: currentImage, error: fetchError } = await (supabaseAdmin || supabase)
       .from('product_images')
       .select('*')
       .eq('id', id)
@@ -183,7 +183,7 @@ export const updateProductImage = async (req: Request, res: Response, next: Next
     // If display_order is changing, we need to update other images for the same product/variant
     if (display_order !== undefined && display_order !== currentImage.display_order) {
       // Build query to get all images for the same product/variant combination
-      let imagesQuery = supabase
+      let imagesQuery = (supabaseAdmin || supabase)
         .from('product_images')
         .select('*')
         .eq('company_id', req.companyId)
@@ -234,7 +234,7 @@ export const updateProductImage = async (req: Request, res: Response, next: Next
         }
 
         if (newOrder !== image.display_order) {
-          await supabase
+          await (supabaseAdmin || supabase)
             .from('product_images')
             .update({ display_order: newOrder })
             .eq('id', image.id)
@@ -248,7 +248,7 @@ export const updateProductImage = async (req: Request, res: Response, next: Next
     // If is_primary is changing to true, update other images for the same product/variant
     if (is_primary === true) {
       // Build query to unset primary for other images
-      let unsetPrimaryQuery = supabase
+      let unsetPrimaryQuery = (supabaseAdmin || supabase)
         .from('product_images')
         .update({ is_primary: false })
         .eq('company_id', req.companyId)
@@ -288,7 +288,7 @@ export const updateProductImage = async (req: Request, res: Response, next: Next
     }
 
     // Update the target image
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('product_images')
       .update(updateData)
       .eq('id', id)
@@ -318,7 +318,7 @@ export const deleteProductImage = async (req: Request, res: Response, next: Next
       throw new ApiError(400, 'Company context is required');
     }
 
-    const { error } = await supabase
+    const { error } = await (supabaseAdmin || supabase)
       .from('product_images')
       .delete()
       .eq('id', id)
@@ -362,7 +362,7 @@ export const bulkAddProductImages = async (req: Request, res: Response, next: Ne
     
     if (variantIds.length > 0) {
       const uniqueVariantIds = [...new Set(variantIds)];
-      const { data: variants, error: variantError } = await supabase
+      const { data: variants, error: variantError } = await (supabaseAdmin || supabase)
         .from('product_variants')
         .select('id, product_id')
         .in('id', uniqueVariantIds)
@@ -413,7 +413,7 @@ export const bulkAddProductImages = async (req: Request, res: Response, next: Ne
         .map(img => ({ product_id: img.product_id, variant_id: img.variant_id }));
 
       for (const pair of productVariantPairs) {
-        let unsetPrimaryQuery = supabase
+        let unsetPrimaryQuery = (supabaseAdmin || supabase)
           .from('product_images')
           .update({ is_primary: false })
           .eq('company_id', req.companyId);
@@ -435,7 +435,7 @@ export const bulkAddProductImages = async (req: Request, res: Response, next: Ne
     }
 
     // Insert all images in a batch
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('product_images')
       .insert(imagesData)
       .select();

@@ -85,7 +85,7 @@ export const getProducts = async (req: Request, res: Response) => {
           name,
           logo_url
         ),
-        variants:product_variants (
+        variants:product_variants!product_id (
           id,
           name,
           sku,
@@ -277,7 +277,7 @@ export const getProductById = async (req: Request, res: Response) => {
           name,
           logo_url
         ),
-        variants:product_variants (
+        variants:product_variants!product_id (
           id,
           name,
           sku,
@@ -506,7 +506,7 @@ export const updateProduct = async (req: Request, res: Response) => {
 
     // Check if product exists and belongs to the company
     console.log('Checking if product exists...');
-    const { data: existingProduct, error: fetchError } = await supabase
+    const { data: existingProduct, error: fetchError } = await (supabaseAdmin || supabase)
       .from('products')
       .select('*')
       .eq('id', id)
@@ -618,7 +618,7 @@ export const updateProduct = async (req: Request, res: Response) => {
     if ('brand_id' in req.body && req.body.brand_id !== undefined) {
       // Validate brand_id if provided
       if (req.body.brand_id) {
-        const { data: brand, error: brandError } = await supabase
+        const { data: brand, error: brandError } = await (supabaseAdmin || supabase)
           .from('brands')
           .select('id')
           .eq('id', req.body.brand_id)
@@ -638,7 +638,7 @@ export const updateProduct = async (req: Request, res: Response) => {
     console.log('Prepared update data:', updateData);
     
     // Perform the update with company_id filter
-    const { error: updateError } = await supabase
+    const { error: updateError } = await (supabaseAdmin || supabase)
       .from('products')
       .update(updateData)
       .eq('id', id)
@@ -654,7 +654,7 @@ export const updateProduct = async (req: Request, res: Response) => {
     }
 
     // Then fetch the updated product
-    let { data: updatedProduct, error: fetchUpdateError } = await supabase
+    let { data: updatedProduct, error: fetchUpdateError } = await (supabaseAdmin || supabase)
       .from('products')
       .select('*')
       .eq('id', id)
@@ -700,7 +700,7 @@ export const updateProduct = async (req: Request, res: Response) => {
       // Add a small delay and try one more time
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      const { data: retryData, error: retryError } = await supabase
+      const { data: retryData, error: retryError } = await (supabaseAdmin || supabase)
         .from('products')
         .select('*')
         .eq('id', id)
@@ -761,7 +761,7 @@ export const deleteProduct = async (req: Request, res: Response) => {
     }
     
     // Check if product exists
-    const { data: existingProduct, error: fetchError } = await supabase
+    const { data: existingProduct, error: fetchError } = await (supabaseAdmin || supabase)
       .from('products')
       .select('*')
       .eq('id', id)
@@ -776,7 +776,7 @@ export const deleteProduct = async (req: Request, res: Response) => {
     }
     
     // Delete product (cascade will delete variants and prices)
-    const { error } = await supabase
+    const { error } = await (supabaseAdmin || supabase)
       .from('products')
       .delete()
       .eq('id', id)

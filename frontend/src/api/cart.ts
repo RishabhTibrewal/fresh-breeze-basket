@@ -2,21 +2,33 @@ import apiClient from '@/lib/apiClient';
 
 export interface CartItem {
   id: string;
-  product_id: string;
   quantity: number;
+  variant_id: string | null;
   products: {
     id: string;
     name: string;
-    price: number;
-    sale_price?: number;
-    unit?: number;
-    unit_type?: string;
-    image_url?: string;
-    description?: string;
-    category_id?: string;
+    image_url?: string | null;
+    description?: string | null;
+    category_id?: string | null;
     is_active?: boolean;
-    is_featured?: boolean;
+    slug?: string | null;
   };
+  // Joined variant with its price — present when variant_id is set
+  variant?: {
+    id: string;
+    name: string;
+    sku?: string | null;
+    image_url?: string | null;
+    unit?: number | null;
+    unit_type?: string | null;
+    is_default?: boolean;
+    price?: {
+      id: string;
+      sale_price: number;
+      mrp_price: number;
+      price_type: string;
+    } | null;
+  } | null;
 }
 
 export interface Cart {

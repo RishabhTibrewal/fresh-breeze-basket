@@ -60,7 +60,7 @@ const CartDrawer = () => {
             ) : (
               <ul className="space-y-4">
                 {state.items.map((item) => (
-                  <li key={item.id} className="flex gap-4 pb-4 border-b">
+                  <li key={`${item.id}|${item.variant_id}`} className="flex gap-4 pb-4 border-b">
                     <div className="w-20 h-20 rounded-md overflow-hidden bg-gray-50 flex-shrink-0">
                       <img 
                         src={item.image} 

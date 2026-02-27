@@ -41,4 +41,3 @@ todos:
 - Add in-memory cache `{ subdomain -> { companyId, companySlug, expiresAt } }` with 10-minute TTL.
 - Use detection order: `X-Tenant-Subdomain`, then `Host`.
 - Keep Origin/Referer for logging only, not selection.
-- Update dependencies in [`backend/package.json`](backend/package.json) to include `jose`.

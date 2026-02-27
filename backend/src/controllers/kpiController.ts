@@ -1,5 +1,9 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
+
+// Use service role client to bypass RLS — security is enforced by
+// the protect middleware (JWT) and company_id filters in every query.
+const db = supabaseAdmin || supabase;
 
 export const getModuleKPIs = async (req: Request, res: Response) => {
   const { moduleKey } = req.params;
@@ -19,7 +23,7 @@ export const getModuleKPIs = async (req: Request, res: Response) => {
     switch (moduleKey) {
       case 'sales':
         // Today's orders count (only sales orders)
-        const { count: ordersToday } = await supabase
+        const { count: ordersToday } = await db
           .from('orders')
           .select('*', { count: 'exact', head: true })
           .eq('company_id', companyId)
@@ -27,7 +31,7 @@ export const getModuleKPIs = async (req: Request, res: Response) => {
           .gte('created_at', todayISO);
 
         // Outstanding invoices (only sales orders)
-        const { count: outstandingInvoices } = await supabase
+        const { count: outstandingInvoices } = await db
           .from('orders')
           .select('*', { count: 'exact', head: true })
           .eq('company_id', companyId)
@@ -38,7 +42,7 @@ export const getModuleKPIs = async (req: Request, res: Response) => {
         const monthStart = new Date();
         monthStart.setDate(1);
         monthStart.setHours(0, 0, 0, 0);
-        const { data: revenueData } = await supabase
+        const { data: revenueData } = await db
           .from('orders')
           .select('total_amount')
           .eq('company_id', companyId)
@@ -56,20 +60,20 @@ export const getModuleKPIs = async (req: Request, res: Response) => {
 
       case 'inventory':
         // Total products
-        const { count: totalProducts } = await supabase
+        const { count: totalProducts } = await db
           .from('products')
           .select('*', { count: 'exact', head: true })
           .eq('company_id', companyId);
 
         // Low stock items (from warehouse_inventory)
-        const { count: lowStock } = await supabase
+        const { count: lowStock } = await db
           .from('warehouse_inventory')
           .select('*', { count: 'exact', head: true })
           .eq('company_id', companyId)
           .lt('stock_count', 10);
 
         // Stock value (simplified calculation)
-        const { data: stockData } = await supabase
+        const { data: stockData } = await db
           .from('products')
           .select('price')
           .eq('company_id', companyId);
@@ -85,21 +89,21 @@ export const getModuleKPIs = async (req: Request, res: Response) => {
 
       case 'procurement':
         // Open purchase orders
-        const { count: openPOs } = await supabase
+        const { count: openPOs } = await db
           .from('purchase_orders')
           .select('*', { count: 'exact', head: true })
           .eq('company_id', companyId)
           .in('status', ['pending', 'approved', 'partially_received']);
 
         // Pending GRNs
-        const { count: pendingGRNs } = await supabase
+        const { count: pendingGRNs } = await db
           .from('goods_receipts')
           .select('*', { count: 'exact', head: true })
           .eq('company_id', companyId)
           .eq('status', 'pending');
 
         // Supplier outstanding (simplified - sum of unpaid purchase invoices)
-        const { data: supplierOutstandingData } = await supabase
+        const { data: supplierOutstandingData } = await db
           .from('purchase_invoices')
           .select('total_amount, status')
           .eq('company_id', companyId)
@@ -119,7 +123,7 @@ export const getModuleKPIs = async (req: Request, res: Response) => {
 
       case 'accounting':
         // Receivables (from customer sales orders)
-        const { data: receivablesData } = await supabase
+        const { data: receivablesData } = await db
           .from('orders')
           .select('total_amount, status, order_type')
           .eq('company_id', companyId)
@@ -132,7 +136,7 @@ export const getModuleKPIs = async (req: Request, res: Response) => {
         ) || 0;
 
         // Payables (from purchase invoices)
-        const { data: payablesData } = await supabase
+        const { data: payablesData } = await db
           .from('purchase_invoices')
           .select('total_amount, status')
           .eq('company_id', companyId)
@@ -161,7 +165,7 @@ export const getModuleKPIs = async (req: Request, res: Response) => {
 
       case 'pos':
         // Today's POS sales (sales orders with POS source)
-        const { data: posSalesData } = await supabase
+        const { data: posSalesData } = await db
           .from('orders')
           .select('total_amount, order_type, order_source')
           .eq('company_id', companyId)
@@ -186,7 +190,7 @@ export const getModuleKPIs = async (req: Request, res: Response) => {
 
       case 'ecommerce':
         // Online (ecommerce) sales orders today
-        const { count: ecommerceOrdersToday } = await supabase
+        const { count: ecommerceOrdersToday } = await db
           .from('orders')
           .select('*', { count: 'exact', head: true })
           .eq('company_id', companyId)

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { Database } from '../types/database';
 import { getDefaultWarehouseId, findWarehouseWithStock } from '../utils/warehouseInventory';
 import { ProductService } from '../services/core/ProductService';
@@ -48,7 +48,7 @@ export const orderController = {
       }
 
       // Verify the customer belongs to this sales executive
-      const { data: customer, error: customerError } = await supabase
+      const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('id, user_id, current_credit, credit_limit, sales_executive_id')
         .eq('id', customer_id)
@@ -208,7 +208,7 @@ export const orderController = {
       console.log('Order data being inserted:', JSON.stringify(orderData, null, 2));
 
       // Create order - use customer.user_id instead of customer_id for user_id field
-      const { data: order, error: orderError } = await supabase
+      const { data: order, error: orderError } = await (supabaseAdmin || supabase)
         .from('orders')
         .insert(orderData)
         .select()
@@ -238,7 +238,7 @@ export const orderController = {
             variantIds[item.product_id] = variantId;
           } catch (error) {
             console.error('Error getting default variant:', error);
-            await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
+            await (supabaseAdmin || supabase).from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
             return res.status(500).json({ 
               error: `Failed to get default variant for product ${item.product_id}: ${error instanceof Error ? error.message : 'Unknown error'}` 
             });
@@ -253,7 +253,7 @@ export const orderController = {
           productPrices[item.product_id] = variantPrice;
         } catch (error) {
           console.error('Error getting variant price:', error);
-          await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
+          await (supabaseAdmin || supabase).from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
           return res.status(500).json({ 
             error: `Failed to get price for variant ${variantId}: ${error instanceof Error ? error.message : 'Unknown error'}` 
           });
@@ -275,7 +275,7 @@ export const orderController = {
       }
 
       // Get default warehouse if warehouse_id not provided for items
-      const { data: defaultWarehouse } = await supabase
+      const { data: defaultWarehouse } = await (supabaseAdmin || supabase)
         .from('warehouses')
         .select('id')
         .eq('code', 'WH-001')
@@ -364,14 +364,14 @@ export const orderController = {
       // If there were reservation errors, rollback the order
       if (reservationErrors.length > 0) {
         console.error('Stock reservation errors:', reservationErrors);
-        await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
+        await (supabaseAdmin || supabase).from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
         return res.status(400).json({ 
           error: 'Failed to reserve stock for some products',
           details: reservationErrors
         });
       }
 
-      const { error: itemsError } = await supabase
+      const { error: itemsError } = await (supabaseAdmin || supabase)
         .from('order_items')
         .insert(orderItems);
 
@@ -406,7 +406,7 @@ export const orderController = {
         }
         
         // Rollback by deleting the order if items creation fails
-        await supabase.from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
+        await (supabaseAdmin || supabase).from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
         return res.status(500).json({ error: `Failed to create order items: ${itemsError.message}` });
       }
 
@@ -431,7 +431,7 @@ export const orderController = {
           console.log('Creating credit period for amount:', creditAmount);
           
           // Create credit period record
-          const { error: creditError } = await supabase
+          const { error: creditError } = await (supabaseAdmin || supabase)
             .from('credit_periods')
             .insert({
               customer_id,
@@ -451,7 +451,7 @@ export const orderController = {
           }
 
           // Update customer's current credit
-          const { error: updateCreditError } = await supabase
+          const { error: updateCreditError } = await (supabaseAdmin || supabase)
             .from('customers')
             .update({ current_credit: customer.current_credit + creditAmount })
             .eq('id', customer_id)
@@ -490,7 +490,7 @@ export const orderController = {
       console.log(`Fetching orders for customer ID: ${customer_id}`);
 
       // First get the customer details to get the user_id
-      const { data: customer, error: customerError } = await supabase
+      const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('id, user_id')
         .eq('id', customer_id)
@@ -505,7 +505,7 @@ export const orderController = {
       console.log(`Found customer user_id: ${customer.user_id}`);
 
       // Use the customer's user_id to query orders
-      const { data: orders, error: ordersError } = await supabase
+      const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
         .from('orders')
         .select(`
           *,
@@ -586,7 +586,7 @@ export const orderController = {
       }
 
       // Find the order
-      const { data: order, error: orderError } = await supabase
+      const { data: order, error: orderError } = await (supabaseAdmin || supabase)
         .from('orders')
         .select(`
           *,
@@ -625,7 +625,7 @@ export const orderController = {
 
       // Get credit details if applicable
       if (order.payment_method === 'full_credit' || order.payment_method === 'partial_payment') {
-        const { data: creditPeriod, error: creditError } = await supabase
+        const { data: creditPeriod, error: creditError } = await (supabaseAdmin || supabase)
           .from('credit_periods')
           .select('*')
           .eq('order_id', order_id)
@@ -638,7 +638,7 @@ export const orderController = {
       }
 
       // Verify the order belongs to a customer of this sales executive
-      const { data: customer, error: customerError } = await supabase
+      const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('id, name, sales_executive_id')
         .eq('user_id', order.user_id)
@@ -679,7 +679,7 @@ export const orderController = {
       }
 
       // Verify the order belongs to a customer of this sales executive
-      const { data: order, error: orderError } = await supabase
+      const { data: order, error: orderError } = await (supabaseAdmin || supabase)
         .from('orders')
         .select(`
           id,
@@ -698,7 +698,7 @@ export const orderController = {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const { data: updatedOrder, error: updateError } = await supabase
+      const { data: updatedOrder, error: updateError } = await (supabaseAdmin || supabase)
         .from('orders')
         .update({ status })
         .eq('id', order_id)
@@ -724,7 +724,7 @@ export const orderController = {
       const sales_executive_id = req.user?.id;
 
       // Get all customers for this sales executive (filtered by company_id)
-      const { data: customers, error: customersError } = await supabase
+      const { data: customers, error: customersError } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('id, user_id, name')
         .eq('sales_executive_id', sales_executive_id)
@@ -741,7 +741,7 @@ export const orderController = {
 
       // Get all orders for these customers (filtered by company_id)
       const customerUserIds = customers.map(c => c.user_id);
-      const { data: orders, error: ordersError } = await supabase
+      const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
         .from('orders')
         .select(`
           *,
@@ -782,7 +782,7 @@ export const orderController = {
       const ordersWithCredit = await Promise.all(orders.map(async (order) => {
         // Only fetch credit details for orders with credit
         if (order.payment_method === 'full_credit' || order.payment_method === 'partial_payment') {
-          const { data: creditPeriod, error: creditError } = await supabase
+          const { data: creditPeriod, error: creditError } = await (supabaseAdmin || supabase)
             .from('credit_periods')
             .select('*')
             .eq('order_id', order.id)

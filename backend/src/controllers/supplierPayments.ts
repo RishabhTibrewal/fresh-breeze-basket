@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError, ValidationError } from '../middleware/error';
 
 /**
@@ -8,7 +8,7 @@ import { ApiError, ValidationError } from '../middleware/error';
 const generatePaymentNumber = async (companyId: string): Promise<string> => {
   const year = new Date().getFullYear();
   
-  const { data: latestPayment, error } = await supabase
+  const { data: latestPayment, error } = await (supabaseAdmin || supabase)
     .schema('procurement')
     .from('supplier_payments')
     .select('payment_number')
@@ -81,7 +81,7 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
     }
 
     // Verify invoice exists and get supplier_id if not provided
-    const { data: invoice, error: invoiceError } = await supabase
+    const { data: invoice, error: invoiceError } = await (supabaseAdmin || supabase)
       .schema('procurement')
       .from('purchase_invoices')
       .select('*')
@@ -97,7 +97,7 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
     // Fetch purchase order to get supplier_id if not provided
     let finalSupplierId = supplier_id;
     if (!finalSupplierId && invoice.purchase_order_id) {
-      const { data: purchaseOrder, error: poError } = await supabase
+      const { data: purchaseOrder, error: poError } = await (supabaseAdmin || supabase)
         .schema('procurement')
         .from('purchase_orders')
         .select('supplier_id')
@@ -117,7 +117,7 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
     const payment_number = await generatePaymentNumber(req.companyId);
 
     // Create supplier payment
-    const { data: payment, error: paymentError } = await supabase
+    const { data: payment, error: paymentError } = await (supabaseAdmin || supabase)
       .schema('procurement')
       .from('supplier_payments')
       .insert({
@@ -146,7 +146,7 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
 
     // Update invoice paid amount and status
     // Only count completed payments towards paid_amount
-    const { data: invoiceData } = await supabase
+    const { data: invoiceData } = await (supabaseAdmin || supabase)
       .schema('procurement')
       .from('purchase_invoices')
       .select('paid_amount, total_amount, status')
@@ -156,7 +156,7 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
 
     if (invoiceData) {
       // Get all completed payments for this invoice
-      const { data: completedPayments } = await supabase
+      const { data: completedPayments } = await (supabaseAdmin || supabase)
         .schema('procurement')
         .from('supplier_payments')
         .select('amount')
@@ -178,7 +178,7 @@ export const createSupplierPayment = async (req: Request, res: Response, next: N
         }
       }
 
-      await supabase
+      await (supabaseAdmin || supabase)
         .schema('procurement')
         .from('purchase_invoices')
         .update({
@@ -229,7 +229,7 @@ export const getSupplierPayments = async (req: Request, res: Response, next: Nex
       throw new ApiError(400, 'Company context is required');
     }
 
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .schema('procurement')
       .from('supplier_payments')
       .select('*')
@@ -271,7 +271,7 @@ export const getSupplierPayments = async (req: Request, res: Response, next: Nex
     const suppliersMap = new Map();
 
     if (invoiceIds.length > 0) {
-      const { data: invoices, error: invoicesError } = await supabase
+      const { data: invoices, error: invoicesError } = await (supabaseAdmin || supabase)
         .schema('procurement')
         .from('purchase_invoices')
         .select('*')
@@ -289,7 +289,7 @@ export const getSupplierPayments = async (req: Request, res: Response, next: Nex
     }
 
     if (supplierIds.length > 0) {
-      const { data: suppliers, error: suppliersError } = await supabase
+      const { data: suppliers, error: suppliersError } = await (supabaseAdmin || supabase)
         .from('suppliers')
         .select('*')
         .in('id', supplierIds)
@@ -332,7 +332,7 @@ export const getSupplierPaymentById = async (req: Request, res: Response, next: 
       throw new ApiError(400, 'Company context is required');
     }
 
-    const { data: payment, error } = await supabase
+    const { data: payment, error } = await (supabaseAdmin || supabase)
       .schema('procurement')
       .from('supplier_payments')
       .select('*')
@@ -410,7 +410,7 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
       throw new ApiError(400, 'Company context is required');
     }
 
-    const { data: payment, error: updateError } = await supabase
+    const { data: payment, error: updateError } = await (supabaseAdmin || supabase)
       .schema('procurement')
       .from('supplier_payments')
       .update(updateData)
@@ -429,7 +429,7 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
 
     // Update invoice paid amount if amount or status changed
     if ((amount !== undefined || status !== undefined) && payment.purchase_invoice_id) {
-      const { data: payments } = await supabase
+      const { data: payments } = await (supabaseAdmin || supabase)
         .schema('procurement')
         .from('supplier_payments')
         .select('amount, status')
@@ -442,7 +442,7 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
           .filter((p) => p.status === 'completed')
           .reduce((sum, p) => sum + (p.amount || 0), 0);
         
-        const { data: invoiceData } = await supabase
+        const { data: invoiceData } = await (supabaseAdmin || supabase)
           .schema('procurement')
           .from('purchase_invoices')
           .select('total_amount, status')
@@ -464,7 +464,7 @@ export const updateSupplierPayment = async (req: Request, res: Response, next: N
             }
           }
 
-          await supabase
+          await (supabaseAdmin || supabase)
             .schema('procurement')
             .from('purchase_invoices')
             .update({

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
 // Get customer details for the logged-in user
@@ -16,7 +16,7 @@ export const getCustomerDetails = async (req: Request, res: Response) => {
     }
 
     // Get customer details
-    const { data: customer, error: customerError } = await supabase
+    const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
       .from('customers')
       .select(`
         *,

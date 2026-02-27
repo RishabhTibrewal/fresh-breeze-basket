@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { createAuthClient, supabase } from '../config/supabase';
+import { createAuthClient, supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
 const getAuthClient = (req: Request) => {
@@ -17,7 +17,8 @@ export const getCategories = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Company context is required');
     }
 
-    const { data, error } = await supabase
+    const client = supabaseAdmin || supabase;
+    const { data, error } = await client
       .from('categories')
       .select('*')
       .eq('company_id', req.companyId)
@@ -62,7 +63,8 @@ export const getCategoryById = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Company context is required');
     }
     
-    const { data, error } = await supabase
+    const client = supabaseAdmin || supabase;
+    const { data, error } = await client
       .from('categories')
       .select('*, products(*)')
       .eq('id', id)

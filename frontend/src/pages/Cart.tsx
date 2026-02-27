@@ -50,7 +50,7 @@ const Cart = () => {
                 <div className="bg-white rounded-lg shadow-md overflow-hidden">
                   <ul className="divide-y divide-gray-200">
                     {items.map((item) => (
-                      <li key={item.id} className="p-6">
+                      <li key={`${item.id}|${item.variant_id}`} className="p-6">
                         <div className="flex gap-4">
                           <div className="w-24 h-24 rounded-md overflow-hidden bg-gray-50 flex-shrink-0">
                             <img 

@@ -383,30 +383,30 @@ export const login = async (req: Request, res: Response) => {
       });
     }
     
-    // Get Supabase auth session first
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    // Use service-role client so the auth call routes through the proxy (supabaseAdmin)
+    const client = supabaseAdmin || supabase;
+    const { data: authData, error: authError } = await client.auth.signInWithPassword({
       email,
       password,
     });
     
-    if (authError) {
+    if (authError || !authData.session) {
       console.error('Supabase auth error:', authError);
       return res.status(401).json({
         success: false,
-        message: 'Please register'
+        message: authError?.message || 'Invalid email or password'
       });
     }
     
-    // Get or create profile
+    // Get or create profile using admin client (bypasses RLS)
     let profile;
-    const { data: existingProfile, error: profileError } = await supabase
+    const { data: existingProfile, error: profileError } = await client
       .from('profiles')
       .select('*')
       .eq('id', authData.user.id)
       .single();
     
     if (profileError) {
-      // Profile not found - return error instead of creating
       console.error('Login successful but profile not found for user ID:', authData.user.id, 'Error:', profileError);
       return res.status(500).json({
         success: false,
@@ -434,7 +434,7 @@ export const login = async (req: Request, res: Response) => {
     }
 
     if (profile.company_id !== activeCompanyId) {
-      await supabase
+      await client
         .from('profiles')
         .update({ company_id: activeCompanyId })
         .eq('id', profile.id);
@@ -447,16 +447,19 @@ export const login = async (req: Request, res: Response) => {
     return res.status(200).json({
       success: true,
       data: {
-        token: authData.session.access_token,
+        access_token: authData.session.access_token,   // frontend expects access_token
+        refresh_token: authData.session.refresh_token, // frontend expects refresh_token
+        roles: userRoles,                              // frontend expects roles at data level
         user: {
           id: profile.id,
           email: profile.email,
           first_name: profile.first_name,
           last_name: profile.last_name,
           phone: profile.phone,
-          role: primaryRole, // Backward compatibility
-          roles: userRoles, // New: array of roles
-          company_id: activeCompanyId
+          role: primaryRole,
+          roles: userRoles,
+          company_id: activeCompanyId,
+          created_at: profile.created_at,
         }
       }
     });
@@ -466,6 +469,37 @@ export const login = async (req: Request, res: Response) => {
       success: false,
       message: 'An unexpected error occurred during login'
     });
+  }
+};
+
+// Refresh session — accepts { refresh_token } and returns new { access_token, refresh_token }
+export const refresh = async (req: Request, res: Response) => {
+  try {
+    const { refresh_token } = req.body;
+    if (!refresh_token) {
+      return res.status(400).json({ success: false, message: 'refresh_token is required' });
+    }
+
+    // Use service-role client when available, otherwise fall back to anon client (for type safety)
+    const client = supabaseAdmin || supabase;
+    const { data, error } = await client.auth.refreshSession({ refresh_token });
+
+    // Guard against data being null/undefined when refresh fails
+    if (error || !data?.session) {
+      return res.status(401).json({
+        success: false,
+        message: error?.message || 'Failed to refresh session',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+    });
+  } catch (error: any) {
+    console.error('Unexpected error during token refresh:', error);
+    return res.status(500).json({ success: false, message: 'An unexpected error occurred during token refresh' });
   }
 };
 
@@ -573,8 +607,8 @@ export const getCurrentUser = async (req: Request, res: Response) => {
       });
     }
 
-    // Fetch full profile once company is verified
-    const { data: profile, error } = await supabase
+    // Fetch full profile once company is verified (use admin client to bypass RLS)
+    const { data: profile, error } = await adminClient
       .from('profiles')
       .select('*')
       .eq('id', userId)
@@ -599,7 +633,7 @@ export const getCurrentUser = async (req: Request, res: Response) => {
     const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
     
     if (profile?.company_id !== activeCompanyId) {
-      await supabase
+      await adminClient
         .from('profiles')
         .update({ company_id: activeCompanyId })
         .eq('id', userId);

@@ -55,7 +55,7 @@ export const getOrders = async (req: Request, res: Response) => {
     // Get customer user IDs if user is sales (not admin)
     let customerUserIds: string[] | null = null;
     if (isSales && !isAdmin) {
-      const { data: customers } = await supabase
+      const { data: customers } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('user_id')
         .eq('sales_executive_id', userId)
@@ -78,7 +78,7 @@ export const getOrders = async (req: Request, res: Response) => {
     }
     
     // First get the total count (filtered by company_id and sales_executive if needed)
-    let countQuery = supabase
+    let countQuery = (supabaseAdmin || supabase)
       .from('orders')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', req.companyId);
@@ -99,7 +99,7 @@ export const getOrders = async (req: Request, res: Response) => {
     
     const { count: totalCount } = await countQuery;
     
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('orders')
       .select(`
         *,
@@ -233,7 +233,7 @@ export const getUserOrders = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Company context is required');
     }
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('orders')
       .select(`
         *,
@@ -303,7 +303,7 @@ export const getOrderById = async (req: Request, res: Response) => {
     console.log('User admin status:', isAdmin, 'User sales status:', isSales);
     
     // First, get the order details
-    const { data: order, error: orderError } = await supabase
+    const { data: order, error: orderError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select(`
         *,
@@ -348,7 +348,7 @@ export const getOrderById = async (req: Request, res: Response) => {
     
     if (!hasAccess && isSales) {
       // For sales, check if this order belongs to their customer
-      const { data: customer } = await supabase
+      const { data: customer } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('id, sales_executive_id')
         .eq('user_id', order.user_id)
@@ -371,7 +371,7 @@ export const getOrderById = async (req: Request, res: Response) => {
     }
     
     // Get order items with product and variant details
-    const { data: orderItems, error: itemsError } = await supabase
+    const { data: orderItems, error: itemsError } = await (supabaseAdmin || supabase)
       .from('order_items')
       .select(`
         *,
@@ -409,7 +409,7 @@ export const getOrderById = async (req: Request, res: Response) => {
     
     // Get credit details if applicable (for both credit and partial payment status)
     if (order.payment_status === 'credit' || order.payment_status === 'partial') {
-      const { data: creditPeriod, error: creditError } = await supabase
+      const { data: creditPeriod, error: creditError } = await (supabaseAdmin || supabase)
         .from('credit_periods')
         .select('*')
         .eq('order_id', id)
@@ -423,7 +423,7 @@ export const getOrderById = async (req: Request, res: Response) => {
 
     // Get shipping address if available
     if (order.shipping_address_id) {
-      const { data: shippingAddress, error: shippingAddressError } = await supabase
+      const { data: shippingAddress, error: shippingAddressError } = await (supabaseAdmin || supabase)
         .from('addresses')
         .select('*')
         .eq('id', order.shipping_address_id)
@@ -436,7 +436,7 @@ export const getOrderById = async (req: Request, res: Response) => {
     
     // Get billing address if available and different from shipping
     if (order.billing_address_id && order.billing_address_id !== order.shipping_address_id) {
-      const { data: billingAddress, error: billingAddressError } = await supabase
+      const { data: billingAddress, error: billingAddressError } = await (supabaseAdmin || supabase)
         .from('addresses')
         .select('*')
         .eq('id', order.billing_address_id)
@@ -448,7 +448,7 @@ export const getOrderById = async (req: Request, res: Response) => {
     }
 
     // Get customer details
-    const { data: customer, error: customerError } = await supabase
+    const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('*')
       .eq('user_id', order.user_id)
@@ -509,7 +509,7 @@ export const createOrder = async (req: Request, res: Response) => {
       console.log('Checking shipping address:', shipping_address_id, 'for user:', userId);
       
       // Verify the shipping address exists and belongs to the user
-      const { data: shippingAddr, error: shippingAddrError } = await supabase
+      const { data: shippingAddr, error: shippingAddrError } = await (supabaseAdmin || supabase)
         .from('addresses')
         .select('id, user_id')
         .eq('id', shipping_address_id)
@@ -527,7 +527,7 @@ export const createOrder = async (req: Request, res: Response) => {
       // Use either provided billing address ID or shipping address ID
       if (billing_address_id && billing_address_id !== shipping_address_id) {
         // Verify the billing address exists and belongs to the user
-        const { data: billingAddr, error: billingAddrError } = await supabase
+        const { data: billingAddr, error: billingAddrError } = await (supabaseAdmin || supabase)
           .from('addresses')
           .select('id')
           .eq('id', billing_address_id)
@@ -547,7 +547,7 @@ export const createOrder = async (req: Request, res: Response) => {
     else if (shipping_address) {
       // Create shipping address
       console.log('Creating shipping address...');
-      const { data: shippingAddr, error: shippingAddrError } = await supabase
+      const { data: shippingAddr, error: shippingAddrError } = await (supabaseAdmin || supabase)
         .from('addresses')
         .insert({
           user_id: userId,
@@ -572,7 +572,7 @@ export const createOrder = async (req: Request, res: Response) => {
       // Create billing address if different from shipping
       if (billing_address && JSON.stringify(billing_address) !== JSON.stringify(shipping_address)) {
         console.log('Creating billing address...');
-        const { data: billingAddr, error: billingAddrError } = await supabase
+        const { data: billingAddr, error: billingAddrError } = await (supabaseAdmin || supabase)
           .from('addresses')
           .insert({
             user_id: userId,
@@ -658,7 +658,7 @@ export const createOrder = async (req: Request, res: Response) => {
       const creditAmount = req_payment_status === 'full_credit' ? total_amount : (total_amount - (partial_payment_amount || 0));
       
       // First get the customer ID for this user
-      const { data: customerData, error: customerError } = await supabase
+      const { data: customerData, error: customerError } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('id')
         .eq('user_id', userId)
@@ -680,7 +680,7 @@ export const createOrder = async (req: Request, res: Response) => {
       const endDate = new Date();
       endDate.setDate(startDate.getDate() + (credit_period || 30));
       
-      const { error: creditError } = await supabase
+      const { error: creditError } = await (supabaseAdmin || supabase)
         .from('credit_periods')
         .insert({
           order_id: result.id,
@@ -711,14 +711,14 @@ export const createOrder = async (req: Request, res: Response) => {
     
     // Clear the user's cart
     console.log('Clearing cart...');
-    const { data: cart } = await supabase
+    const { data: cart } = await (supabaseAdmin || supabase)
       .from('carts')
       .select('id')
       .eq('user_id', userId)
       .single();
     
     if (cart) {
-      const { error: cartError } = await supabase
+      const { error: cartError } = await (supabaseAdmin || supabase)
         .from('cart_items')
         .delete()
         .eq('cart_id', cart.id);
@@ -790,7 +790,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     }
 
     // Fetch the current order data to check previous status and inventory_updated flag
-    const { data: currentOrder, error: currentOrderError } = await supabase
+    const { data: currentOrder, error: currentOrderError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select('*, order_items(product_id, quantity, warehouse_id), status, inventory_updated, user_id, payment_status')
       .eq('id', id)
@@ -806,7 +806,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     
     if (!hasAccess && isSales) {
       // Check if this order belongs to a customer assigned to this sales exec
-      const { data: customer, error: customerError } = await supabase
+      const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('sales_executive_id')
         .eq('user_id', currentOrder.user_id)
@@ -878,7 +878,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     
     // Check if this order was created through sales dashboard
     // Sales dashboard orders have a customer record associated with the user_id
-    const { data: customer } = await supabase
+    const { data: customer } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('id')
       .eq('user_id', currentOrder.user_id)
@@ -914,7 +914,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     if (isPaymentStatusChanging) {
       try {
         // Find associated credit period
-        const { data: creditPeriod, error: creditError } = await supabase
+        const { data: creditPeriod, error: creditError } = await (supabaseAdmin || supabase)
           .from('credit_periods')
           .select('*')
           .eq('order_id', id)
@@ -974,7 +974,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
             console.log('[OrderUpdate] Attempting to update credit_periods for ID:', creditPeriod.id, 'with data:', JSON.stringify(creditUpdateData));
             
             // Update credit period
-            const { data: updatedCpData, error: updateCreditError } = await supabase
+            const { data: updatedCpData, error: updateCreditError } = await (supabaseAdmin || supabase)
               .from('credit_periods')
               .update(creditUpdateData)
               .eq('id', creditPeriod.id)
@@ -987,7 +987,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
               console.log('[OrderUpdate] Credit period updated successfully. Result:', JSON.stringify(updatedCpData));
               
               // Find the customer record for this order
-              const { data: customer, error: customerError } = await supabase
+              const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
                 .from('customers')
                 .select('id, current_credit')
                 .eq('user_id', currentOrder.user_id)
@@ -1001,7 +1001,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
                 const currentCredit = parseFloat(customer.current_credit.toString());
                 const newCreditAmount = Math.max(0, currentCredit - paymentAmountToProcess);
                 
-                const { error: customerUpdateError } = await supabase
+                const { error: customerUpdateError } = await (supabaseAdmin || supabase)
                   .from('customers')
                   .update({ current_credit: newCreditAmount })
                   .eq('id', customer.id)
@@ -1027,7 +1027,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       console.log(`Order ${id} cancelled. Handling credit amounts and inventory restoration.`);
       
       // Find associated credit period if it exists
-      const { data: creditPeriod, error: creditError } = await supabase
+      const { data: creditPeriod, error: creditError } = await (supabaseAdmin || supabase)
         .from('credit_periods')
         .select('*')
         .eq('order_id', id)
@@ -1038,7 +1038,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         console.log('Found credit period for cancelled order:', creditPeriod);
         
         // Get the customer record
-        const { data: customer, error: customerError } = await supabase
+        const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
           .from('customers')
           .select('id, current_credit')
           .eq('user_id', currentOrder.user_id)
@@ -1059,7 +1059,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           });
           
           // Update customer's current_credit
-          const { error: updateError } = await supabase
+          const { error: updateError } = await (supabaseAdmin || supabase)
             .from('customers')
             .update({ current_credit: newCreditAmount })
             .eq('id', customer.id)
@@ -1079,7 +1079,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           ? `${existingDescription}\n${cancellationEntry}`
           : cancellationEntry;
 
-        const creditUpdateResult = await supabase
+        const creditUpdateResult = await (supabaseAdmin || supabase)
           .from('credit_periods')
           .update({
             description: newDescription,
@@ -1121,7 +1121,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
     console.log(`Attempting to cancel order ${id} by user ${userId} with role ${userRole}`);
 
     // Fetch the order
-    let orderQuery = supabase
+    let orderQuery = (supabaseAdmin || supabase)
       .from('orders')
       .select('*, order_items(product_id, quantity, warehouse_id), user_id') // Ensure user_id is selected
       .eq('id', id)
@@ -1154,7 +1154,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
       hasPermission = true;
       console.log(`Admin ${userId} has permission to cancel order ${id}`);
     } else if (effectiveRoleForCancellation === 'sales') { // This means sales exec acting on OTHERS' orders
-      const { data: customer } = await supabase
+      const { data: customer } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('sales_executive_id')
         .eq('user_id', order.user_id)
@@ -1229,7 +1229,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
     }
     
     // After updating the order status to cancelled, update the associated credit period if it exists
-    const { data: creditPeriod, error: creditError } = await supabase
+    const { data: creditPeriod, error: creditError } = await (supabaseAdmin || supabase)
       .from('credit_periods')
       .select('*')
       .eq('order_id', id)
@@ -1239,7 +1239,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
     if (!creditError && creditPeriod) {
       console.log('[CancelOrder] Found credit period for cancelled order:', creditPeriod);
       // Get the customer record
-      const { data: customer, error: customerError } = await supabase
+      const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('id, current_credit')
         .eq('user_id', order.user_id)
@@ -1251,7 +1251,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
         const creditAmount = parseFloat(creditPeriod.amount.toString());
         const newCreditAmount = Math.max(0, currentCredit - creditAmount);
         // Update customer's current_credit
-        const { error: updateError } = await supabase
+        const { error: updateError } = await (supabaseAdmin || supabase)
           .from('customers')
           .update({ current_credit: newCreditAmount })
           .eq('id', customer.id)
@@ -1263,7 +1263,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
         }
       }
       // Mark credit period as cancelled and update its description (no status field)
-      const creditUpdateResult = await supabase
+      const creditUpdateResult = await (supabaseAdmin || supabase)
         .from('credit_periods')
         .update({
           description: 'Order Cancelled',
@@ -1314,7 +1314,7 @@ export const getSalesOrders = async (req: Request, res: Response) => {
     console.log('Fetching orders for user:', userId, 'isAdmin:', isAdmin, 'isSales:', isSales);
 
     // Get all customers - filter by sales_executive_id only if user is sales (not admin)
-    let customerQuery = supabase
+    let customerQuery = (supabaseAdmin || supabase)
       .from('customers')
       .select('id, user_id, name, sales_executive_id')
       .eq('company_id', req.companyId);
@@ -1341,7 +1341,7 @@ export const getSalesOrders = async (req: Request, res: Response) => {
     const customerUserIds = customers.map(c => c.user_id);
     console.log('Fetching orders for customer user IDs:', customerUserIds);
 
-    const { data: orders, error: ordersError } = await supabase
+    const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select(`
         *,
@@ -1438,7 +1438,7 @@ export const getSalesDashboardStats = async (req: Request, res: Response) => {
     }
     
     // Get all customers - filter by sales_executive_id only if user is sales (not admin)
-    let customerQuery = supabase
+    let customerQuery = (supabaseAdmin || supabase)
       .from('customers')
       .select('id, user_id, name, current_credit')
       .eq('company_id', req.companyId);
@@ -1455,7 +1455,7 @@ export const getSalesDashboardStats = async (req: Request, res: Response) => {
     const totalCustomers = customers?.length || 0;
     const customerUserIds = customers.map(c => c.user_id);
     // Get all orders for these customers (filtered by company_id)
-    const { data: orders, error: ordersError } = await supabase
+    const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select('id, user_id, total_amount, status, created_at, order_type')
       .in('user_id', customerUserIds)
@@ -1519,7 +1519,7 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
     startDate.setDate(startDate.getDate() - days);
 
     // Get all customers - filter by sales_executive_id only if user is sales (not admin)
-    let customerQuery = supabase
+    let customerQuery = (supabaseAdmin || supabase)
       .from('customers')
       .select('id, user_id, name, current_credit, credit_limit')
       .eq('company_id', req.companyId);
@@ -1572,7 +1572,7 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
     }
 
     // Get all orders for these customers within the date range (filtered by company_id)
-    const { data: orders, error: ordersError } = await supabase
+    const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select(
         'id, user_id, total_amount, status, payment_status, payment_method, created_at, order_type'
@@ -1593,7 +1593,7 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
 
     // Get credit periods for orders with partial or credit payments to calculate actual amounts (filtered by company_id)
     const orderIds = filteredOrders.map(o => o.id);
-    const { data: creditPeriods, error: creditError } = await supabase
+    const { data: creditPeriods, error: creditError } = await (supabaseAdmin || supabase)
       .from('credit_periods')
       .select('order_id, amount')
       .in('order_id', orderIds)
@@ -1714,7 +1714,7 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
 
     // Get top products (need to fetch order items with variant pricing) (filtered by company_id)
     const productOrderIds = filteredOrders.map(o => o.id);
-    const { data: orderItems, error: itemsError } = await supabase
+    const { data: orderItems, error: itemsError } = await (supabaseAdmin || supabase)
       .from('order_items')
       .select(`
         product_id,
@@ -1782,7 +1782,7 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
 
     // Get current active sales target (filtered by company_id)
     const today = new Date().toISOString().split('T')[0];
-    let targetQuery = supabase
+    let targetQuery = (supabaseAdmin || supabase)
       .from('sales_targets')
       .select('*')
       .eq('company_id', req.companyId)

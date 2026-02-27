@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { hasAnyRole } from '../utils/roles';
 import { ApiError } from '../middleware/error';
 
@@ -32,7 +32,7 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
     const isSales = await hasAnyRole(req.user.id, req.companyId, ['sales']);
     
     // Get the order to check permissions
-    const { data: order, error: orderError } = await supabase
+    const { data: order, error: orderError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select('*, user_id')
       .eq('id', id)
@@ -48,7 +48,7 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
     
     // For sales, check if this is their customer's order
     if (!hasAccess && isSales) {
-      const { data: customer } = await supabase
+      const { data: customer } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('sales_executive_id')
         .eq('user_id', order.user_id)
@@ -77,7 +77,7 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
     if (estimated_delivery) updateData.estimated_delivery = estimated_delivery;
     if (notes) updateData.notes = notes;
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('orders')
       .update(updateData)
       .eq('id', id)

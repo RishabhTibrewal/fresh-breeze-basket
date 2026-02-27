@@ -16,7 +16,7 @@ export const getInventory = async (req: Request, res: Response) => {
             });
         }
         
-        let query = supabase
+        let query = (supabaseAdmin || supabase)
             .from('warehouse_inventory')
             .select(`
                 *,
@@ -76,7 +76,7 @@ export const getInventoryByProductId = async (req: Request, res: Response) => {
             });
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await (supabaseAdmin || supabase)
             .from('warehouse_inventory')
             .select(`
                 *,

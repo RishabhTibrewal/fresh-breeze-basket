@@ -118,10 +118,18 @@ const LoadingFallback = () => (
   </div>
 );
 
-// Create a new QueryClient instance inside the component
+// Create QueryClient once outside the component so it persists across re-renders
+// (Creating it inside would wipe the entire cache on every App re-render)
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes — reduces redundant refetches
+      retry: 1,
+    },
+  },
+});
+
 const App: React.FC = () => {
-  const queryClient = new QueryClient();
-  
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
@@ -154,7 +162,7 @@ const App: React.FC = () => {
                       <Route path="customer" element={<CustomerProfilePage />} />
                       <Route path="address" element={<AddressPage />} />
                       <Route path="orders" element={<OrdersPage />} />
-                      <Route path="orders/:id" element={<OrderDocumentPage />} />
+                      <Route path="orders/:id" element={<OrderDetailsPage />} />
                       <Route path="orders/:id/return" element={<CreateReturnOrderPage />} />
                       <Route path="payments" element={<PaymentHistoryPage />} />
                       <Route path="payment" element={<PaymentMethodsPage />} />
@@ -193,7 +201,7 @@ const App: React.FC = () => {
                       <Route path="inventory/balance" element={<PlaceholderPage />} />
                       <Route path="inventory/warehouse-balance" element={<PlaceholderPage />} />
                       <Route path="orders" element={<AdminOrderList />} />
-                      <Route path="orders/:id" element={<OrderDocumentPage />} />
+                      <Route path="orders/:id" element={<AdminOrderDetails />} />
                       <Route path="orders/:id/return" element={<CreateReturnOrderPage />} />
                       <Route path="customers" element={<CustomerList />} />
                       <Route path="customers/:id" element={<AdminCustomerDetails />} />

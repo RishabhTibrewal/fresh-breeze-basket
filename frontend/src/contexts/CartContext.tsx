@@ -315,58 +315,63 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Process cart items
       cartItems.forEach((item: any) => {
         if (!item || !item.products) return;
-        
-        // Store the mapping of product ID to cart item ID
-        setCartItemIds(prev => ({
-          ...prev,
-          [item.products.id]: item.id
-        }));
+
+        // Key is variant_id (preferred) so the same product with two variants
+        // gets two separate entries in the cartItemIds map
+        const itemKey = item.variant_id
+          ? `${item.products.id}|${item.variant_id}`
+          : item.products.id;
+
+        setCartItemIds(prev => ({ ...prev, [itemKey]: item.id }));
         
         const quantity = typeof item.quantity === 'string' ? parseInt(item.quantity, 10) : item.quantity;
-        
-        // Create minimal Product and Variant from backend cart item
-        // Note: Backend cart items may not have full variant data, so we create minimal objects
+
+        // Use the joined variant object returned by the new backend query
+        const backendVariant = item.variant;
+        const backendPrice = backendVariant?.price;
+
         const product: Product = {
           id: item.products.id,
           name: item.products.name || 'Unknown Product',
           description: item.products.description || null,
           category_id: item.products.category_id || null,
           slug: item.products.slug || '',
-          is_active: item.products.is_active || false,
+          is_active: item.products.is_active ?? true,
           nutritional_info: null,
           origin: null,
           brand_id: null,
-          product_code: item.products.product_code || null,
+          product_code: null,
           created_at: '',
           updated_at: '',
         };
 
-        // Create minimal variant - backend may not provide full variant data
         const variant: ProductVariant = {
-          id: item.variant_id || item.products.id, // Fallback to product ID if no variant_id
+          id: backendVariant?.id || item.variant_id || item.products.id,
           product_id: item.products.id,
-          name: item.variant_name || item.products.name || 'Default Variant',
-          sku: item.variant_sku || null,
-          is_default: true,
+          name: backendVariant?.name || 'Default Variant',
+          sku: backendVariant?.sku || null,
+          is_default: backendVariant?.is_default ?? true,
           is_active: true,
           is_featured: false,
-          image_url: item.products.image_url || null,
-          unit: item.products.unit || null,
-          unit_type: item.products.unit_type || null,
+          // Prefer variant image, then product image
+          image_url: backendVariant?.image_url || item.products.image_url || null,
+          unit: backendVariant?.unit ?? null,
+          unit_type: backendVariant?.unit_type || null,
           best_before: null,
           hsn: null,
           badge: null,
           brand_id: null,
           tax_id: null,
-          price_id: '',
-          price: item.products.price || item.products.sale_price ? {
-            id: '',
+          price_id: backendPrice?.id || '',
+          // Real variant price from product_prices table
+          price: backendPrice ? {
+            id: backendPrice.id,
             product_id: null,
-            variant_id: item.variant_id || item.products.id,
+            variant_id: backendVariant?.id || item.variant_id,
             outlet_id: null,
-            price_type: 'default',
-            mrp_price: Number(item.products.price) || 0,
-            sale_price: item.products.sale_price ? Number(item.products.sale_price) : Number(item.products.price) || 0,
+            price_type: backendPrice.price_type || 'default',
+            mrp_price: Number(backendPrice.mrp_price) || 0,
+            sale_price: Number(backendPrice.sale_price) || 0,
             brand_id: null,
             valid_from: new Date().toISOString(),
             valid_until: null,

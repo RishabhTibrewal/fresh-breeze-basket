@@ -5,6 +5,7 @@ import 'express-async-errors';
 // Load environment variables first
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
+
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {
   console.error('UNCAUGHT EXCEPTION! 💥 Shutting down gracefully...');

@@ -17,7 +17,6 @@ import { StripeProvider } from "@/components/StripeProvider";
 
 import { addressApi } from "@/api/addresses";
 import { ordersService } from "@/api/orders";
-import { productsService } from "@/api/products";
 import { useCart } from "@/contexts/CartContext";
 import { Address } from "@/types/database";
 import AddressForm from "./account/AddressForm";
@@ -105,43 +104,16 @@ export default function CheckoutPage() {
         return;
       }
       
-      // Fetch latest product data to ensure price consistency
-      const productIds = cartState.items.map(item => item.id);
-      const latestProductsData = await Promise.all(
-        productIds.map(async (id) => {
-          try {
-            return await productsService.getById(id);
-          } catch (error) {
-            console.error(`Error fetching product ${id}:`, error);
-            return null;
-          }
-        })
-      );
-      
-      // Filter out any failed product fetches
-      const validProducts = latestProductsData.filter(product => product !== null);
-      
-      // Check if all products were fetched successfully
-      if (validProducts.length !== productIds.length) {
-        toast.error("Some products are unavailable. Please refresh and try again.");
-        setIsProcessing(false);
-        setIsInitializingPayment(false);
-        return;
-      }
-      
-      // Prepare items with latest prices
-      const items = cartState.items.map(cartItem => {
-        const latestProduct = validProducts.find(p => p?.id === cartItem.id);
-        const currentPrice = latestProduct?.sale_price || latestProduct?.price;
-        
-        return {
-          product_id: cartItem.id,
-          quantity: cartItem.quantity,
-          price: currentPrice
-        };
-      });
-      
-      // Calculate total amount with latest prices
+      // Build order items directly from cart — variant prices are already accurate
+      // (loaded from product_prices via the backend cart sync)
+      const items = cartState.items.map(cartItem => ({
+        product_id: cartItem.id,
+        variant_id: cartItem.variant_id,                 // send the selected variant
+        quantity: cartItem.quantity,
+        price: cartItem.sale_price ?? cartItem.price,   // use variant's sale_price, fall back to MRP
+      }));
+
+      // Calculate total amount from cart prices
       const subtotal = items.reduce((total, item) => total + (item.price * item.quantity), 0);
       const shippingCost = subtotal >= 100 ? 0 : 10;
       const taxRate = 0.05; // 5% tax rate

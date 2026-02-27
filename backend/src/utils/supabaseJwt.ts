@@ -1,13 +1,22 @@
+// supabaseJwt.ts — JWT verification using remote JWKS
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_JWKS_URL = process.env.SUPABASE_JWKS_URL;
+// SUPABASE_ISSUER is the real Supabase project URL used for JWT `iss` claim validation.
+// It must match the `iss` embedded in every JWT Supabase signs (always the real project URL,
+// never a proxy). Separate from SUPABASE_URL which may point to a Cloudflare proxy.
+const SUPABASE_ISSUER = process.env.SUPABASE_ISSUER;
 
 if (!SUPABASE_URL && !SUPABASE_JWKS_URL) {
   throw new Error('Missing SUPABASE_URL or SUPABASE_JWKS_URL');
 }
 
 const normalizedSupabaseUrl = SUPABASE_URL?.replace(/\/$/, '');
+// Use the explicit issuer URL if set, otherwise fall back to SUPABASE_URL.
+// When SUPABASE_URL is a proxy (e.g. Cloudflare Worker), SUPABASE_ISSUER must be
+// set to the real Supabase project URL so that JWT `iss` validation passes.
+const normalizedIssuerUrl = (SUPABASE_ISSUER ?? SUPABASE_URL)?.replace(/\/$/, '');
 const JWKS_URL = SUPABASE_JWKS_URL
   ? new URL(SUPABASE_JWKS_URL)
   : new URL(`${normalizedSupabaseUrl}/auth/v1/.well-known/jwks.json`);
@@ -67,7 +76,7 @@ const isJwksUnavailableError = (error: unknown) => {
 export async function verifySupabaseJwt(token: string): Promise<SupabaseJwtPayload> {
   try {
     const { payload } = await jwtVerify(token, jwks, {
-      issuer: normalizedSupabaseUrl ? `${normalizedSupabaseUrl}/auth/v1` : undefined,
+      issuer: normalizedIssuerUrl ? `${normalizedIssuerUrl}/auth/v1` : undefined,
       audience: 'authenticated'
     });
 
@@ -118,7 +127,7 @@ export async function verifySupabaseJwt(token: string): Promise<SupabaseJwtPaylo
         sub: decoded.sub,
         email: decoded.email,
         exp: decoded.exp,
-        expectedIssuer: `${normalizedSupabaseUrl}/auth/v1`,
+        expectedIssuer: `${normalizedIssuerUrl}/auth/v1`,
         expectedAudience: 'authenticated'
       });
     }

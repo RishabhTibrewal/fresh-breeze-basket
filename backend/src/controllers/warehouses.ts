@@ -11,7 +11,7 @@ export const getAllWarehouses = async (req: Request, res: Response) => {
     
     const { is_active } = req.query;
     
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('warehouses')
       .select('*')
       .eq('company_id', req.companyId)
@@ -48,7 +48,7 @@ export const getWarehouseById = async (req: Request, res: Response) => {
     
     const { warehouseId } = req.params;
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('warehouses')
       .select('*')
       .eq('id', warehouseId)
@@ -97,7 +97,7 @@ export const createWarehouse = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Name and code are required');
     }
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('warehouses')
       .insert({
         name,
@@ -183,7 +183,7 @@ export const updateWarehouse = async (req: Request, res: Response) => {
     delete updateData.created_at;
     delete updateData.company_id; // Prevent company_id changes
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('warehouses')
       .update({
         ...updateData,
@@ -220,7 +220,7 @@ export const deleteWarehouse = async (req: Request, res: Response) => {
     const { id } = req.params;
     
     // Soft delete by setting is_active to false
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('warehouses')
       .update({
         is_active: false,
@@ -258,7 +258,7 @@ export const getWarehouseInventory = async (req: Request, res: Response) => {
     const { warehouseId } = req.params;
     const { product_id, low_stock } = req.query;
     
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('warehouse_inventory')
       .select(`
         *,
@@ -345,7 +345,7 @@ export const getProductStockAcrossWarehouses = async (req: Request, res: Respons
       console.warn(`⚠️ Individual stock API called for product ${productId}. Consider using bulk endpoint instead.`);
     }
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('warehouse_inventory')
       .select(`
         *,
@@ -421,7 +421,7 @@ export const getBulkProductStock = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Maximum 100 products allowed per request');
     }
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabaseAdmin || supabase)
       .from('warehouse_inventory')
       .select(`
         *,

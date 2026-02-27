@@ -17,7 +17,8 @@ export const getAllUsers = async (req: Request, res: Response) => {
     const limitNum = parseInt(limit as string, 10);
     const offset = (pageNum - 1) * limitNum;
     
-    let query = supabase
+    const db = supabaseAdmin || supabase;
+    let query = db
       .from('profiles')
       .select('*', { count: 'exact' })
       .eq('company_id', req.companyId);
@@ -83,7 +84,9 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 
     // Get total number of users (filtered by company_id)
     // Use supabaseAdmin to bypass RLS for admin operations
-    const { count: userCount, error: userError } = await (supabaseAdmin || supabase)
+    const db = supabaseAdmin || supabase;
+
+    const { count: userCount, error: userError } = await db
       .from('profiles')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', req.companyId);
@@ -94,7 +97,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     }
     
     // Get total number of products (filtered by company_id)
-    const { count: productCount, error: productError } = await supabase
+    const { count: productCount, error: productError } = await db
       .from('products')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', req.companyId);
@@ -107,7 +110,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     const lastWeekDate = new Date();
     lastWeekDate.setDate(lastWeekDate.getDate() - 7);
     
-    const { count: newProductsCount, error: newProductsError } = await supabase
+    const { count: newProductsCount, error: newProductsError } = await db
       .from('products')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', req.companyId)
@@ -118,7 +121,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     }
     
     // Get total number of orders (filtered by company_id)
-    const { count: orderCount, error: orderError } = await supabase
+    const { count: orderCount, error: orderError } = await db
       .from('orders')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', req.companyId);
@@ -128,7 +131,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     }
     
     // Get number of active orders (pending or processing) (filtered by company_id)
-    const { count: activeOrderCount, error: activeOrderError } = await supabase
+    const { count: activeOrderCount, error: activeOrderError } = await db
       .from('orders')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', req.companyId)
@@ -139,7 +142,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     }
     
     // Get total sales amount (filtered by company_id)
-    const { data: salesData, error: salesError } = await supabase
+    const { data: salesData, error: salesError } = await db
       .from('orders')
       .select('total_amount')
       .eq('company_id', req.companyId);
@@ -154,7 +157,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     const lastMonthDate = new Date();
     lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
     
-    const { data: lastMonthSalesData, error: lastMonthSalesError } = await supabase
+    const { data: lastMonthSalesData, error: lastMonthSalesError } = await db
       .from('orders')
       .select('total_amount')
       .eq('company_id', req.companyId)
@@ -170,7 +173,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     const twoMonthsAgoDate = new Date();
     twoMonthsAgoDate.setMonth(twoMonthsAgoDate.getMonth() - 2);
     
-    const { data: twoMonthsAgoSalesData, error: twoMonthsAgoSalesError } = await supabase
+    const { data: twoMonthsAgoSalesData, error: twoMonthsAgoSalesError } = await db
       .from('orders')
       .select('total_amount')
       .eq('company_id', req.companyId)
@@ -191,7 +194,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     
     // Get products with low inventory based on warehouse inventory stock (not product.stock_count)
     // First, get all products for the company
-    const { data: allProducts, error: productsError } = await supabase
+    const { data: allProducts, error: productsError } = await db
       .from('products')
       .select('id, name, category_id, categories(name)')
       .eq('company_id', req.companyId);
@@ -206,7 +209,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     if (allProducts && allProducts.length > 0) {
       // Get warehouse inventory for all products
       const productIds = allProducts.map(p => p.id);
-      const { data: warehouseInventory, error: inventoryError } = await supabase
+      const { data: warehouseInventory, error: inventoryError } = await db
         .from('warehouse_inventory')
         .select('product_id, stock_count')
         .in('product_id', productIds)
@@ -238,7 +241,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     
     
     // Get recent orders (filtered by company_id)
-    const { data: recentOrders, error: recentOrdersError } = await supabase
+    const { data: recentOrders, error: recentOrdersError } = await db
       .from('orders')
       .select(`
         id,
@@ -258,7 +261,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     // Fetch profile data separately for each order (filtered by company_id)
     const enhancedOrders = [];
     for (const order of recentOrders || []) {
-      const { data: profileData } = await supabase
+      const { data: profileData } = await db
         .from('profiles')
         .select('email, first_name, last_name')
         .eq('id', order.user_id)
@@ -433,7 +436,7 @@ export const updateUserRoles = async (req: Request, res: Response) => {
     // Update company_memberships for backward compatibility
     // RLS policies now allow admins to manage memberships
     const primaryRole = roles[0] || 'user';
-    const { error: membershipError } = await supabase
+    const { error: membershipError } = await (supabaseAdmin || supabase)
       .from('company_memberships')
       .upsert({
         user_id: userId,
@@ -451,7 +454,7 @@ export const updateUserRoles = async (req: Request, res: Response) => {
 
     // Update profile role for backward compatibility
     // RLS policies now allow admins to update profiles
-    const { error: profileError } = await supabase
+    const { error: profileError } = await (supabaseAdmin || supabase)
       .from('profiles')
       .update({ 
         role: primaryRole,
@@ -520,7 +523,7 @@ export const getSalesExecutives = async (req: Request, res: Response) => {
     }
     
     // Get the 'sales' role ID
-    const { data: salesRole, error: roleError } = await supabase
+    const { data: salesRole, error: roleError } = await (supabaseAdmin || supabase)
       .from('roles')
       .select('id')
       .eq('name', 'sales')
@@ -539,7 +542,7 @@ export const getSalesExecutives = async (req: Request, res: Response) => {
     }
 
     // Get all users with 'sales' role in this company from user_roles table
-    const { data: userRoles, error: userRolesError } = await supabase
+    const { data: userRoles, error: userRolesError } = await (supabaseAdmin || supabase)
       .from('user_roles')
       .select('user_id')
       .eq('company_id', req.companyId)
@@ -560,7 +563,7 @@ export const getSalesExecutives = async (req: Request, res: Response) => {
     const userIds = userRoles.map(ur => ur.user_id);
 
     // Fetch profiles for these users
-    const { data: salesExecutives, error: profilesError } = await supabase
+    const { data: salesExecutives, error: profilesError } = await (supabaseAdmin || supabase)
       .from('profiles')
       .select('id, email, first_name, last_name, phone, avatar_url, created_at, updated_at')
       .in('id', userIds)
@@ -592,7 +595,7 @@ export const getSalesTargets = async (req: Request, res: Response) => {
     
     const { sales_executive_id, period_type, is_active } = req.query;
 
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('sales_targets')
       .select('*')
       .eq('company_id', req.companyId)
@@ -619,7 +622,7 @@ export const getSalesTargets = async (req: Request, res: Response) => {
     // Fetch profile data and calculate progress for each sales executive
     const targetsWithProfiles = await Promise.all(
       (targets || []).map(async (target) => {
-        const { data: profile } = await supabase
+        const { data: profile } = await (supabaseAdmin || supabase)
           .from('profiles')
           .select('id, email, first_name, last_name')
           .eq('id', target.sales_executive_id)
@@ -627,7 +630,7 @@ export const getSalesTargets = async (req: Request, res: Response) => {
 
         // Calculate achieved amount for this target period
         // Get all customers for this sales executive (filtered by company_id)
-        const { data: customers, error: customersError } = await supabase
+        const { data: customers, error: customersError } = await (supabaseAdmin || supabase)
           .from('customers')
           .select('user_id')
           .eq('sales_executive_id', target.sales_executive_id)
@@ -648,7 +651,7 @@ export const getSalesTargets = async (req: Request, res: Response) => {
           const periodStart = `${target.period_start}T00:00:00.000Z`;
           const periodEnd = `${target.period_end}T23:59:59.999Z`;
           
-          const { data: orders, error: ordersError } = await supabase
+          const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
             .from('orders')
             .select('total_amount, created_at, status')
             .in('user_id', customerUserIds)
@@ -705,7 +708,7 @@ export const getSalesTargetById = async (req: Request, res: Response) => {
     
     const { id } = req.params;
 
-    const { data: target, error } = await supabase
+    const { data: target, error } = await (supabaseAdmin || supabase)
       .from('sales_targets')
       .select('*')
       .eq('id', id)
@@ -717,7 +720,7 @@ export const getSalesTargetById = async (req: Request, res: Response) => {
     }
 
     // Fetch profile data for the sales executive (filtered by company_id)
-    const { data: profile } = await supabase
+    const { data: profile } = await (supabaseAdmin || supabase)
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', target.sales_executive_id)
@@ -788,7 +791,7 @@ export const createSalesTarget = async (req: Request, res: Response) => {
 
     // Verify sales executive exists and has sales role in this company (check membership)
     // Check if user exists in company and has sales role using new role system
-    const { data: membership, error: membershipError } = await supabase
+    const { data: membership, error: membershipError } = await (supabaseAdmin || supabase)
       .from('company_memberships')
       .select('id')
       .eq('user_id', sales_executive_id)
@@ -813,7 +816,7 @@ export const createSalesTarget = async (req: Request, res: Response) => {
     }
 
     // Create target (with company_id)
-    const { data: target, error } = await supabase
+    const { data: target, error } = await (supabaseAdmin || supabase)
       .from('sales_targets')
       .insert({
         sales_executive_id,
@@ -834,7 +837,7 @@ export const createSalesTarget = async (req: Request, res: Response) => {
     }
 
     // Fetch profile data for the sales executive (filtered by company_id)
-    const { data: salesExecutiveProfile } = await supabase
+    const { data: salesExecutiveProfile } = await (supabaseAdmin || supabase)
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', sales_executive_id)
@@ -880,7 +883,7 @@ export const updateSalesTarget = async (req: Request, res: Response) => {
     }
 
     // Check if target exists (filtered by company_id)
-    const { data: existingTarget, error: fetchError } = await supabase
+    const { data: existingTarget, error: fetchError } = await (supabaseAdmin || supabase)
       .from('sales_targets')
       .select('*')
       .eq('id', id)
@@ -945,7 +948,7 @@ export const updateSalesTarget = async (req: Request, res: Response) => {
     }
 
     // Update target (filtered by company_id)
-    const { data: target, error } = await supabase
+    const { data: target, error } = await (supabaseAdmin || supabase)
       .from('sales_targets')
       .update(updateData)
       .eq('id', id)
@@ -958,7 +961,7 @@ export const updateSalesTarget = async (req: Request, res: Response) => {
     }
 
     // Fetch profile data for the sales executive (filtered by company_id)
-    const { data: salesExecutiveProfile } = await supabase
+    const { data: salesExecutiveProfile } = await (supabaseAdmin || supabase)
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', target.sales_executive_id)
@@ -995,7 +998,7 @@ export const deleteSalesTarget = async (req: Request, res: Response) => {
     
     const { id } = req.params;
 
-    const { error } = await supabase
+    const { error } = await (supabaseAdmin || supabase)
       .from('sales_targets')
       .delete()
       .eq('id', id)
@@ -1030,7 +1033,7 @@ export const getCurrentSalesTarget = async (req: Request, res: Response) => {
     const sales_executive_id = req.user?.id;
     const today = new Date().toISOString().split('T')[0];
 
-    const { data: target, error } = await supabase
+    const { data: target, error } = await (supabaseAdmin || supabase)
       .from('sales_targets')
       .select('*')
       .eq('sales_executive_id', sales_executive_id)
@@ -1071,7 +1074,7 @@ export const getAllLeads = async (req: Request, res: Response) => {
     const { stage, priority, source, search, sales_executive_id } = req.query;
 
     // First get all leads (filtered by company_id)
-    let query = supabase
+    let query = (supabaseAdmin || supabase)
       .from('leads')
       .select('*')
       .eq('company_id', req.companyId)
@@ -1109,7 +1112,7 @@ export const getAllLeads = async (req: Request, res: Response) => {
     // Fetch sales executive profiles for each lead
     const leadsWithProfiles = await Promise.all(
       (leads || []).map(async (lead) => {
-        const { data: profile } = await supabase
+        const { data: profile } = await (supabaseAdmin || supabase)
           .from('profiles')
           .select('id, email, first_name, last_name')
           .eq('id', lead.sales_executive_id)
@@ -1144,7 +1147,7 @@ export const getLeadByIdAdmin = async (req: Request, res: Response) => {
     
     const { id } = req.params;
 
-    const { data: lead, error } = await supabase
+    const { data: lead, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('*')
       .eq('id', id)
@@ -1159,7 +1162,7 @@ export const getLeadByIdAdmin = async (req: Request, res: Response) => {
     }
 
     // Fetch sales executive profile (filtered by company_id)
-    const { data: profile } = await supabase
+    const { data: profile } = await (supabaseAdmin || supabase)
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', lead.sales_executive_id)
@@ -1194,7 +1197,7 @@ export const updateLeadAdmin = async (req: Request, res: Response) => {
     }
 
     // Get existing lead to preserve notes if appending (filtered by company_id)
-    const { data: existingLead } = await supabase
+    const { data: existingLead } = await (supabaseAdmin || supabase)
       .from('leads')
       .select('notes, stage, converted_at, lost_at')
       .eq('id', id)
@@ -1224,7 +1227,7 @@ export const updateLeadAdmin = async (req: Request, res: Response) => {
       updateData.lost_at = new Date().toISOString();
     }
 
-    const { data: updatedLead, error } = await supabase
+    const { data: updatedLead, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .update(updateData)
       .eq('id', id)
@@ -1237,7 +1240,7 @@ export const updateLeadAdmin = async (req: Request, res: Response) => {
     }
 
     // Fetch sales executive profile
-    const { data: profile } = await supabase
+    const { data: profile } = await (supabaseAdmin || supabase)
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', updatedLead.sales_executive_id)
@@ -1304,7 +1307,7 @@ export const createLeadAdmin = async (req: Request, res: Response) => {
     }
 
     // Validate that sales_executive_id exists and is a sales role in this company (check membership)
-    const { data: membership, error: membershipError } = await supabase
+    const { data: membership, error: membershipError } = await (supabaseAdmin || supabase)
       .from('company_memberships')
       .select('id, role')
       .eq('user_id', sales_executive_id)
@@ -1339,7 +1342,7 @@ export const createLeadAdmin = async (req: Request, res: Response) => {
       throw new ApiError(400, `Invalid source. Must be one of: ${LEAD_SOURCES.join(', ')}`);
     }
 
-    const { data: lead, error } = await supabase
+    const { data: lead, error } = await (supabaseAdmin || supabase)
       .from('leads')
       .insert({
         sales_executive_id,
@@ -1376,7 +1379,7 @@ export const createLeadAdmin = async (req: Request, res: Response) => {
     }
 
     // Fetch sales executive profile for response (filtered by company_id)
-    const { data: profile } = await supabase
+    const { data: profile } = await (supabaseAdmin || supabase)
       .from('profiles')
       .select('id, email, first_name, last_name')
       .eq('id', sales_executive_id)
@@ -1407,7 +1410,7 @@ export const deleteLeadAdmin = async (req: Request, res: Response) => {
     
     const { id } = req.params;
 
-    const { error } = await supabase
+    const { error } = await (supabaseAdmin || supabase)
       .from('leads')
       .delete()
       .eq('id', id)

@@ -3,8 +3,8 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
 interface PriceDisplayProps {
-  mrpPrice: number;
-  salePrice: number;
+  mrpPrice?: number | null;
+  salePrice?: number | null;
   showDiscount?: boolean;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
@@ -17,19 +17,23 @@ export const PriceDisplay: React.FC<PriceDisplayProps> = ({
   size = 'md',
   className,
 }) => {
-  const discount = mrpPrice > salePrice
-    ? Math.round(((mrpPrice - salePrice) / mrpPrice) * 100)
+  // Safely coerce nullish values to numbers so .toFixed() never throws
+  const safeMrp = Number(mrpPrice) || 0;
+  const safeSale = salePrice != null ? Number(salePrice) : safeMrp;
+
+  const discount = safeMrp > safeSale
+    ? Math.round(((safeMrp - safeSale) / safeMrp) * 100)
     : 0;
 
   const hasDiscount = discount > 0;
 
-  const sizeClasses = {
+  const sizeClasses: Record<string, string> = {
     sm: 'text-sm',
     md: 'text-base',
     lg: 'text-xl',
   };
 
-  const priceSizeClasses = {
+  const priceSizeClasses: Record<string, string> = {
     sm: 'text-xs',
     md: 'text-sm',
     lg: 'text-base',
@@ -41,12 +45,12 @@ export const PriceDisplay: React.FC<PriceDisplayProps> = ({
         {hasDiscount ? (
           <>
             <span className={cn('font-bold', sizeClasses[size])}>
-              ₹{salePrice.toFixed(2)}
+              ₹{safeSale.toFixed(2)}
             </span>
             <span className={cn('text-muted-foreground line-through', priceSizeClasses[size])}>
-              ₹{mrpPrice.toFixed(2)}
+              ₹{safeMrp.toFixed(2)}
             </span>
-            {showDiscount && discount > 0 && (
+            {showDiscount && (
               <Badge variant="destructive" className={cn('text-xs', size === 'sm' && 'text-[10px] px-1')}>
                 {discount}% OFF
               </Badge>
@@ -54,16 +58,15 @@ export const PriceDisplay: React.FC<PriceDisplayProps> = ({
           </>
         ) : (
           <span className={cn('font-bold', sizeClasses[size])}>
-            ₹{salePrice.toFixed(2)}
+            ₹{safeSale.toFixed(2)}
           </span>
         )}
       </div>
-      {!hasDiscount && mrpPrice !== salePrice && (
+      {!hasDiscount && safeMrp !== safeSale && (
         <div className={cn('text-muted-foreground', priceSizeClasses[size])}>
-          MRP: ₹{mrpPrice.toFixed(2)}
+          MRP: ₹{safeMrp.toFixed(2)}
         </div>
       )}
     </div>
   );
 };
-

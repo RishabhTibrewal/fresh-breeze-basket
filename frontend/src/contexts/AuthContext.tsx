@@ -472,76 +472,118 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signIn = async (email: string, password: string) => {
     try {
-      // First, sign in with Supabase
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      // Call backend login endpoint (which proxies Supabase auth)
+      const { data: loginData } = await apiClient.post('/auth/login', { email, password });
       
-      if (error) {
-        toast.error(error.message);
-        throw error;
+      if (!loginData?.success || !loginData?.data) {
+        throw new Error(loginData?.message || 'Login failed');
       }
 
-      // If Supabase login successful, also call backend login
-      try {
-        const { data: loginData } = await apiClient.post('/auth/login', { email, password });
-        const userProfile = loginData?.data?.user;
-        const userId = data?.user?.id || userProfile?.id;
-        if (userProfile) {
-          const userRoles = userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
-          const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
-          localStorage.setItem('userRole', primaryRole);
-          localStorage.setItem('userRoles', JSON.stringify(userRoles));
-          setProfile(prev => (prev ? { ...prev, role: primaryRole, roles: userRoles } : prev));
-          setIsAdmin(userRoles.includes('admin') || userRoles.includes('accounts'));
-          setIsSales(userRoles.includes('sales'));
-          setIsAccounts(userRoles.includes('accounts'));
-          setIsWarehouseManager(userRoles.includes('warehouse_manager'));
-          setRole(primaryRole);
-          setRoles(userRoles);
-          
-          // Fetch warehouses if user is warehouse manager
-          if (userRoles.includes('warehouse_manager') || userRoles.includes('admin')) {
-            if (userId) {
-              try {
-                const { warehouseManagersService } = await import('@/api/warehouseManagers');
-                const warehouseAssignments = await warehouseManagersService.getByUser(userId);
-                const warehouseIds = warehouseAssignments
-                  .map((wm: any) => wm.warehouses?.id || wm.warehouse_id)
-                  .filter(Boolean);
-                setWarehouses(warehouseIds);
-              } catch (error) {
-                console.error('Error fetching user warehouses:', error);
-                setWarehouses([]);
-              }
-            } else {
-              console.warn('Cannot fetch warehouses: userId not available');
+      const { access_token, refresh_token, user: userProfile, roles: userRoles } = loginData.data;
+      const userId = userProfile?.id;
+
+      if (!access_token || !refresh_token) {
+        throw new Error('Missing tokens in login response');
+      }
+
+      // Decode JWT to extract user info and expiry — no network call needed
+      const decodeJWT = (token: string) => {
+        try {
+          const base64Url = token.split('.')[1];
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(
+            atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
+          );
+          return JSON.parse(jsonPayload);
+        } catch { return null; }
+      };
+
+      const jwtPayload = decodeJWT(access_token);
+      if (!jwtPayload) throw new Error('Invalid access token received');
+
+      // Construct User and Session objects locally — no network call
+      const supabaseUser: User = {
+        id: jwtPayload.sub,
+        aud: jwtPayload.aud || 'authenticated',
+        role: jwtPayload.role || 'authenticated',
+        email: jwtPayload.email || userProfile?.email,
+        email_confirmed_at: jwtPayload.email_confirmed_at,
+        phone: jwtPayload.phone || '',
+        confirmed_at: jwtPayload.email_confirmed_at,
+        last_sign_in_at: new Date().toISOString(),
+        app_metadata: jwtPayload.app_metadata || {},
+        user_metadata: jwtPayload.user_metadata || {},
+        identities: [],
+        created_at: jwtPayload.iat ? new Date(jwtPayload.iat * 1000).toISOString() : new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        factors: [],
+      };
+
+      const supabaseSession: Session = {
+        access_token,
+        refresh_token,
+        token_type: 'bearer',
+        expires_in: (jwtPayload.exp || 0) - (jwtPayload.iat || 0),
+        expires_at: jwtPayload.exp,
+        user: supabaseUser,
+      };
+
+      // Write session directly to Supabase's localStorage key (bypasses network call)
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+      const projectRef = supabaseUrl.replace('https://', '').split('.')[0];
+      localStorage.setItem(`sb-${projectRef}-auth-token`, JSON.stringify(supabaseSession));
+      localStorage.setItem('supabase_token', access_token);
+      localStorage.setItem('supabase_refresh_token', refresh_token);
+
+      // Set state directly from the locally constructed objects
+      setUser(supabaseUser);
+      setSession(supabaseSession);
+
+      // Handle roles and profile
+      if (userProfile) {
+        const roles = userRoles || userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
+        const primaryRole = roles.length > 0 ? roles[0] : 'user';
+        localStorage.setItem('userRole', primaryRole);
+        localStorage.setItem('userRoles', JSON.stringify(roles));
+        setProfile(prev => (prev ? { ...prev, role: primaryRole, roles } : userProfile));
+        setIsAdmin(roles.includes('admin') || roles.includes('accounts'));
+        setIsSales(roles.includes('sales'));
+        setIsAccounts(roles.includes('accounts'));
+        setIsWarehouseManager(roles.includes('warehouse_manager'));
+        setRole(primaryRole);
+        setRoles(roles);
+        
+        // Fetch warehouses if user is warehouse manager
+        if (roles.includes('warehouse_manager') || roles.includes('admin')) {
+          if (userId) {
+            try {
+              const { warehouseManagersService } = await import('@/api/warehouseManagers');
+              const warehouseAssignments = await warehouseManagersService.getByUser(userId);
+              const warehouseIds = warehouseAssignments
+                .map((wm: any) => wm.warehouses?.id || wm.warehouse_id)
+                .filter(Boolean);
+              setWarehouses(warehouseIds);
+            } catch (error) {
+              console.error('Error fetching user warehouses:', error);
               setWarehouses([]);
             }
           } else {
+            console.warn('Cannot fetch warehouses: userId not available');
             setWarehouses([]);
           }
+        } else {
+          setWarehouses([]);
         }
-        // We don't store the backend token since we're using Supabase's token
-      } catch (backendError: any) {
-        const message = backendError?.response?.data?.message || 'Login failed for this company.';
-        console.error('Backend login failed:', backendError);
-        await supabase.auth.signOut();
-        await clearLocalSession();
-        toast.error(message);
-        throw backendError;
-      }
-
-      // Explicitly store the Supabase token
-      if (data.session?.access_token) {
-        localStorage.setItem('supabase_token', data.session.access_token);
-        console.log('Token stored after sign in');
       }
       
       toast.success('Successfully signed in!');
       // Set flag to show dashboard button on landing page
       sessionStorage.setItem('from_login', 'true');
       navigate('/');
-    } catch (error) {
-      console.error('Error signing in:', error);
+    } catch (error: any) {
+      const errorMessage = error?.response?.data?.message || error?.message || 'Login failed';
+      toast.error(errorMessage);
+      await clearLocalSession();
       throw error;
     }
   };
@@ -564,53 +606,94 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (response.data.success) {
         console.log('User created successfully:', response.data.data?.id);
         
-        // After successful registration, sign in with Supabase to get session
+        // After successful registration, sign in through backend (which proxies Supabase auth)
         try {
-          console.log('Signing in with Supabase after registration');
-          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-            email,
-            password
-          });
-
-          if (signInError) {
-            console.error('Supabase sign-in error after registration:', signInError);
-            toast.warning('Registration successful, but automatic sign-in failed. Please sign in manually.');
-          } else if (signInData.user) {
-            console.log('Auto sign-in successful after registration');
-            // Update user state
-            setUser(signInData.user);
-            // Cache the token
-            if (signInData.session?.access_token) {
-              localStorage.setItem('supabase_token', signInData.session.access_token);
-            }
-            try {
-              const { data: loginData } = await apiClient.post('/auth/login', { email, password });
-              const userProfile = loginData?.data?.user;
-              if (userProfile) {
-                const userRoles = userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
-                const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
-                localStorage.setItem('userRole', primaryRole);
-                localStorage.setItem('userRoles', JSON.stringify(userRoles));
-                setProfile(prev => (prev ? { ...prev, role: primaryRole, roles: userRoles } : prev));
-                setIsAdmin(userRoles.includes('admin'));
-                setIsSales(userRoles.includes('sales'));
-                setIsAccounts(userRoles.includes('accounts'));
-                setRole(primaryRole);
-                setRoles(userRoles);
-              }
-            } catch (backendError: any) {
-              const message = backendError?.response?.data?.message || 'Login failed for this company.';
-              console.error('Backend login failed after registration:', backendError);
-              await supabase.auth.signOut();
-              await clearLocalSession();
-              toast.error(message);
-              return;
-            }
-            toast.success('Registration successful! You have been signed in.');
+          console.log('Signing in through backend after registration');
+          const { data: loginData } = await apiClient.post('/auth/login', { email, password });
+          
+          if (!loginData?.success || !loginData?.data) {
+            throw new Error(loginData?.message || 'Login failed');
           }
-        } catch (signInErr) {
-          console.error('Error during auto sign-in:', signInErr);
-          toast.warning('Registration successful, but automatic sign-in failed. Please sign in manually.');
+
+          const { access_token, refresh_token, user: userProfile, roles: userRoles } = loginData.data;
+          const userId = userProfile?.id;
+
+          if (!access_token || !refresh_token) {
+            throw new Error('Missing tokens in login response');
+          }
+
+          // Decode JWT locally — no network call
+          const decodeJWT = (token: string) => {
+            try {
+              const base64Url = token.split('.')[1];
+              const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+              const jsonPayload = decodeURIComponent(
+                atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
+              );
+              return JSON.parse(jsonPayload);
+            } catch { return null; }
+          };
+
+          const jwtPayload = decodeJWT(access_token);
+          if (!jwtPayload) throw new Error('Invalid access token received');
+
+          const supabaseUser: User = {
+            id: jwtPayload.sub,
+            aud: jwtPayload.aud || 'authenticated',
+            role: jwtPayload.role || 'authenticated',
+            email: jwtPayload.email || userProfile?.email,
+            email_confirmed_at: jwtPayload.email_confirmed_at,
+            phone: jwtPayload.phone || '',
+            confirmed_at: jwtPayload.email_confirmed_at,
+            last_sign_in_at: new Date().toISOString(),
+            app_metadata: jwtPayload.app_metadata || {},
+            user_metadata: jwtPayload.user_metadata || {},
+            identities: [],
+            created_at: jwtPayload.iat ? new Date(jwtPayload.iat * 1000).toISOString() : new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            factors: [],
+          };
+
+          const supabaseSession: Session = {
+            access_token,
+            refresh_token,
+            token_type: 'bearer',
+            expires_in: (jwtPayload.exp || 0) - (jwtPayload.iat || 0),
+            expires_at: jwtPayload.exp,
+            user: supabaseUser,
+          };
+
+          // Write session directly to Supabase's localStorage key — no network call
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+          const projectRef = supabaseUrl.replace('https://', '').split('.')[0];
+          localStorage.setItem(`sb-${projectRef}-auth-token`, JSON.stringify(supabaseSession));
+          localStorage.setItem('supabase_token', access_token);
+          localStorage.setItem('supabase_refresh_token', refresh_token);
+
+          // Set state directly
+          setUser(supabaseUser);
+          setSession(supabaseSession);
+
+          // Handle roles and profile
+          if (userProfile) {
+            const roles = userRoles || userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
+            const primaryRole = roles.length > 0 ? roles[0] : 'user';
+            localStorage.setItem('userRole', primaryRole);
+            localStorage.setItem('userRoles', JSON.stringify(roles));
+            setProfile(prev => (prev ? { ...prev, role: primaryRole, roles } : userProfile));
+            setIsAdmin(roles.includes('admin') || roles.includes('accounts'));
+            setIsSales(roles.includes('sales'));
+            setIsAccounts(roles.includes('accounts'));
+            setIsWarehouseManager(roles.includes('warehouse_manager'));
+            setRole(primaryRole);
+            setRoles(roles);
+          }
+          
+          toast.success('Registration successful! You have been signed in.');
+        } catch (signInErr: any) {
+          console.error('Error during auto sign-in after registration:', signInErr);
+          const errorMessage = signInErr?.response?.data?.message || signInErr?.message || 'Sign-in failed';
+          toast.warning(`Registration successful, but automatic sign-in failed: ${errorMessage}. Please sign in manually.`);
         }
       } else {
         throw new Error(response.data.message || 'Registration failed');

@@ -2,6 +2,7 @@ import express from 'express';
 import { 
   register,
   login,
+  refresh,
   logout,
   getCurrentUser,
   updateProfile,
@@ -22,6 +23,7 @@ const router = express.Router();
 router.use(rateLimitAuth);
 router.post('/register', register);
 router.post('/login', login);
+router.post('/refresh', refresh);
 
 // Protected routes
 router.post('/logout', protect, logout);

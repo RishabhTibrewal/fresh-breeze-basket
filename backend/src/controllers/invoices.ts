@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import PDFDocument from 'pdfkit';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
 /**
@@ -16,7 +16,7 @@ export const getPOSInvoice = async (req: Request, res: Response, next: NextFunct
     }
 
     // Fetch company details
-    const { data: company } = await supabase
+    const { data: company } = await (supabaseAdmin || supabase)
       .from('companies')
       .select('name')
       .eq('id', req.companyId)
@@ -25,7 +25,7 @@ export const getPOSInvoice = async (req: Request, res: Response, next: NextFunct
     const companyName = company?.name || 'Fresh Breeze Basket';
 
     // Fetch order with all details
-    const { data: order, error: orderError } = await supabase
+    const { data: order, error: orderError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select(`
         *,
@@ -47,7 +47,7 @@ export const getPOSInvoice = async (req: Request, res: Response, next: NextFunct
     let customerPhone = '';
     
     if (order.user_id) {
-      const { data: customer } = await supabase
+      const { data: customer } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('name, phone')
         .eq('user_id', order.user_id)
@@ -299,7 +299,7 @@ export const getCustomerBill = async (req: Request, res: Response, next: NextFun
     }
 
     // Fetch company details
-    const { data: company } = await supabase
+    const { data: company } = await (supabaseAdmin || supabase)
       .from('companies')
       .select('name')
       .eq('id', req.companyId)
@@ -308,7 +308,7 @@ export const getCustomerBill = async (req: Request, res: Response, next: NextFun
     const companyName = company?.name || 'Fresh Breeze Basket';
 
     // Fetch order with all details
-    const { data: order, error: orderError } = await supabase
+    const { data: order, error: orderError } = await (supabaseAdmin || supabase)
       .from('orders')
       .select(`
         *,
@@ -332,7 +332,7 @@ export const getCustomerBill = async (req: Request, res: Response, next: NextFun
     let shippingAddress: any = null;
 
     if (order.user_id) {
-      const { data: customer } = await supabase
+      const { data: customer } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('name, email, phone')
         .eq('user_id', order.user_id)
@@ -347,7 +347,7 @@ export const getCustomerBill = async (req: Request, res: Response, next: NextFun
 
       // Get shipping address
       if (order.shipping_address_id) {
-        const { data: address } = await supabase
+        const { data: address } = await (supabaseAdmin || supabase)
           .from('addresses')
           .select('*')
           .eq('id', order.shipping_address_id)
