@@ -4,6 +4,7 @@ import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import apiClient from '@/lib/apiClient';
+import { useQueryClient } from '@tanstack/react-query';
 
 // Add a global declaration for the session refresh interval
 declare global {
@@ -52,6 +53,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const clearLocalSession = useCallback(async () => {
     // Clear any active session refresh interval
@@ -579,6 +581,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       toast.success('Successfully signed in!');
       // Set flag to show dashboard button on landing page
       sessionStorage.setItem('from_login', 'true');
+      
+      // Invalidate all React Query caches after login so stale anonymous data
+      // (e.g. empty variant lists fetched before auth) is discarded and re-fetched.
+      queryClient.invalidateQueries();
+      
       navigate('/');
     } catch (error: any) {
       const errorMessage = error?.response?.data?.message || error?.message || 'Login failed';
@@ -778,6 +785,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setRoles([]);
       
       toast.success('Successfully signed out!');
+      
+      // Clear all React Query caches on logout so user-specific data
+      // doesn't persist and get served to the next (possibly different) user.
+      queryClient.clear();
       
       // Use setTimeout to ensure state updates are complete before navigation
       setTimeout(() => {

@@ -76,6 +76,7 @@ export const getProducts = async (req: Request, res: Response) => {
     }
     
     // New format - include variants with prices, brand, tax
+    // Fetch products first (without nested variants - PostgREST nested selects are unreliable)
     let query = client
       .from('products')
       .select(`
@@ -84,36 +85,6 @@ export const getProducts = async (req: Request, res: Response) => {
           id,
           name,
           logo_url
-        ),
-        variants:product_variants!product_id (
-          id,
-          name,
-          sku,
-          is_default,
-          is_active,
-          is_featured,
-          image_url,
-          unit,
-          unit_type,
-          best_before,
-          hsn,
-          badge,
-          price:product_prices!price_id (
-            id,
-            sale_price,
-            mrp_price,
-            price_type
-          ),
-          brand:brands (
-            id,
-            name,
-            logo_url
-          ),
-          tax:taxes (
-            id,
-            name,
-            rate
-          )
         )
       `);
 
@@ -154,15 +125,76 @@ export const getProducts = async (req: Request, res: Response) => {
       query = query.range(start, start + pageSize - 1);
     }
     
-    const { data, error, count } = await query;
+    const { data: products, error, count } = await query;
     
     if (error) {
       throw new ApiError(400, error.message);
     }
     
-    // Process products to include default_variant_id and filter by price if needed
-    const processedProducts = (data || []).map((product: any) => {
-      const variants = product.variants || [];
+    if (!products || products.length === 0) {
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        data: []
+      });
+    }
+    
+    // Fetch all variants for these products in a separate query (more reliable than nested selects)
+    const productIds = products.map((p: any) => p.id);
+    const { data: allVariants, error: variantsError } = await client
+      .from('product_variants')
+      .select(`
+        *,
+        price:product_prices!price_id (
+          id,
+          sale_price,
+          mrp_price,
+          price_type
+        ),
+        brand:brands (
+          id,
+          name,
+          logo_url
+        ),
+        tax:taxes (
+          id,
+          name,
+          rate
+        )
+      `)
+      .in('product_id', productIds)
+      // CRITICAL: Explicit company_id filter when using admin client (RLS bypassed)
+      // Include variants with matching company_id OR NULL company_id (inherit from product)
+      .or(`company_id.eq.${req.companyId},company_id.is.null`)
+      .order('is_default', { ascending: false })
+      .order('created_at', { ascending: true });
+    
+    if (variantsError) {
+      console.error('Error fetching variants:', variantsError);
+      // Continue without variants rather than failing
+    }
+    
+    // No application-level company_id filtering:
+    // Products are already filtered by company_id above. Variants tied to those products via
+    // product_id FK implicitly belong to the same company — don't filter them further.
+    const allFilteredVariants = allVariants || [];
+    
+    if (productIds.length > 0) {
+      console.log(`[getProducts] Fetched ${allFilteredVariants.length} variants for ${productIds.length} products`);
+    }
+    
+    // Group variants by product_id
+    const variantsByProductId: Record<string, any[]> = {};
+    allFilteredVariants.forEach((variant: any) => {
+      if (!variantsByProductId[variant.product_id]) {
+        variantsByProductId[variant.product_id] = [];
+      }
+      variantsByProductId[variant.product_id].push(variant);
+    });
+    
+    // Process products to include variants and default_variant_id
+    const processedProducts = products.map((product: any) => {
+      const variants = variantsByProductId[product.id] || [];
       const defaultVariant = variants.find((v: any) => v.is_default === true);
       
       // Filter variants by price if minPrice/maxPrice specified
@@ -267,6 +299,7 @@ export const getProductById = async (req: Request, res: Response) => {
     }
 
     // New format - include variants with prices, brand, tax, images
+    // Fetch product first (without nested variants - PostgREST nested selects are unreliable)
     const { data: product, error: productError } = await client
       .from('products')
       .select(`
@@ -276,41 +309,6 @@ export const getProductById = async (req: Request, res: Response) => {
           id,
           name,
           logo_url
-        ),
-        variants:product_variants!product_id (
-          id,
-          name,
-          sku,
-          is_default,
-          is_active,
-          is_featured,
-          image_url,
-          unit,
-          unit_type,
-          best_before,
-          hsn,
-          badge,
-          price:product_prices!price_id (
-            id,
-            sale_price,
-            mrp_price,
-            price_type
-          ),
-          brand:brands (
-            id,
-            name,
-            logo_url
-          ),
-          tax:taxes (
-            id,
-            name,
-            rate
-          ),
-          variant_images:product_images!variant_id (
-            id,
-            image_url,
-            display_order
-          )
         )
       `)
       .eq('id', id)
@@ -327,6 +325,50 @@ export const getProductById = async (req: Request, res: Response) => {
       });
     }
 
+    // Fetch variants separately (more reliable than nested selects)
+    const { data: variants, error: variantsError } = await client
+      .from('product_variants')
+      .select(`
+        *,
+        price:product_prices!price_id (
+          id,
+          sale_price,
+          mrp_price,
+          price_type
+        ),
+        brand:brands (
+          id,
+          name,
+          logo_url
+        ),
+        tax:taxes (
+          id,
+          name,
+          rate
+        ),
+        variant_images:product_images!variant_id (
+          id,
+          image_url,
+          display_order
+        )
+      `)
+      .eq('product_id', id)
+      // CRITICAL: Explicit company_id filter when using admin client (RLS bypassed)
+      // Include variants with matching company_id OR NULL company_id (inherit from product)
+      .or(`company_id.eq.${req.companyId},company_id.is.null`)
+      .order('is_default', { ascending: false })
+      .order('created_at', { ascending: true });
+
+    if (variantsError) {
+      console.error('Error fetching variants:', variantsError);
+      // Continue without variants rather than failing
+    }
+
+    // No application-level company_id filtering:
+    // Product is already verified to belong to req.companyId above. Variants tied to this
+    // product via product_id FK implicitly belong to the same company.
+    const filteredVariants = variants || [];
+
     // Get product-level images (not variant-specific)
     const { data: productImages, error: imagesError } = await client
       .from('product_images')
@@ -342,14 +384,14 @@ export const getProductById = async (req: Request, res: Response) => {
     }
 
     // Process variants - keep variant_images in the response
-    const variants = (product.variants || []).map((variant: any) => ({
+    const processedVariants = filteredVariants.map((variant: any) => ({
       ...variant,
       // Keep variant_images as is (don't rename to images)
       variant_images: variant.variant_images || [],
     }));
 
     // Find default variant
-    const defaultVariant = variants.find((v: any) => v.is_default === true);
+    const defaultVariant = processedVariants.find((v: any) => v.is_default === true);
 
     // Structure response according to plan
     const response = {
@@ -369,7 +411,7 @@ export const getProductById = async (req: Request, res: Response) => {
         created_at: product.created_at,
         updated_at: product.updated_at,
       },
-      variants: variants, // Keep variant_images in each variant
+      variants: processedVariants, // Keep variant_images in each variant
       images: productImages?.map(img => img.image_url) || [],
       default_variant_id: defaultVariant?.id || null,
     };
@@ -807,25 +849,49 @@ export const getProductVariants = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Company context is required');
     }
 
+    // Always use admin client to bypass RLS
     const client = supabaseAdmin || supabase;
+    const isUsingAdmin = !!supabaseAdmin;
+    
+    console.log(`[getProductVariants] Using ${isUsingAdmin ? 'admin' : 'anon'} client for product ${id}, company ${req.companyId}`);
 
     // Verify product exists
     const { data: product, error: productError } = await client
       .from('products')
-      .select('id, name')
+      .select('id, name, company_id')
       .eq('id', id)
       .eq('company_id', req.companyId)
       .single();
 
     if (productError || !product) {
+      console.error(`[getProductVariants] Product not found:`, productError);
       throw new ApiError(
         404,
         `Product with ID '${id}' not found or does not belong to your company`
       );
     }
+    
+    console.log(`[getProductVariants] Product verified: ${product.name} (company: ${product.company_id})`);
+
+    // First, try a simple query to verify variants exist
+    console.log(`[getProductVariants] Testing simple variant query for product_id: ${id}`);
+    const { data: testVariants, error: testError } = await client
+      .from('product_variants')
+      .select('id, name, product_id, company_id')
+      .eq('product_id', id);
+    
+    console.log(`[getProductVariants] Simple query result: ${testVariants?.length || 0} variants, error: ${testError?.message || 'none'}`);
+    if (testVariants && testVariants.length > 0) {
+      console.log(`[getProductVariants] Sample test variant:`, testVariants[0]);
+    }
 
     // Get all variants with prices, brand, tax, images
-    const { data: variants, error: variantsError } = await client
+    // Since product is already verified to belong to company, we can rely on product_id FK for company isolation
+    // Filter by product_id only - variants inherit company context from product
+    console.log(`[getProductVariants] Fetching full variant data for product_id: ${id}`);
+    
+    // Try full query with all nested data first
+    let { data: variants, error: variantsError } = await client
       .from('product_variants')
       .select(`
         *,
@@ -852,17 +918,88 @@ export const getProductVariants = async (req: Request, res: Response) => {
         )
       `)
       .eq('product_id', id)
-      .eq('company_id', req.companyId)
+      // CRITICAL: Explicit company_id filter when using admin client (RLS bypassed)
+      // Include variants with matching company_id OR NULL company_id (inherit from product)
+      .or(`company_id.eq.${req.companyId},company_id.is.null`)
       .order('is_default', { ascending: false })
       .order('created_at', { ascending: true });
 
+    // If nested query fails, try simpler query without variant_images
     if (variantsError) {
-      throw new ApiError(500, `Failed to fetch variants: ${variantsError.message}`);
+      console.warn('[getProductVariants] Full query failed, trying without variant_images:', variantsError.message);
+      const simpleResult = await client
+        .from('product_variants')
+        .select(`
+          *,
+          price:product_prices!price_id (
+            id,
+            sale_price,
+            mrp_price,
+            price_type
+          ),
+          brand:brands (
+            id,
+            name,
+            logo_url
+          ),
+          tax:taxes (
+            id,
+            name,
+            rate
+          )
+        `)
+        .eq('product_id', id)
+        // CRITICAL: Explicit company_id filter when using admin client (RLS bypassed)
+        // Include variants with matching company_id OR NULL company_id (inherit from product)
+        .or(`company_id.eq.${req.companyId},company_id.is.null`)
+        .order('is_default', { ascending: false })
+        .order('created_at', { ascending: true });
+      
+      if (simpleResult.error) {
+        console.error('[getProductVariants] Simple query also failed:', simpleResult.error);
+        throw new ApiError(500, `Failed to fetch variants: ${simpleResult.error.message}`);
+      }
+      
+      variants = simpleResult.data;
+      variantsError = null;
+      
+      // Fetch variant images separately if needed
+      if (variants && variants.length > 0) {
+        const variantIds = variants.map((v: any) => v.id);
+        const { data: images } = await client
+          .from('product_images')
+          .select('*')
+          .in('variant_id', variantIds)
+          .order('display_order', { ascending: true });
+        
+        // Attach images to variants
+        if (images) {
+          const imagesByVariantId: Record<string, any[]> = {};
+          images.forEach((img: any) => {
+            if (!imagesByVariantId[img.variant_id]) {
+              imagesByVariantId[img.variant_id] = [];
+            }
+            imagesByVariantId[img.variant_id].push(img);
+          });
+          
+          variants = variants.map((v: any) => ({
+            ...v,
+            variant_images: imagesByVariantId[v.id] || []
+          }));
+        }
+      }
     }
+    
+    // No application-level company_id filtering needed:
+    // - Product was already verified to belong to req.companyId (step above)
+    // - Variants are tied to the product via product_id FK
+    // - Therefore all variants for this product implicitly belong to this company
+    const allVariants = variants || [];
+    console.log(`[getProductVariants] Returning ${allVariants.length} variants for product ${id}`);
 
     res.status(200).json({
       success: true,
-      data: variants || [],
+      data: allVariants,
     });
   } catch (error) {
     if (error instanceof ApiError) {

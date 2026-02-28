@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 
 const BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN || 'gofreshco.com';
 const DEFAULT_COMPANY_SLUG = process.env.DEFAULT_COMPANY_SLUG || 'default';
@@ -85,7 +85,9 @@ export const resolveTenant = async (req: Request, res: Response, next: NextFunct
       return next();
     }
 
-    const { data: company, error } = await supabase
+    // Use admin client to bypass RLS on companies table for tenant resolution
+    const client = supabaseAdmin || supabase;
+    const { data: company, error } = await client
       .from('companies')
       .select('id, slug, is_active')
       .eq('slug', subdomain)

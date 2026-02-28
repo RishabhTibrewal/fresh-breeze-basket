@@ -107,12 +107,12 @@ export default function CheckoutPage() {
       // Build order items directly from cart — variant prices are already accurate
       // (loaded from product_prices via the backend cart sync)
       const items = cartState.items.map(cartItem => ({
-        product_id: cartItem.id,
+          product_id: cartItem.id,
         variant_id: cartItem.variant_id,                 // send the selected variant
-        quantity: cartItem.quantity,
+          quantity: cartItem.quantity,
         price: cartItem.sale_price ?? cartItem.price,   // use variant's sale_price, fall back to MRP
       }));
-
+      
       // Calculate total amount from cart prices
       const subtotal = items.reduce((total, item) => total + (item.price * item.quantity), 0);
       const shippingCost = subtotal >= 100 ? 0 : 10;

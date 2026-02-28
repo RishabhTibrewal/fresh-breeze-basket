@@ -315,7 +315,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Process cart items
       cartItems.forEach((item: any) => {
         if (!item || !item.products) return;
-
+        
         // Key is variant_id (preferred) so the same product with two variants
         // gets two separate entries in the cartItemIds map
         const itemKey = item.variant_id
@@ -325,7 +325,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCartItemIds(prev => ({ ...prev, [itemKey]: item.id }));
         
         const quantity = typeof item.quantity === 'string' ? parseInt(item.quantity, 10) : item.quantity;
-
+        
         // Use the joined variant object returned by the new backend query
         const backendVariant = item.variant;
         const backendPrice = backendVariant?.price;
