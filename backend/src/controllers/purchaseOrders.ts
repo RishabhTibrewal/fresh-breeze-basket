@@ -76,15 +76,25 @@ const queryProcurementTable = async (table: string, operation: 'select' | 'inser
         throw new Error(`Unknown operation: ${operation}`);
     }
   } catch (error: unknown) {
-    // Properly extract error message from Supabase error objects
+    // Preserve original error structure (especially code for duplicate key detection)
+    if (error && typeof error === 'object' && 'code' in error) {
+      // This is a Supabase PostgREST error - preserve it
+      console.error(`Error in queryProcurementTable (${operation}):`, (error as any).message);
+      console.error('Full error object:', error);
+      throw error; // Re-throw original error to preserve code, details, etc.
+    }
+    
+    // For other errors, extract message but preserve structure if possible
     let errorMessage: string;
     if (error instanceof Error) {
       errorMessage = error.message;
+      // Preserve the Error object if it has useful properties
+      const preservedError = error as any;
+      if (preservedError.code || preservedError.details || preservedError.hint) {
+        throw error; // Re-throw to preserve properties
+      }
     } else if (error && typeof error === 'object' && 'message' in error) {
       errorMessage = String((error as any).message);
-    } else if (error && typeof error === 'object' && 'code' in error) {
-      const supabaseError = error as any;
-      errorMessage = supabaseError.message || supabaseError.code || JSON.stringify(error);
     } else {
       errorMessage = JSON.stringify(error);
     }
@@ -256,10 +266,16 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
         break;
       } catch (error: any) {
         // Check if it's a duplicate key error on po_number
+        // Error code 23505 is PostgreSQL unique constraint violation
+        const errorMessage = error?.message || '';
+        const errorDetails = error?.details || '';
+        const errorMessageLower = errorMessage.toLowerCase();
+        const errorDetailsLower = errorDetails.toLowerCase();
         const isDuplicatePO = error?.code === '23505' && 
-                             (error?.message?.includes('po_number') || 
-                              error?.details?.includes('po_number') ||
-                              error?.message?.includes('PO-'));
+                             (errorMessageLower.includes('po_number') || 
+                              errorMessageLower.includes('purchase_orders_po_number') ||
+                              errorDetailsLower.includes('po_number') ||
+                              errorMessageLower.includes('po-'));
         
         if (isDuplicatePO && retryCount < maxRetries - 1) {
           retryCount++;
