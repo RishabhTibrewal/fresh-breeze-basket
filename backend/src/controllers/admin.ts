@@ -18,34 +18,87 @@ export const getAllUsers = async (req: Request, res: Response) => {
     const offset = (pageNum - 1) * limitNum;
     
     const db = supabaseAdmin || supabase;
-    let query = db
+    
+    // Get all user IDs who have membership in this company
+    const { data: memberships, error: membershipError, count: membershipCount } = await db
+      .from('company_memberships')
+      .select('user_id, role, is_active, created_at', { count: 'exact' })
+      .eq('company_id', req.companyId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+    
+    if (membershipError) {
+      throw new ApiError(500, `Error fetching company memberships: ${membershipError.message}`);
+    }
+    
+    if (!memberships || memberships.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          users: [],
+          pagination: {
+            page: pageNum,
+            limit: limitNum,
+            total: 0,
+            pages: 0
+          }
+        }
+      });
+    }
+    
+    // Extract user IDs
+    const userIds = memberships.map((m: any) => m.user_id);
+    const membershipMap = new Map(memberships.map((m: any) => [m.user_id, m]));
+    
+    // Fetch profiles for these users
+    let profilesQuery = db
       .from('profiles')
-      .select('*', { count: 'exact' })
-      .eq('company_id', req.companyId);
+      .select('*')
+      .in('id', userIds);
     
     // Add search filter if provided
     if (search) {
       const searchTerm = `%${search}%`;
-      query = query.or(`email.ilike.${searchTerm},first_name.ilike.${searchTerm},last_name.ilike.${searchTerm}`);
+      profilesQuery = profilesQuery.or(`email.ilike.${searchTerm},first_name.ilike.${searchTerm},last_name.ilike.${searchTerm}`);
     }
     
-    // Apply pagination
-    query = query.range(offset, offset + limitNum - 1);
+    const { data: profiles, error: profilesError } = await profilesQuery;
     
-    // Order by created_at descending (newest first)
-    query = query.order('created_at', { ascending: false });
-    
-    const { data: users, error, count } = await query;
-    
-    if (error) {
-      throw new ApiError(500, `Error fetching users: ${error.message}`);
+    if (profilesError) {
+      throw new ApiError(500, `Error fetching profiles: ${profilesError.message}`);
     }
+    
+    // Combine profiles with membership data
+    let users = (profiles || [])
+      .map((profile: any) => {
+        const membership = membershipMap.get(profile.id);
+        if (!membership) return null;
+        
+        return {
+          ...profile,
+          membership_role: membership.role, // Role from membership (backward compatibility)
+          membership_created_at: membership.created_at,
+          membership_is_active: membership.is_active
+        };
+      })
+      .filter((user: any) => user !== null);
+    
+    // Sort by membership created_at (newest first)
+    users.sort((a: any, b: any) => {
+      const aDate = new Date(a.membership_created_at).getTime();
+      const bDate = new Date(b.membership_created_at).getTime();
+      return bDate - aDate;
+    });
+    
+    // Apply pagination after filtering and sorting
+    const totalUsers = users.length;
+    const paginatedUsers = users.slice(offset, offset + limitNum);
     
     // Fetch roles for each user from user_roles table
     const usersWithRoles = await Promise.all(
-      (users || []).map(async (user: any) => {
+      paginatedUsers.map(async (user: any) => {
         const userRoles = await getUserRolesUtil(user.id, req.companyId);
-        const primaryRole = userRoles.length > 0 ? userRoles[0] : (user.role || 'user');
+        const primaryRole = userRoles.length > 0 ? userRoles[0] : (user.membership_role || user.role || 'user');
         
         return {
           ...user,
@@ -55,6 +108,9 @@ export const getAllUsers = async (req: Request, res: Response) => {
       })
     );
     
+    // Use total count from memberships (before search filter) or filtered count
+    const filteredCount = search ? totalUsers : (membershipCount || 0);
+    
     return res.status(200).json({
       success: true,
       data: {
@@ -62,8 +118,8 @@ export const getAllUsers = async (req: Request, res: Response) => {
         pagination: {
           page: pageNum,
           limit: limitNum,
-          total: count || 0,
-          pages: count ? Math.ceil(count / limitNum) : 0
+          total: filteredCount,
+          pages: filteredCount ? Math.ceil(filteredCount / limitNum) : 0
         }
       }
     });
@@ -406,7 +462,7 @@ export const updateUserRoles = async (req: Request, res: Response) => {
     }
 
     // Validate role names
-    const validRoles = ['admin', 'sales', 'accounts', 'user', 'warehouse_manager'];
+    const validRoles = ['admin', 'sales', 'accounts', 'user', 'warehouse_manager', 'procurement'];
     const invalidRoles = roles.filter((role: string) => !validRoles.includes(role));
     if (invalidRoles.length > 0) {
       return res.status(400).json({
@@ -424,12 +480,21 @@ export const updateUserRoles = async (req: Request, res: Response) => {
     }
 
     // Assign roles using the utility function
+    console.log('[updateUserRoles] Assigning roles:', {
+      userId,
+      companyId: req.companyId,
+      roles,
+      requestingUserId: req.user?.id
+    });
+
     const result = await assignUserRoles(userId, req.companyId, roles);
 
     if (!result.success) {
+      console.error('[updateUserRoles] Failed to assign roles:', result);
       return res.status(500).json({
         success: false,
-        message: result.error || 'Failed to update user roles'
+        message: result.error || 'Failed to update user roles',
+        details: result.details || undefined
       });
     }
 

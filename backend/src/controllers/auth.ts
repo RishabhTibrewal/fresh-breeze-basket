@@ -61,7 +61,7 @@ export const register = async (req: Request, res: Response) => {
     const userRoles = roles && Array.isArray(roles) ? roles : ['user'];
     
     // Validate role names
-    const validRoles = ['admin', 'sales', 'accounts', 'user', 'warehouse_manager'];
+    const validRoles = ['admin', 'sales', 'accounts', 'user', 'warehouse_manager', 'procurement'];
     const invalidRoles = userRoles.filter((role: string) => !validRoles.includes(role));
     if (invalidRoles.length > 0) {
       return res.status(400).json({
@@ -119,34 +119,56 @@ export const register = async (req: Request, res: Response) => {
         authError.message?.includes('already registered') ||
         authError.message?.includes('already exists');
       if (isEmailExists) {
-        // If user already exists, link them to the company instead of failing
+        // If user already exists in Auth, link them to this company
+        // Note: Supabase Auth requires globally unique emails, but we allow
+        // the same email to be associated with multiple companies via memberships
+        console.log('Email already exists in Auth, attempting to link to company:', req.companyId);
+        
         let existingUserId: string | null = null;
 
-        if (!existingUserId) {
-          const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
-            .from('profiles')
-            .select('id, company_id')
-            .eq('email', email)
-            .maybeSingle();
+        // First, try to find the user by email in profiles
+        const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
+          .from('profiles')
+          .select('id, company_id, email')
+          .eq('email', email)
+          .maybeSingle();
 
-          if (existingProfileError) {
-            console.error('Error fetching profile by email:', existingProfileError);
-          } else {
-            existingUserId = existingProfile?.id || null;
+        if (existingProfileError) {
+          console.error('Error fetching profile by email:', existingProfileError);
+        } else if (existingProfile) {
+          existingUserId = existingProfile.id;
+          console.log('Found existing profile for email:', existingUserId);
+        }
+
+        // If not found in profiles, try to get from auth.users directly
+        if (!existingUserId) {
+          try {
+            // Use admin API to get user by email
+            const { data: authUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+            if (!listError && authUsers?.users) {
+              const user = authUsers.users.find(u => u.email === email);
+              if (user) {
+                existingUserId = user.id;
+                console.log('Found existing auth user:', existingUserId);
+              }
+            }
+          } catch (err) {
+            console.error('Error listing users:', err);
           }
         }
 
         if (!existingUserId) {
-          // Verify credentials to safely link existing auth user
+          // If we still can't find the user, verify credentials to get the user ID
+          console.log('User not found, verifying credentials to get user ID...');
           const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
             email,
             password
           });
 
           if (signInError || !signInData.user) {
-            return res.status(401).json({
+            return res.status(400).json({
               success: false,
-              message: 'Account exists. Please login with the correct password to link this company.'
+              message: `Email ${email} is already registered. Please use a different email or login to link this company to your existing account.`
             });
           }
 
@@ -154,23 +176,57 @@ export const register = async (req: Request, res: Response) => {
         }
 
         if (existingUserId) {
+          console.log('Linking existing user to company:', { userId: existingUserId, companyId: req.companyId });
+          
+          // Check if user is already a member of this company
+          const { data: existingMembership } = await supabaseAdmin
+            .from('company_memberships')
+            .select('id')
+            .eq('user_id', existingUserId)
+            .eq('company_id', req.companyId)
+            .maybeSingle();
+
+          if (existingMembership) {
+            // User already has membership, just update roles
+            const membershipError = await ensureMembership(existingUserId, req.companyId, userRoles);
+            if (membershipError) {
+              console.error('Error updating membership for existing user:', membershipError);
+              return res.status(500).json({
+                success: false,
+                message: 'Failed to update user roles in company'
+              });
+            }
+
+            return res.status(200).json({
+              success: true,
+              message: 'User roles updated successfully',
+              data: {
+                id: existingUserId,
+                email
+              }
+            });
+          }
+
+          // Link user to new company
           const membershipError = await ensureMembership(existingUserId, req.companyId, userRoles);
           if (membershipError) {
             console.error('Error creating membership for existing user:', membershipError);
             return res.status(500).json({
               success: false,
-              message: 'Failed to link existing user to company'
+              message: membershipError.message || 'Failed to link existing user to company. Please ensure RLS policies are configured correctly.'
             });
           }
 
-          const { data: existingProfile } = await supabaseAdmin
+          // Update or create profile if needed
+          const { data: currentProfile } = await supabaseAdmin
             .from('profiles')
-            .select('id, company_id')
+            .select('id, company_id, first_name, last_name, phone')
             .eq('id', existingUserId)
             .maybeSingle();
 
-          if (!existingProfile) {
-            await supabaseAdmin
+          if (!currentProfile) {
+            // Create profile if it doesn't exist
+            const { error: profileInsertError } = await supabaseAdmin
               .from('profiles')
               .insert({
                 id: existingUserId,
@@ -178,19 +234,37 @@ export const register = async (req: Request, res: Response) => {
                 first_name: first_name || null,
                 last_name: last_name || null,
                 phone: phone || null,
-                company_id: req.companyId,
-                role: 'user'
+                company_id: req.companyId, // Set to new company
+                role: userRoles[0] || 'user'
               });
-          } else if (existingProfile.company_id !== req.companyId) {
-            await supabaseAdmin
-              .from('profiles')
-              .update({ company_id: req.companyId })
-              .eq('id', existingUserId);
+
+            if (profileInsertError) {
+              console.error('Error creating profile:', profileInsertError);
+              // Non-critical, continue
+            }
+          } else {
+            // Update profile with new information if provided
+            const updateData: any = {};
+            if (first_name && !currentProfile.first_name) updateData.first_name = first_name;
+            if (last_name && !currentProfile.last_name) updateData.last_name = last_name;
+            if (phone && !currentProfile.phone) updateData.phone = phone;
+            if (Object.keys(updateData).length > 0) {
+              updateData.role = userRoles[0] || 'user';
+              const { error: profileUpdateError } = await supabaseAdmin
+                .from('profiles')
+                .update(updateData)
+                .eq('id', existingUserId);
+
+              if (profileUpdateError) {
+                console.error('Error updating profile:', profileUpdateError);
+                // Non-critical, continue
+              }
+            }
           }
 
           return res.status(200).json({
             success: true,
-            message: 'User linked to company successfully',
+            message: 'User successfully linked to company',
             data: {
               id: existingUserId,
               email
@@ -200,7 +274,7 @@ export const register = async (req: Request, res: Response) => {
 
         return res.status(400).json({
           success: false,
-          message: 'User already registered. Please login or contact support.'
+          message: 'Unable to find or link existing user. Please contact support.'
         });
       }
       return res.status(400).json({
@@ -1266,7 +1340,7 @@ export const updateRole = async (req: Request, res: Response) => {
     }
 
     // Validate role
-    const validRoles = ['user', 'admin', 'sales', 'accounts', 'warehouse_manager'];
+    const validRoles = ['user', 'admin', 'sales', 'accounts', 'warehouse_manager', 'procurement'];
     if (!role || !validRoles.includes(role)) {
       return res.status(400).json({
         success: false,

@@ -177,9 +177,14 @@ export async function assignUserRoles(
   userId: string,
   companyId: string,
   roleNames: string[]
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; details?: string }> {
   try {
-    const client = supabaseAdmin || supabase;
+    // Always use admin client to bypass RLS for role management
+    if (!supabaseAdmin) {
+      console.error('[assignUserRoles] Admin client not available - SUPABASE_SERVICE_ROLE_KEY missing');
+      return { success: false, error: 'Admin client not configured' };
+    }
+    const client = supabaseAdmin;
 
     // Validate that all role names exist
     const { data: roles, error: rolesError } = await client
@@ -224,13 +229,30 @@ export async function assignUserRoles(
         role_id: roleMap.get(roleName)!
       }));
 
+      console.log('[assignUserRoles] Inserting user roles:', {
+        userId,
+        companyId,
+        roleNames: validRoleNames,
+        userRolesToInsert
+      });
+
       const { error: insertError } = await client
         .from('user_roles')
         .insert(userRolesToInsert);
 
       if (insertError) {
         console.error('Error inserting new roles:', insertError);
-        return { success: false, error: 'Failed to assign roles' };
+        console.error('Insert error details:', {
+          code: insertError.code,
+          message: insertError.message,
+          details: insertError.details,
+          hint: insertError.hint
+        });
+        return { 
+          success: false, 
+          error: insertError.message || 'Failed to assign roles',
+          details: insertError.details || undefined
+        };
       }
     }
 
