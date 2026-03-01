@@ -52,6 +52,8 @@ export default function CreateGoodsReceipt() {
   const [items, setItems] = useState<Array<{
     purchase_order_item_id: string;
     product_id: string;
+    variant_id?: string | null;
+    variant_name?: string;
     product_name: string;
     product_code?: string;
     hsn_code?: string;
@@ -116,6 +118,8 @@ export default function CreateGoodsReceipt() {
         const grnItems = existingGRN.goods_receipt_items.map((item: any) => ({
           purchase_order_item_id: item.purchase_order_item_id,
           product_id: item.product_id,
+          variant_id: item.variant_id || item.purchase_order_items?.variant_id || null,
+          variant_name: item.variants?.name || item.purchase_order_items?.variants?.name || '',
           product_name: item.products?.name || item.purchase_order_items?.products?.name || 'Product',
           product_code: item.product_code || item.products?.product_code || item.purchase_order_items?.product_code || '',
           hsn_code: item.hsn_code || item.products?.hsn_code || item.purchase_order_items?.hsn_code || '',
@@ -149,6 +153,8 @@ export default function CreateGoodsReceipt() {
           return {
             purchase_order_item_id: item.id,
             product_id: item.product_id,
+            variant_id: item.variant_id || null,
+            variant_name: item.variants?.name || item.variant?.name || '',
             product_name: item.products?.name || 'Product',
             product_code: item.product_code || item.products?.product_code || '',
             hsn_code: item.hsn_code || item.products?.hsn_code || '',
@@ -252,6 +258,7 @@ export default function CreateGoodsReceipt() {
       items: validItems.map(item => ({
         purchase_order_item_id: item.purchase_order_item_id,
         product_id: item.product_id,
+        variant_id: item.variant_id || undefined,
         quantity_received: item.quantity_received,
         quantity_accepted: item.quantity_accepted,
         quantity_rejected: item.quantity_rejected,
@@ -384,6 +391,7 @@ export default function CreateGoodsReceipt() {
                   <TableRow>
                     <TableHead className="min-w-[100px]">Product Code</TableHead>
                     <TableHead className="min-w-[150px]">Product Name</TableHead>
+                    <TableHead className="min-w-[120px]">Variant</TableHead>
                     <TableHead className="min-w-[100px]">HSN Code</TableHead>
                     <TableHead className="min-w-[80px]">Unit</TableHead>
                     <TableHead className="min-w-[80px]">Ordered</TableHead>
@@ -401,6 +409,9 @@ export default function CreateGoodsReceipt() {
                       <TableRow key={item.purchase_order_item_id}>
                         <TableCell className="text-sm">{item.product_code || '-'}</TableCell>
                         <TableCell className="font-medium text-sm">{item.product_name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {item.variant_name || '-'}
+                        </TableCell>
                         <TableCell className="text-sm">{item.hsn_code || '-'}</TableCell>
                         <TableCell className="text-sm">{item.unit || '-'}</TableCell>
                         <TableCell>{item.ordered_quantity}</TableCell>

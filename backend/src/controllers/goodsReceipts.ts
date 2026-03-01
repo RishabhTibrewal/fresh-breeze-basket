@@ -99,11 +99,11 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
     // Generate GRN number
     const grn_number = await generateGRNNumber(req.companyId);
 
-    // Fetch PO items to validate quantities
+    // Fetch PO items to validate quantities and get variant_id
     const { data: poItems, error: poItemsError } = await adminClient
       .schema('procurement')
       .from('purchase_order_items')
-      .select('id, quantity, received_quantity')
+      .select('id, quantity, received_quantity, variant_id, product_id')
       .eq('purchase_order_id', purchase_order_id)
       .eq('company_id', req.companyId);
 
@@ -274,10 +274,14 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
       productsMap = new Map(products?.map((p: any) => [p.id, p]) || []);
     }
 
-    // Create goods receipt items with product details
+    // Create goods receipt items with variant_id from PO items
     const receiptItems = items.map((item: any) => {
+      const poItem = poItemsMap.get(item.purchase_order_item_id);
       const product = productsMap.get(item.product_id);
       const quantity_received = item.quantity_received;
+      
+      // Get variant_id from purchase order item (preferred) or fallback to null
+      const variant_id = poItem?.variant_id || null;
       
       // Ensure quantity_accepted + quantity_rejected = quantity_received
       // If both are provided, validate they add up correctly
@@ -316,6 +320,7 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
         goods_receipt_id: goodsReceipt.id,
         purchase_order_item_id: item.purchase_order_item_id,
         product_id: item.product_id,
+        variant_id, // Store variant_id from PO item
         quantity_received: quantity_received,
         quantity_accepted: quantity_accepted,
         quantity_rejected: quantity_rejected,
@@ -513,11 +518,13 @@ export const getGoodsReceiptById = async (req: Request, res: Response, next: Nex
     const purchaseOrder = purchaseOrderResult.error ? null : purchaseOrderResult.data;
     const warehouse = warehouseResult.error ? null : warehouseResult.data;
 
-    // Fetch products and purchase order items for receipt items
+    // Fetch products, variants, and purchase order items for receipt items
     const productIds = items?.map((item: any) => item.product_id).filter(Boolean) || [];
+    const variantIds = items?.map((item: any) => item.variant_id).filter(Boolean) || [];
     const purchaseOrderItemIds = items?.map((item: any) => item.purchase_order_item_id).filter(Boolean) || [];
 
     const productsMap = new Map();
+    const variantsMap = new Map();
     const purchaseOrderItemsMap = new Map();
 
     if (productIds.length > 0) {
@@ -529,6 +536,18 @@ export const getGoodsReceiptById = async (req: Request, res: Response, next: Nex
       
       products?.forEach((product: any) => {
         productsMap.set(product.id, product);
+      });
+    }
+
+    if (variantIds.length > 0) {
+      const { data: variants } = await adminClient
+        .from('product_variants')
+        .select('id, name, sku, is_default, image_url, unit, unit_type, hsn')
+        .in('id', variantIds)
+        .or(`company_id.eq.${req.companyId},company_id.is.null`);
+      
+      variants?.forEach((variant: any) => {
+        variantsMap.set(variant.id, variant);
       });
     }
 
@@ -545,12 +564,20 @@ export const getGoodsReceiptById = async (req: Request, res: Response, next: Nex
       });
     }
 
-    // Enrich items with products and purchase order items
-    const enrichedItems = (items || []).map((item: any) => ({
-      ...item,
-      products: item.product_id ? productsMap.get(item.product_id) : null,
-      purchase_order_items: item.purchase_order_item_id ? purchaseOrderItemsMap.get(item.purchase_order_item_id) : null
-    }));
+    // Enrich items with products, variants, and purchase order items
+    const enrichedItems = (items || []).map((item: any) => {
+      const poItem = item.purchase_order_item_id ? purchaseOrderItemsMap.get(item.purchase_order_item_id) : null;
+      return {
+        ...item,
+        products: item.product_id ? productsMap.get(item.product_id) : null,
+        variants: item.variant_id ? variantsMap.get(item.variant_id) : null,
+        variant: item.variant_id ? variantsMap.get(item.variant_id) : null, // Alias for backward compatibility
+        purchase_order_items: poItem ? {
+          ...poItem,
+          variants: poItem.variant_id ? variantsMap.get(poItem.variant_id) : null
+        } : null
+      };
+    });
 
     res.json({
       success: true,
@@ -875,6 +902,16 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
       }
     }
 
+    // Fetch goods receipt items to get variant_id
+    const { data: grnItems } = await adminClient
+      .schema('procurement')
+      .from('goods_receipt_items')
+      .select('id, purchase_order_item_id, variant_id, product_id')
+      .eq('goods_receipt_id', id)
+      .eq('company_id', req.companyId);
+
+    const grnItemsMap = new Map(grnItems?.map((item: any) => [item.purchase_order_item_id, item]) || []);
+
     // Update items and warehouse inventory
     const productService = new ProductService(req.companyId);
     for (const item of items) {
@@ -884,14 +921,20 @@ export const receiveGoods = async (req: Request, res: Response, next: NextFuncti
         continue; // Skip invalid items
       }
 
-      // Get default variant for the product
+      // Get variant_id from goods_receipt_item (preferred) or fallback to default variant
       let variantId: string;
-      try {
-        const defaultVariant = await productService.getDefaultVariant(product_id);
-        variantId = defaultVariant.id;
-      } catch (variantError) {
-        console.error(`Error getting default variant for product ${product_id}:`, variantError);
-        continue; // Skip this item if we can't get the variant
+      const grnItem = grnItemsMap.get(purchase_order_item_id);
+      if (grnItem?.variant_id) {
+        variantId = grnItem.variant_id;
+      } else {
+        // Fallback: get default variant for the product (for backward compatibility)
+        try {
+          const defaultVariant = await productService.getDefaultVariant(product_id);
+          variantId = defaultVariant.id;
+        } catch (variantError) {
+          console.error(`Error getting default variant for product ${product_id}:`, variantError);
+          continue; // Skip this item if we can't get the variant
+        }
       }
 
       // Convert quantity_accepted to number if it's a string
@@ -1027,11 +1070,11 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
       throw new ApiError(404, 'Goods receipt not found');
     }
 
-    // Fetch goods receipt items separately to avoid type issues
+    // Fetch goods receipt items separately to avoid type issues (include variant_id)
     const { data: items, error: itemsError } = await adminClient
       .schema('procurement')
       .from('goods_receipt_items')
-      .select('*')
+      .select('*, variant_id')
       .eq('goods_receipt_id', id)
       .eq('company_id', req.companyId);
 
@@ -1150,14 +1193,19 @@ export const completeGoodsReceipt = async (req: Request, res: Response, next: Ne
 
     for (const item of itemsList) {
       if (item.quantity_accepted > 0) {
-        // Get default variant for the product
+        // Use variant_id from goods_receipt_item (preferred) or fallback to default variant
         let variantId: string;
-        try {
-          const defaultVariant = await productService.getDefaultVariant(item.product_id);
-          variantId = defaultVariant.id;
-        } catch (variantError) {
-          console.error(`Error getting default variant for product ${item.product_id}:`, variantError);
-          continue; // Skip this item if we can't get the variant
+        if (item.variant_id) {
+          variantId = item.variant_id;
+        } else {
+          // Fallback: get default variant for the product (for backward compatibility)
+          try {
+            const defaultVariant = await productService.getDefaultVariant(item.product_id);
+            variantId = defaultVariant.id;
+          } catch (variantError) {
+            console.error(`Error getting default variant for product ${item.product_id}:`, variantError);
+            continue; // Skip this item if we can't get the variant
+          }
         }
 
         // Convert quantity_accepted to number if needed

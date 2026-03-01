@@ -283,6 +283,7 @@ export default function PurchaseInvoiceDetail() {
                       <TableRow>
                         <TableHead className="min-w-[100px]">Product Code</TableHead>
                         <TableHead className="min-w-[150px]">Product Name</TableHead>
+                        <TableHead className="min-w-[120px]">Variant</TableHead>
                         <TableHead className="min-w-[100px]">HSN Code</TableHead>
                         <TableHead className="min-w-[80px]">Qty</TableHead>
                         <TableHead className="min-w-[80px]">Unit</TableHead>
@@ -298,6 +299,9 @@ export default function PurchaseInvoiceDetail() {
                           <TableCell className="text-sm">{item.product_code || '-'}</TableCell>
                           <TableCell className="font-medium text-sm">
                             {item.products?.name || 'Product'}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {item.variants?.name || item.goods_receipt_items?.variants?.name || '-'}
                           </TableCell>
                           <TableCell className="text-sm">{item.hsn_code || '-'}</TableCell>
                           <TableCell className="text-sm">{item.quantity}</TableCell>

@@ -378,6 +378,28 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
         }
       }
 
+      // Fetch variant_id from goods_receipt_items if goods_receipt_item_id is provided
+      const grnItemIds = req.body.items
+        .map((item: any) => item.goods_receipt_item_id)
+        .filter((id: any) => id != null) as string[];
+      
+      let grnItemsMap = new Map();
+      if (grnItemIds.length > 0) {
+        const { data: grnItems, error: grnItemsError } = await adminClient
+          .schema('procurement')
+          .from('goods_receipt_items')
+          .select('id, variant_id')
+          .in('id', grnItemIds)
+          .eq('company_id', req.companyId);
+
+        if (grnItemsError) {
+          console.error('Error fetching goods receipt items:', grnItemsError);
+          // Continue without variant_id if fetch fails
+        } else {
+          grnItemsMap = new Map(grnItems?.map((item: any) => [item.id, item]) || []);
+        }
+      }
+
       // Fetch product details for all items
       const productIds = req.body.items.map((item: any) => item.product_id).filter(Boolean);
       let productsMap = new Map();
@@ -399,6 +421,7 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
 
       const invoiceItems = req.body.items.map((item: any) => {
         const product = productsMap.get(item.product_id);
+        const grnItem = item.goods_receipt_item_id ? grnItemsMap.get(item.goods_receipt_item_id) : null;
         const quantity = item.quantity || 0;
         const unitPrice = item.unit_price || 0;
         const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : (product?.tax || 0);
@@ -409,6 +432,7 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
         return {
           purchase_invoice_id: purchaseInvoice.id,
           product_id: item.product_id,
+          variant_id: grnItem?.variant_id || null, // Store variant_id from GRN item
           goods_receipt_item_id: item.goods_receipt_item_id || null,
           quantity,
           unit: item.unit || product?.unit_type || 'piece',
@@ -691,9 +715,15 @@ export const getPurchaseInvoiceById = async (req: Request, res: Response, next: 
       // Don't fail, just log the error
     }
 
-    // Fetch products for invoice items
+    // Fetch products, variants, and goods receipt items for invoice items
     const productIds = invoiceItems?.map((item: any) => item.product_id).filter(Boolean) || [];
+    const variantIds = invoiceItems?.map((item: any) => item.variant_id).filter(Boolean) || [];
+    const grnItemIds = invoiceItems?.map((item: any) => item.goods_receipt_item_id).filter(Boolean) || [];
+    
     const productsMap = new Map();
+    const variantsMap = new Map();
+    const grnItemsMap = new Map();
+    
     if (productIds.length > 0) {
       const { data: products } = await adminClient
         .from('products')
@@ -706,11 +736,45 @@ export const getPurchaseInvoiceById = async (req: Request, res: Response, next: 
       });
     }
 
-    // Enrich invoice items with products
-    const enrichedInvoiceItems = (invoiceItems || []).map((item: any) => ({
-      ...item,
-      products: item.product_id ? productsMap.get(item.product_id) : null
-    }));
+    if (variantIds.length > 0) {
+      const { data: variants } = await adminClient
+        .from('product_variants')
+        .select('id, name, sku, is_default, image_url, unit, unit_type, hsn')
+        .in('id', variantIds)
+        .or(`company_id.eq.${req.companyId},company_id.is.null`);
+      
+      variants?.forEach((variant: any) => {
+        variantsMap.set(variant.id, variant);
+      });
+    }
+
+    if (grnItemIds.length > 0) {
+      const { data: grnItems } = await adminClient
+        .schema('procurement')
+        .from('goods_receipt_items')
+        .select('id, variant_id')
+        .in('id', grnItemIds)
+        .eq('company_id', req.companyId);
+      
+      grnItems?.forEach((grnItem: any) => {
+        grnItemsMap.set(grnItem.id, grnItem);
+      });
+    }
+
+    // Enrich invoice items with products, variants, and goods receipt items
+    const enrichedInvoiceItems = (invoiceItems || []).map((item: any) => {
+      const grnItem = item.goods_receipt_item_id ? grnItemsMap.get(item.goods_receipt_item_id) : null;
+      return {
+        ...item,
+        products: item.product_id ? productsMap.get(item.product_id) : null,
+        variants: item.variant_id ? variantsMap.get(item.variant_id) : null,
+        variant: item.variant_id ? variantsMap.get(item.variant_id) : null, // Alias for backward compatibility
+        goods_receipt_items: grnItem ? {
+          ...grnItem,
+          variants: grnItem.variant_id ? variantsMap.get(grnItem.variant_id) : null
+        } : null
+      };
+    });
 
     res.json({
       success: true,

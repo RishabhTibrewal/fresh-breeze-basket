@@ -87,6 +87,8 @@ export default function CreatePurchaseInvoice() {
   // State for invoice items
   const [invoiceItems, setInvoiceItems] = useState<Array<{
     product_id: string;
+    variant_id?: string | null;
+    variant_name?: string;
     product_name: string;
     product_code?: string;
     hsn_code?: string;
@@ -97,6 +99,7 @@ export default function CreatePurchaseInvoice() {
     tax_amount: number;
     discount_amount: number;
     line_total: number;
+    goods_receipt_item_id?: string;
   }>>([]);
 
   // Load existing invoice data when in edit mode
@@ -115,6 +118,8 @@ export default function CreatePurchaseInvoice() {
       if (invoiceToEdit.purchase_invoice_items && invoiceToEdit.purchase_invoice_items.length > 0) {
         const items = invoiceToEdit.purchase_invoice_items.map((item: any) => ({
           product_id: item.product_id,
+          variant_id: item.variant_id || item.goods_receipt_items?.variant_id || null,
+          variant_name: item.variants?.name || item.goods_receipt_items?.variants?.name || '',
           product_name: item.products?.name || 'Product',
           product_code: item.product_code || '',
           hsn_code: item.hsn_code || '',
@@ -125,6 +130,7 @@ export default function CreatePurchaseInvoice() {
           tax_amount: item.tax_amount || 0,
           discount_amount: item.discount_amount || 0,
           line_total: item.line_total,
+          goods_receipt_item_id: item.goods_receipt_item_id,
         }));
         setInvoiceItems(items);
       }
@@ -147,6 +153,8 @@ export default function CreatePurchaseInvoice() {
           
           return {
             product_id: item.product_id,
+            variant_id: item.variant_id || null,
+            variant_name: item.variants?.name || '',
             product_name: item.products?.name || 'Product',
             product_code: item.product_code || item.products?.product_code || '',
             hsn_code: item.hsn_code || item.products?.hsn_code || '',
@@ -254,6 +262,8 @@ export default function CreatePurchaseInvoice() {
     // Include invoice items
     submitData.items = invoiceItems.map(item => ({
       product_id: item.product_id,
+      variant_id: item.variant_id || undefined,
+      goods_receipt_item_id: item.goods_receipt_item_id || undefined,
       quantity: item.quantity,
       unit: item.unit,
       unit_price: item.unit_price,
@@ -480,6 +490,7 @@ export default function CreatePurchaseInvoice() {
                         <TableRow>
                           <TableHead className="min-w-[100px]">Product Code</TableHead>
                           <TableHead className="min-w-[150px]">Product Name</TableHead>
+                          <TableHead className="min-w-[120px]">Variant</TableHead>
                           <TableHead className="min-w-[100px]">HSN Code</TableHead>
                           <TableHead className="min-w-[80px]">Qty</TableHead>
                           <TableHead className="min-w-[80px]">Unit</TableHead>
@@ -495,6 +506,9 @@ export default function CreatePurchaseInvoice() {
                           <TableRow key={index}>
                             <TableCell className="text-sm">{item.product_code || '-'}</TableCell>
                             <TableCell className="font-medium text-sm">{item.product_name}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {item.variant_name || '-'}
+                            </TableCell>
                             <TableCell className="text-sm">{item.hsn_code || '-'}</TableCell>
                             <TableCell>
                               <Input

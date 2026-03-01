@@ -24,6 +24,7 @@ import { purchaseOrdersService } from '@/api/purchaseOrders';
 import { suppliersService } from '@/api/suppliers';
 import { warehousesService } from '@/api/warehouses';
 import { productsService } from '@/api/products';
+import { variantsService } from '@/api/variants';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Select,
@@ -38,6 +39,8 @@ import { Textarea } from "@/components/ui/textarea";
 interface OrderItem {
   id: string; // Unique ID for each row
   product_id: string;
+  variant_id?: string | null;
+  variant_name?: string;
   product_name: string;
   product_code?: string;
   hsn_code?: string;
@@ -84,6 +87,9 @@ export default function CreatePurchaseOrder() {
     queryFn: () => productsService.getAll(),
   });
 
+  // State to store variants for each product
+  const [productVariants, setProductVariants] = useState<Record<string, any[]>>({});
+
 
   // Fetch existing purchase order if in edit mode
   const { data: existingPO, isLoading: isLoadingPO } = useQuery({
@@ -106,6 +112,8 @@ export default function CreatePurchaseOrder() {
         const loadedItems: OrderItem[] = existingPO.purchase_order_items.map((item: any) => ({
           id: `row-${item.id}-${Date.now()}`,
           product_id: item.product_id,
+          variant_id: item.variant_id || null,
+          variant_name: item.variants?.name || item.variant?.name || '',
           product_name: item.products?.name || '',
           product_code: item.product_code || item.products?.product_code || '',
           hsn_code: item.hsn_code || item.products?.hsn_code || '',
@@ -146,6 +154,8 @@ export default function CreatePurchaseOrder() {
       {
         id: `row-${Date.now()}-${Math.random()}`,
         product_id: '',
+        variant_id: null,
+        variant_name: '',
         product_name: '',
         product_code: '',
         hsn_code: '',
@@ -158,13 +168,53 @@ export default function CreatePurchaseOrder() {
     ]);
   };
 
+  // Fetch variants for a product
+  const fetchVariantsForProduct = async (productId: string) => {
+    if (productVariants[productId]) {
+      return productVariants[productId];
+    }
+    try {
+      const variants = await variantsService.getByProduct(productId);
+      setProductVariants(prev => ({ ...prev, [productId]: variants }));
+      return variants;
+    } catch (error) {
+      console.error('Error fetching variants:', error);
+      return [];
+    }
+  };
+
   // Update product for a specific row
-  const updateProductForRow = (rowId: string, productId: string) => {
+  const updateProductForRow = async (rowId: string, productId: string) => {
     const product = products.find((p: any) => p.id === productId);
     if (!product) return;
 
-    const price = product.sale_price || product.price || 0;
-    const taxPercentage = product.tax || 0;
+    // Fetch variants for this product
+    const variants = await fetchVariantsForProduct(productId);
+    
+    // Use default variant if available, otherwise use product-level data
+    const defaultVariant = variants.find((v: any) => v.is_default) || variants[0];
+    
+    let price = 0;
+    let taxPercentage = 0;
+    let hsnCode = '';
+    let unit = 'piece';
+    let variantId: string | null = null;
+    let variantName = '';
+
+    if (defaultVariant) {
+      variantId = defaultVariant.id;
+      variantName = defaultVariant.name;
+      price = defaultVariant.price?.sale_price || product.sale_price || product.price || 0;
+      taxPercentage = defaultVariant.tax?.rate || product.tax || 0;
+      hsnCode = defaultVariant.hsn || product.hsn_code || '';
+      unit = defaultVariant.unit_type || product.unit_type || 'piece';
+    } else {
+      // Fallback to product-level data
+      price = product.sale_price || product.price || 0;
+      taxPercentage = product.tax || 0;
+      hsnCode = product.hsn_code || '';
+      unit = product.unit_type || 'piece';
+    }
     
     setItems(items.map(item => {
       if (item.id === rowId) {
@@ -172,16 +222,50 @@ export default function CreatePurchaseOrder() {
         return {
           ...item,
           product_id: product.id,
+          variant_id: variantId,
+          variant_name: variantName,
           product_name: product.name,
           product_code: product.product_code || '',
-          hsn_code: product.hsn_code || '',
-          unit: product.unit_type || 'piece',
+          hsn_code: hsnCode,
+          unit: unit,
           tax_percentage: taxPercentage,
           unit_price: price,
           line_total: lineTotal
         };
       }
       return item;
+    }));
+  };
+
+  // Update variant for a specific row
+  const updateVariantForRow = (rowId: string, variantId: string) => {
+    const item = items.find(i => i.id === rowId);
+    if (!item || !item.product_id) return;
+
+    const variants = productVariants[item.product_id] || [];
+    const variant = variants.find((v: any) => v.id === variantId);
+    if (!variant) return;
+
+    const price = variant.price?.sale_price || 0;
+    const taxPercentage = variant.tax?.rate || 0;
+    const hsnCode = variant.hsn || '';
+    const unit = variant.unit_type || 'piece';
+
+    setItems(items.map(i => {
+      if (i.id === rowId) {
+        const lineTotal = i.quantity * price;
+        return {
+          ...i,
+          variant_id: variant.id,
+          variant_name: variant.name,
+          hsn_code: hsnCode,
+          unit: unit,
+          tax_percentage: taxPercentage,
+          unit_price: price,
+          line_total: lineTotal
+        };
+      }
+      return i;
     }));
   };
 
@@ -275,6 +359,7 @@ export default function CreatePurchaseOrder() {
       terms_conditions: termsConditions || undefined,
       items: validItems.map(item => ({
         product_id: item.product_id,
+        variant_id: item.variant_id || undefined,
         quantity: item.quantity,
         unit_price: item.unit_price
       }))
@@ -407,6 +492,7 @@ export default function CreatePurchaseOrder() {
                     <TableRow>
                       <TableHead className="min-w-[150px]">Product Code</TableHead>
                       <TableHead className="min-w-[200px]">Product Name</TableHead>
+                      <TableHead className="min-w-[150px]">Variant</TableHead>
                       <TableHead className="min-w-[100px]">HSN Code</TableHead>
                       <TableHead className="min-w-[80px]">Qty</TableHead>
                       <TableHead className="min-w-[80px]">Unit</TableHead>
@@ -428,7 +514,9 @@ export default function CreatePurchaseOrder() {
                           <TableCell>
                             <Select
                               value={item.product_id || ''}
-                              onValueChange={(productId) => updateProductForRow(item.id, productId)}
+                              onValueChange={async (productId) => {
+                                await updateProductForRow(item.id, productId);
+                              }}
                             >
                               <SelectTrigger className="w-full">
                                 <SelectValue placeholder="Select product" />
@@ -439,19 +527,68 @@ export default function CreatePurchaseOrder() {
                                   const isUsedInOtherRow = items.some(
                                     (i) => i.product_id === product.id && i.id !== item.id
                                   );
+                                  
+                                  // Get variant information
+                                  const variants = product.variants || [];
+                                  const defaultVariant = variants.find((v: any) => v.is_default) || variants[0];
+                                  const variantCount = variants.length;
+                                  
+                                  // Build variant display text
+                                  let variantInfo = '';
+                                  if (variantCount > 0) {
+                                    if (variantCount === 1) {
+                                      variantInfo = ` - ${defaultVariant.name} (₹${defaultVariant.price?.sale_price || 0})`;
+                                    } else {
+                                      const prices = variants
+                                        .map((v: any) => v.price?.sale_price || 0)
+                                        .filter((p: number) => p > 0);
+                                      const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+                                      const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
+                                      if (minPrice === maxPrice) {
+                                        variantInfo = ` - ${variantCount} variants (₹${minPrice})`;
+                                      } else {
+                                        variantInfo = ` - ${variantCount} variants (₹${minPrice}-₹${maxPrice})`;
+                                      }
+                                    }
+                                  } else {
+                                    // Fallback to product-level price if no variants
+                                    variantInfo = ` - ₹${product.sale_price || product.price || 0}`;
+                                  }
+                                  
                                   return (
                                     <SelectItem 
                                       key={product.id} 
                                       value={product.id}
                                       disabled={isUsedInOtherRow}
                                     >
-                                      {product.name} - ₹{product.sale_price || product.price}
+                                      {product.name}{variantInfo}
                                       {isUsedInOtherRow && ' (Already added)'}
                                     </SelectItem>
                                   );
                                 })}
                               </SelectContent>
                             </Select>
+                          </TableCell>
+                          <TableCell>
+                            {item.product_id ? (
+                              <Select
+                                value={item.variant_id || ''}
+                                onValueChange={(variantId) => updateVariantForRow(item.id, variantId)}
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="Select variant" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {(productVariants[item.product_id] || []).map((variant: any) => (
+                                    <SelectItem key={variant.id} value={variant.id}>
+                                      {variant.name} {variant.is_default && '(Default)'} - ₹{variant.price?.sale_price || 0}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">Select product first</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-sm">
                             {item.hsn_code || '-'}

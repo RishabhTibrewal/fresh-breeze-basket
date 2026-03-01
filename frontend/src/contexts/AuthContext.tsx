@@ -542,40 +542,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(supabaseSession);
 
       // Handle roles and profile
-      if (userProfile) {
+        if (userProfile) {
         const roles = userRoles || userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
         const primaryRole = roles.length > 0 ? roles[0] : 'user';
-        localStorage.setItem('userRole', primaryRole);
+          localStorage.setItem('userRole', primaryRole);
         localStorage.setItem('userRoles', JSON.stringify(roles));
         setProfile(prev => (prev ? { ...prev, role: primaryRole, roles } : userProfile));
         setIsAdmin(roles.includes('admin') || roles.includes('accounts'));
         setIsSales(roles.includes('sales'));
         setIsAccounts(roles.includes('accounts'));
         setIsWarehouseManager(roles.includes('warehouse_manager'));
-        setRole(primaryRole);
+          setRole(primaryRole);
         setRoles(roles);
-        
-        // Fetch warehouses if user is warehouse manager
+          
+          // Fetch warehouses if user is warehouse manager
         if (roles.includes('warehouse_manager') || roles.includes('admin')) {
-          if (userId) {
-            try {
-              const { warehouseManagersService } = await import('@/api/warehouseManagers');
-              const warehouseAssignments = await warehouseManagersService.getByUser(userId);
-              const warehouseIds = warehouseAssignments
-                .map((wm: any) => wm.warehouses?.id || wm.warehouse_id)
-                .filter(Boolean);
-              setWarehouses(warehouseIds);
-            } catch (error) {
-              console.error('Error fetching user warehouses:', error);
+            if (userId) {
+              try {
+                const { warehouseManagersService } = await import('@/api/warehouseManagers');
+                const warehouseAssignments = await warehouseManagersService.getByUser(userId);
+                const warehouseIds = warehouseAssignments
+                  .map((wm: any) => wm.warehouses?.id || wm.warehouse_id)
+                  .filter(Boolean);
+                setWarehouses(warehouseIds);
+              } catch (error) {
+                console.error('Error fetching user warehouses:', error);
+                setWarehouses([]);
+              }
+            } else {
+              console.warn('Cannot fetch warehouses: userId not available');
               setWarehouses([]);
             }
           } else {
-            console.warn('Cannot fetch warehouses: userId not available');
             setWarehouses([]);
           }
-        } else {
-          setWarehouses([]);
-        }
       }
       
       toast.success('Successfully signed in!');
@@ -617,7 +617,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           console.log('Signing in through backend after registration');
           const { data: loginData } = await apiClient.post('/auth/login', { email, password });
-          
+
           if (!loginData?.success || !loginData?.data) {
             throw new Error(loginData?.message || 'Login failed');
           }
@@ -682,19 +682,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setSession(supabaseSession);
 
           // Handle roles and profile
-          if (userProfile) {
+              if (userProfile) {
             const roles = userRoles || userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
             const primaryRole = roles.length > 0 ? roles[0] : 'user';
-            localStorage.setItem('userRole', primaryRole);
+                localStorage.setItem('userRole', primaryRole);
             localStorage.setItem('userRoles', JSON.stringify(roles));
             setProfile(prev => (prev ? { ...prev, role: primaryRole, roles } : userProfile));
             setIsAdmin(roles.includes('admin') || roles.includes('accounts'));
             setIsSales(roles.includes('sales'));
             setIsAccounts(roles.includes('accounts'));
             setIsWarehouseManager(roles.includes('warehouse_manager'));
-            setRole(primaryRole);
+                setRole(primaryRole);
             setRoles(roles);
-          }
+              }
           
           toast.success('Registration successful! You have been signed in.');
         } catch (signInErr: any) {

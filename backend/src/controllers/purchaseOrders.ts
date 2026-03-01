@@ -179,6 +179,9 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
       throw new ValidationError('Company context is required');
     }
 
+    // Initialize admin client early for variant validation
+    const adminClient = supabaseAdmin || supabase;
+
     // Validate warehouse access for warehouse managers
     const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
     if (!isAdmin) {
@@ -188,14 +191,10 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
       }
     }
 
-    // Generate PO number
-    const po_number = await generatePONumber(req.companyId);
-
-    // Calculate total amount
+    // Validate items and calculate total amount
     let total_amount = 0;
     for (const item of items) {
       // Explicit validation: check for null/undefined/empty string, not just falsy values
-      // (0 is falsy but might be valid in edge cases, so we check explicitly)
       if (!item.product_id || item.product_id === '' || 
           item.quantity == null || item.quantity <= 0 || 
           item.unit_price == null || item.unit_price < 0) {
@@ -204,30 +203,80 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
           `Found: product_id=${item.product_id}, quantity=${item.quantity}, unit_price=${item.unit_price}`
         );
       }
+      
+      // Validate variant_id if provided (should belong to the product)
+      if (item.variant_id) {
+        const { data: variant, error: variantError } = await adminClient
+          .from('product_variants')
+          .select('id, product_id')
+          .eq('id', item.variant_id)
+          .eq('product_id', item.product_id)
+          .single();
+        
+        if (variantError || !variant) {
+          throw new ValidationError(
+            `Variant ${item.variant_id} does not belong to product ${item.product_id}`
+          );
+        }
+      }
+      
       const line_total = item.quantity * item.unit_price;
       total_amount += line_total;
     }
 
-    // Create purchase order using admin client for custom schema access
-    const adminClient = supabaseAdmin || supabase;
+    // Create purchase order with retry logic to handle PO number race conditions
+    let purchaseOrderResult: any;
+    let retryCount = 0;
+    const maxRetries = 5;
     
-    const purchaseOrderData = {
-      supplier_id,
-      warehouse_id,
-      po_number,
-      expected_delivery_date,
-      total_amount,
-      notes,
-      terms_conditions,
-      status: 'draft',
-      created_by: userId,
-      company_id: req.companyId
-    };
+    while (retryCount < maxRetries) {
+      try {
+        // Generate PO number (regenerate on each retry to get the latest sequence)
+        const po_number = await generatePONumber(req.companyId);
+        
+        const purchaseOrderData = {
+          supplier_id,
+          warehouse_id,
+          po_number,
+          expected_delivery_date,
+          total_amount,
+          notes,
+          terms_conditions,
+          status: 'draft',
+          created_by: userId,
+          company_id: req.companyId
+        };
 
-    const purchaseOrderResult = await queryProcurementTable('purchase_orders', 'insert', {
-      data: purchaseOrderData,
-      companyId: req.companyId
-    });
+        purchaseOrderResult = await queryProcurementTable('purchase_orders', 'insert', {
+          data: purchaseOrderData,
+          companyId: req.companyId
+        });
+        
+        // Success - exit retry loop
+        break;
+      } catch (error: any) {
+        // Check if it's a duplicate key error on po_number
+        const isDuplicatePO = error?.code === '23505' && 
+                             (error?.message?.includes('po_number') || 
+                              error?.details?.includes('po_number') ||
+                              error?.message?.includes('PO-'));
+        
+        if (isDuplicatePO && retryCount < maxRetries - 1) {
+          retryCount++;
+          console.warn(`PO number conflict detected (attempt ${retryCount}/${maxRetries}), retrying with new PO number...`);
+          // Wait a small random amount to avoid thundering herd
+          await new Promise(resolve => setTimeout(resolve, Math.random() * 100 + 50));
+          continue;
+        }
+        
+        // If it's not a duplicate PO error or we've exhausted retries, throw
+        throw error;
+      }
+    }
+
+    if (!purchaseOrderResult) {
+      throw new ApiError(500, 'Failed to create purchase order after retries');
+    }
 
     if (!purchaseOrderResult || (Array.isArray(purchaseOrderResult) && purchaseOrderResult.length === 0)) {
       throw new ApiError(500, 'Failed to create purchase order');
@@ -235,7 +284,44 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
 
     const po = Array.isArray(purchaseOrderResult) ? purchaseOrderResult[0] : purchaseOrderResult as any;
 
-    // Fetch product details for all items
+    // Collect all variant IDs (filter out null/undefined)
+    const variantIds = items
+      .map((item: any) => item.variant_id)
+      .filter((id: any) => id != null) as string[];
+
+    // Fetch variant details for items that have variant_id
+    let variantsMap = new Map();
+    if (variantIds.length > 0) {
+      const { data: variants, error: variantsError } = await adminClient
+        .from('product_variants')
+        .select(`
+          id,
+          product_id,
+          unit,
+          unit_type,
+          hsn,
+          tax_id,
+          price_id,
+          price:product_prices!price_id (
+            sale_price,
+            mrp_price
+          ),
+          tax:taxes (
+            rate
+          )
+        `)
+        .in('id', variantIds)
+        .or(`company_id.eq.${req.companyId},company_id.is.null`);
+
+      if (variantsError) {
+        console.error('Error fetching variants:', variantsError);
+        throw new ApiError(500, 'Failed to fetch variant details');
+      }
+
+      variantsMap = new Map(variants?.map((v: any) => [v.id, v]) || []);
+    }
+
+    // Fetch product details as fallback (for items without variant_id or for product_code)
     const productIds = items.map((item: any) => item.product_id);
     const { data: products, error: productsError } = await adminClient
       .from('products')
@@ -250,19 +336,30 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
 
     const productsMap = new Map(products?.map((p: any) => [p.id, p]) || []);
 
-    // Create purchase order items with product details
+    // Create purchase order items with variant-level data (preferred) or product-level (fallback)
     const orderItems = items.map((item: any) => {
+      const variant = item.variant_id ? variantsMap.get(item.variant_id) : null;
       const product = productsMap.get(item.product_id);
+      
+      // Use variant data if available, otherwise fall back to product data
+      const unit = variant?.unit_type || variant?.unit || product?.unit_type || 'piece';
+      const product_code = product?.product_code || '';
+      const hsn_code = variant?.hsn || product?.hsn_code || '';
+      // Use variant tax rate if available, otherwise fall back to product tax
+      // Note: variant?.tax?.rate is fetched from taxes table via the join
+      const tax_percentage = variant?.tax?.rate ?? (product?.tax || 0);
+      
       return {
         purchase_order_id: po.id,
         product_id: item.product_id,
+        variant_id: item.variant_id || null, // Store variant_id if provided
         quantity: item.quantity,
         unit_price: item.unit_price,
         line_total: item.quantity * item.unit_price,
-        unit: product?.unit_type || 'piece',
-        product_code: product?.product_code || '',
-        hsn_code: product?.hsn_code || '',
-        tax_percentage: product?.tax || 0,
+        unit,
+        product_code,
+        hsn_code,
+        tax_percentage,
         company_id: req.companyId
       };
     });
@@ -463,9 +560,13 @@ export const getPurchaseOrderById = async (req: Request, res: Response, next: Ne
     const supplier = supplierResult.error ? null : supplierResult.data;
     const warehouse = warehouseResult.error ? null : warehouseResult.data;
 
-    // Fetch products for items
+    // Fetch products and variants for items
     const productIds = items?.map((item: any) => item.product_id).filter(Boolean) || [];
+    const variantIds = items?.map((item: any) => item.variant_id).filter(Boolean) || [];
+    
     let productsMap = new Map();
+    let variantsMap = new Map();
+    
     if (productIds.length > 0) {
       const { data: products } = await adminClient
         .from('products')
@@ -478,10 +579,24 @@ export const getPurchaseOrderById = async (req: Request, res: Response, next: Ne
       });
     }
 
-    // Enrich items with products
+    if (variantIds.length > 0) {
+      const { data: variants } = await adminClient
+        .from('product_variants')
+        .select('id, name, sku, is_default, image_url, unit, unit_type, hsn')
+        .in('id', variantIds)
+        .or(`company_id.eq.${req.companyId},company_id.is.null`);
+      
+      variants?.forEach((variant: any) => {
+        variantsMap.set(variant.id, variant);
+      });
+    }
+
+    // Enrich items with products and variants
     const enrichedItems = (items || []).map((item: any) => ({
       ...item,
-      products: item.product_id ? productsMap.get(item.product_id) : null
+      products: item.product_id ? productsMap.get(item.product_id) : null,
+      variants: item.variant_id ? variantsMap.get(item.variant_id) : null,
+      variant: item.variant_id ? variantsMap.get(item.variant_id) : null // Alias for backward compatibility
     }));
 
     res.json({
@@ -570,9 +685,62 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
               `Found: product_id=${item.product_id}, quantity=${item.quantity}, unit_price=${item.unit_price}`
             );
           }
+          
+          // Validate variant_id if provided (should belong to the product)
+          if (item.variant_id) {
+            const { data: variant, error: variantError } = await adminClient
+              .from('product_variants')
+              .select('id, product_id')
+              .eq('id', item.variant_id)
+              .eq('product_id', item.product_id)
+              .single();
+            
+            if (variantError || !variant) {
+              throw new ValidationError(
+                `Variant ${item.variant_id} does not belong to product ${item.product_id}`
+              );
+            }
+          }
         }
 
-        // Fetch product details for all items
+        // Collect all variant IDs (filter out null/undefined)
+        const variantIds = items
+          .map((item: any) => item.variant_id)
+          .filter((id: any) => id != null) as string[];
+
+        // Fetch variant details for items that have variant_id
+        let variantsMap = new Map();
+        if (variantIds.length > 0) {
+          const { data: variants, error: variantsError } = await adminClient
+            .from('product_variants')
+            .select(`
+              id,
+              product_id,
+              unit,
+              unit_type,
+              hsn,
+              tax_id,
+              price_id,
+              price:product_prices!price_id (
+                sale_price,
+                mrp_price
+              ),
+              tax:taxes (
+                rate
+              )
+            `)
+            .in('id', variantIds)
+            .or(`company_id.eq.${req.companyId},company_id.is.null`);
+
+          if (variantsError) {
+            console.error('Error fetching variants:', variantsError);
+            throw new ApiError(500, 'Failed to fetch variant details');
+          }
+
+          variantsMap = new Map(variants?.map((v: any) => [v.id, v]) || []);
+        }
+
+        // Fetch product details as fallback (for items without variant_id or for product_code)
         const productIds = items.map((item: any) => item.product_id);
         const { data: products, error: productsError } = await adminClient
           .from('products')
@@ -587,18 +755,30 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
 
         const productsMap = new Map(products?.map((p: any) => [p.id, p]) || []);
 
+        // Create purchase order items with variant-level data (preferred) or product-level (fallback)
         const orderItems = items.map((item: any) => {
+          const variant = item.variant_id ? variantsMap.get(item.variant_id) : null;
           const product = productsMap.get(item.product_id);
+          
+          // Use variant data if available, otherwise fall back to product data
+          const unit = variant?.unit_type || variant?.unit || product?.unit_type || 'piece';
+          const product_code = product?.product_code || '';
+          const hsn_code = variant?.hsn || product?.hsn_code || '';
+          // Use variant tax rate if available, otherwise fall back to product tax
+          // Note: variant?.tax?.rate is fetched from taxes table via the join
+          const tax_percentage = variant?.tax?.rate ?? (product?.tax || 0);
+          
           return {
             purchase_order_id: id,
             product_id: item.product_id,
+            variant_id: item.variant_id || null, // Store variant_id if provided
             quantity: item.quantity,
             unit_price: item.unit_price,
             line_total: item.quantity * item.unit_price,
-            unit: product?.unit_type || 'piece',
-            product_code: product?.product_code || '',
-            hsn_code: product?.hsn_code || '',
-            tax_percentage: product?.tax || 0,
+            unit,
+            product_code,
+            hsn_code,
+            tax_percentage,
             company_id: req.companyId
           };
         });

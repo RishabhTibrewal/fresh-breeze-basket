@@ -330,27 +330,27 @@ export const getProductById = async (req: Request, res: Response) => {
       .from('product_variants')
       .select(`
         *,
-        price:product_prices!price_id (
-          id,
-          sale_price,
-          mrp_price,
-          price_type
-        ),
-        brand:brands (
-          id,
-          name,
-          logo_url
-        ),
-        tax:taxes (
-          id,
-          name,
-          rate
-        ),
-        variant_images:product_images!variant_id (
-          id,
-          image_url,
-          display_order
-        )
+          price:product_prices!price_id (
+            id,
+            sale_price,
+            mrp_price,
+            price_type
+          ),
+          brand:brands (
+            id,
+            name,
+            logo_url
+          ),
+          tax:taxes (
+            id,
+            name,
+            rate
+          ),
+          variant_images:product_images!variant_id (
+            id,
+            image_url,
+            display_order
+          )
       `)
       .eq('product_id', id)
       // CRITICAL: Explicit company_id filter when using admin client (RLS bypassed)
@@ -358,7 +358,7 @@ export const getProductById = async (req: Request, res: Response) => {
       .or(`company_id.eq.${req.companyId},company_id.is.null`)
       .order('is_default', { ascending: false })
       .order('created_at', { ascending: true });
-
+    
     if (variantsError) {
       console.error('Error fetching variants:', variantsError);
       // Continue without variants rather than failing

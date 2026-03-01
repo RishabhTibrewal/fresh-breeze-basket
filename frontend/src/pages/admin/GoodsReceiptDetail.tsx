@@ -234,6 +234,7 @@ export default function GoodsReceiptDetail() {
                     <TableRow>
                       <TableHead className="min-w-[100px]">Product Code</TableHead>
                       <TableHead className="min-w-[150px]">Product</TableHead>
+                      <TableHead className="min-w-[120px]">Variant</TableHead>
                       <TableHead className="min-w-[100px]">HSN Code</TableHead>
                       <TableHead className="min-w-[80px]">Received</TableHead>
                       <TableHead className="min-w-[80px]">Accepted</TableHead>
@@ -250,6 +251,9 @@ export default function GoodsReceiptDetail() {
                         <TableCell className="text-sm">{item.product_code || item.products?.product_code || '-'}</TableCell>
                         <TableCell className="font-medium">
                           {item.products?.name || 'Product'}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {item.variants?.name || item.purchase_order_items?.variants?.name || '-'}
                         </TableCell>
                         <TableCell className="text-sm">{item.hsn_code || item.products?.hsn_code || '-'}</TableCell>
                         <TableCell>{item.quantity_received}</TableCell>
@@ -317,6 +321,7 @@ export default function GoodsReceiptDetail() {
                           <TableRow>
                             <TableHead className="min-w-[100px]">Product Code</TableHead>
                             <TableHead className="min-w-[150px]">Product Name</TableHead>
+                            <TableHead className="min-w-[120px]">Variant</TableHead>
                             <TableHead className="min-w-[100px]">HSN Code</TableHead>
                             <TableHead className="min-w-[80px]">Qty</TableHead>
                             <TableHead className="min-w-[80px]">Unit</TableHead>
@@ -332,6 +337,9 @@ export default function GoodsReceiptDetail() {
                               <TableCell className="text-sm">{item.product_code || '-'}</TableCell>
                               <TableCell className="font-medium text-sm">
                                 {item.products?.name || 'Product'}
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {item.variants?.name || item.goods_receipt_items?.variants?.name || '-'}
                               </TableCell>
                               <TableCell className="text-sm">{item.hsn_code || '-'}</TableCell>
                               <TableCell className="text-sm">{item.quantity}</TableCell>
