@@ -156,6 +156,34 @@ export const registerCompany = async (req: Request, res: Response) => {
       console.error('Error creating company membership:', membershipError);
     }
 
+    // Initialize all modules for the new company (enabled by default)
+    const defaultModules = [
+      'ecommerce',
+      'sales',
+      'inventory',
+      'procurement',
+      'accounting',
+      'reports',
+      'pos',
+      'settings'
+    ];
+
+    const moduleInserts = defaultModules.map(module_code => ({
+      company_id: newCompany.id,
+      module_code,
+      is_enabled: true,
+      settings: {}
+    }));
+
+    const { error: modulesError } = await supabaseAdmin
+      .from('company_modules')
+      .insert(moduleInserts);
+
+    if (modulesError) {
+      console.error('Error initializing company modules:', modulesError);
+      // Don't fail company creation if module initialization fails, but log it
+    }
+
     const baseDomain = process.env.TENANT_BASE_DOMAIN || 'gofreshco.com';
 
     return res.status(201).json({

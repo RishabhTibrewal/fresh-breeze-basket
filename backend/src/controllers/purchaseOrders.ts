@@ -194,8 +194,15 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
     // Calculate total amount
     let total_amount = 0;
     for (const item of items) {
-      if (!item.product_id || !item.quantity || !item.unit_price) {
-        throw new ValidationError('Each item must have product_id, quantity, and unit_price');
+      // Explicit validation: check for null/undefined/empty string, not just falsy values
+      // (0 is falsy but might be valid in edge cases, so we check explicitly)
+      if (!item.product_id || item.product_id === '' || 
+          item.quantity == null || item.quantity <= 0 || 
+          item.unit_price == null || item.unit_price < 0) {
+        throw new ValidationError(
+          `Each item must have a valid product_id (non-empty), quantity (greater than 0), and unit_price (non-negative). ` +
+          `Found: product_id=${item.product_id}, quantity=${item.quantity}, unit_price=${item.unit_price}`
+        );
       }
       const line_total = item.quantity * item.unit_price;
       total_amount += line_total;
@@ -553,6 +560,18 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
 
       // Insert new items
       if (items.length > 0) {
+        // Validate all items before processing
+        for (const item of items) {
+          if (!item.product_id || item.product_id === '' || 
+              item.quantity == null || item.quantity <= 0 || 
+              item.unit_price == null || item.unit_price < 0) {
+            throw new ValidationError(
+              `Each item must have a valid product_id (non-empty), quantity (greater than 0), and unit_price (non-negative). ` +
+              `Found: product_id=${item.product_id}, quantity=${item.quantity}, unit_price=${item.unit_price}`
+            );
+          }
+        }
+
         // Fetch product details for all items
         const productIds = items.map((item: any) => item.product_id);
         const { data: products, error: productsError } = await adminClient

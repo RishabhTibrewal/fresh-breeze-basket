@@ -366,6 +366,18 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
 
     // Create invoice items if items array is provided
     if (req.body.items && Array.isArray(req.body.items) && req.body.items.length > 0) {
+      // Validate all items before processing
+      for (const item of req.body.items) {
+        if (!item.product_id || item.product_id === '' || 
+            item.quantity == null || item.quantity <= 0 || 
+            item.unit_price == null || item.unit_price < 0) {
+          throw new ValidationError(
+            `Each item must have a valid product_id (non-empty), quantity (greater than 0), and unit_price (non-negative). ` +
+            `Found: product_id=${item.product_id}, quantity=${item.quantity}, unit_price=${item.unit_price}`
+          );
+        }
+      }
+
       // Fetch product details for all items
       const productIds = req.body.items.map((item: any) => item.product_id).filter(Boolean);
       let productsMap = new Map();
@@ -781,6 +793,18 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
 
       // Insert new items
       if (req.body.items.length > 0) {
+        // Validate all items before processing
+        for (const item of req.body.items) {
+          if (!item.product_id || item.product_id === '' || 
+              item.quantity == null || item.quantity <= 0 || 
+              item.unit_price == null || item.unit_price < 0) {
+            throw new ValidationError(
+              `Each item must have a valid product_id (non-empty), quantity (greater than 0), and unit_price (non-negative). ` +
+              `Found: product_id=${item.product_id}, quantity=${item.quantity}, unit_price=${item.unit_price}`
+            );
+          }
+        }
+
         // Fetch product details for all items
         const productIds = req.body.items.map((item: any) => item.product_id).filter(Boolean);
         let productsMap = new Map();

@@ -122,6 +122,21 @@ BEGIN
     true
   );
 
+  -- Initialize all modules for the new company (enabled by default)
+  INSERT INTO public.company_modules (company_id, module_code, is_enabled, settings)
+  SELECT new_company_id, module_code, true, '{}'::jsonb
+  FROM (
+    VALUES 
+      ('ecommerce'),
+      ('sales'),
+      ('inventory'),
+      ('procurement'),
+      ('accounting'),
+      ('reports'),
+      ('pos'),
+      ('settings')
+  ) AS modules(module_code);
+
   RETURN jsonb_build_object(
     'company_id', new_company_id,
     'user_id', new_user_id
