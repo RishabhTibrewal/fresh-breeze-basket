@@ -306,7 +306,11 @@ export const updatePrice = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Company context is required');
     }
 
-    const client = supabaseAdmin || supabase;
+    // Always use admin client to bypass RLS for backend operations
+    const client = supabaseAdmin;
+    if (!client) {
+      throw new ApiError(500, 'Admin client not configured');
+    }
 
     // Get existing price
     const { data: existingPrice, error: fetchError } = await client
@@ -370,17 +374,29 @@ export const updatePrice = async (req: Request, res: Response) => {
     }
 
     // Update price
+    // Note: We already verified the price exists and belongs to the company above,
+    // so we can safely update by id only. The company_id filter is redundant but
+    // kept for defense-in-depth.
     const { data: updatedPrice, error: updateError } = await client
       .from('product_prices')
       .update(updateData)
       .eq('id', id)
       .eq('company_id', req.companyId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (updateError) {
       console.error('Error updating price:', updateError);
       throw new ApiError(500, `Failed to update price: ${updateError.message}`);
+    }
+
+    if (!updatedPrice) {
+      // This should not happen since we verified the price exists above,
+      // but handle it gracefully in case of race conditions
+      throw new ApiError(
+        404,
+        `Price with ID '${id}' was not found or could not be updated. It may have been deleted.`
+      );
     }
 
     res.status(200).json({

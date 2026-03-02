@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -117,6 +117,16 @@ export default function VariantForm() {
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [existingImages, setExistingImages] = useState<ProductImage[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  
+  // Multiple warehouse stock adjustments
+  interface WarehouseStockAdjustment {
+    id: string;
+    warehouse_id: string | null;
+    stock: number | null;
+  }
+  const [warehouseStockAdjustments, setWarehouseStockAdjustments] = useState<WarehouseStockAdjustment[]>([
+    { id: '1', warehouse_id: null, stock: null }
+  ]);
 
   const form = useForm<VariantFormValues>({
     resolver: zodResolver(variantSchema),
@@ -179,6 +189,18 @@ export default function VariantForm() {
     queryFn: () => inventoryService.getInventoryByProductId(actualProductId!),
     enabled: !!actualProductId,
   });
+
+  // Filter inventory to show only current variant's stock
+  const variantInventory = useMemo(() => {
+    if (!productInventory || !variantId) return null;
+    const filtered = productInventory.warehouses.filter(
+      (item) => item.variant_id === variantId
+    );
+    return {
+      warehouses: filtered,
+      total_stock: filtered.reduce((sum, item) => sum + (item.stock_count || 0), 0)
+    };
+  }, [productInventory, variantId]);
 
   // Fetch existing variant images in edit mode
   const { data: variantImages = [] } = useQuery<ProductImage[]>({
@@ -310,32 +332,33 @@ export default function VariantForm() {
         }
       }
       
-      // Set initial stock if warehouse and stock are provided
-      if (data.warehouse_id && data.initial_stock !== null && data.initial_stock !== undefined && data.initial_stock > 0) {
+      // Set initial stock for multiple warehouses if provided
+      const validStockAdjustments = warehouseStockAdjustments.filter(
+        adj => adj.warehouse_id && adj.stock !== null && adj.stock !== undefined && adj.stock >= 0
+      );
+      
+      if (validStockAdjustments.length > 0) {
         try {
-          // Ensure physical_quantity is an integer
-          const stockQuantity = Math.floor(data.initial_stock);
-          
           // Small delay to ensure variant is fully committed to database
           await new Promise(resolve => setTimeout(resolve, 100));
           
-          await inventoryService.adjustStock({
-            warehouse_id: data.warehouse_id,
-            product_id: productId!,
-            variant_id: variant.id,
-            physical_quantity: stockQuantity,
-            reason: 'Initial Stock Setup',
-          });
+          // Process all warehouse stock adjustments
+          for (const adjustment of validStockAdjustments) {
+            const stockQuantity = Math.floor(adjustment.stock!);
+            await inventoryService.adjustStock({
+              warehouse_id: adjustment.warehouse_id!,
+              product_id: productId!,
+              variant_id: variant.id,
+              physical_quantity: stockQuantity,
+              reason: 'Initial Stock Setup',
+            });
+          }
           
-          toast.success(`Initial stock of ${stockQuantity} set successfully`);
+          if (validStockAdjustments.length > 0) {
+            toast.success(`Initial stock set for ${validStockAdjustments.length} warehouse(s)`);
+          }
         } catch (stockError: any) {
           console.error('Error setting initial stock:', stockError);
-          console.error('Stock adjustment details:', {
-            warehouse_id: data.warehouse_id,
-            product_id: productId,
-            variant_id: variant.id,
-            physical_quantity: Math.floor(data.initial_stock),
-          });
           // Don't fail the variant creation if stock setup fails
           const errorMessage = stockError.response?.data?.error || stockError.message || 'Unknown error';
           toast.warning('Variant created but failed to set initial stock: ' + errorMessage);
@@ -349,6 +372,7 @@ export default function VariantForm() {
       queryClient.invalidateQueries({ queryKey: ['variant-prices'] });
       queryClient.invalidateQueries({ queryKey: ['product', productId] });
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['product-inventory', productId] });
       toast.success('Variant created successfully');
       if (productId) {
         navigate(`${basePath}/products/${productId}/variants`);
@@ -426,34 +450,36 @@ export default function VariantForm() {
         }
       }
       
-      // Update stock if warehouse and stock are provided
-      if (data.warehouse_id && data.initial_stock !== null && data.initial_stock !== undefined && data.initial_stock >= 0) {
+      // Update stock for multiple warehouses if provided
+      const validStockAdjustments = warehouseStockAdjustments.filter(
+        adj => adj.warehouse_id && adj.stock !== null && adj.stock !== undefined && adj.stock >= 0
+      );
+      
+      if (validStockAdjustments.length > 0) {
         try {
-          // Ensure physical_quantity is an integer
-          const stockQuantity = Math.floor(data.initial_stock);
           const targetProductId = productId || variant?.product_id;
           
           if (!targetProductId) {
             throw new Error('Product ID is required to update stock');
           }
           
-          await inventoryService.adjustStock({
-            warehouse_id: data.warehouse_id,
-            product_id: targetProductId,
-            variant_id: variantId!,
-            physical_quantity: stockQuantity,
-            reason: 'Stock Update from Variant Form',
-          });
+          // Process all warehouse stock adjustments
+          for (const adjustment of validStockAdjustments) {
+            const stockQuantity = Math.floor(adjustment.stock!);
+            await inventoryService.adjustStock({
+              warehouse_id: adjustment.warehouse_id!,
+              product_id: targetProductId,
+              variant_id: variantId!,
+              physical_quantity: stockQuantity,
+              reason: 'Stock Update',
+            });
+          }
           
-          toast.success(`Stock updated to ${stockQuantity} successfully`);
+          if (validStockAdjustments.length > 0) {
+            toast.success(`Stock updated for ${validStockAdjustments.length} warehouse(s)`);
+          }
         } catch (stockError: any) {
           console.error('Error updating stock:', stockError);
-          console.error('Stock adjustment details:', {
-            warehouse_id: data.warehouse_id,
-            product_id: productId || variant?.product_id,
-            variant_id: variantId,
-            physical_quantity: Math.floor(data.initial_stock),
-          });
           // Don't fail the variant update if stock update fails
           const errorMessage = stockError.response?.data?.error || stockError.message || 'Unknown error';
           toast.warning('Variant updated but failed to update stock: ' + errorMessage);
@@ -469,6 +495,7 @@ export default function VariantForm() {
       queryClient.invalidateQueries({ queryKey: ['variant-prices', variantId] });
       queryClient.invalidateQueries({ queryKey: ['product', targetProductId] });
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['product-inventory', targetProductId] });
       toast.success('Variant updated successfully');
       if (targetProductId) {
         navigate(`${basePath}/products/${targetProductId}/variants`);
@@ -1215,15 +1242,15 @@ export default function VariantForm() {
                 </FormDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-              {/* Existing stock table */}
-              {productInventory && productInventory.warehouses.length > 0 ? (
+              {/* Existing stock table - filtered by variant */}
+              {variantInventory && variantInventory.warehouses.length > 0 ? (
                 <div className="border rounded-md overflow-hidden">
                   <div className="grid grid-cols-3 bg-muted px-3 py-2 text-xs font-medium">
                     <div>Warehouse</div>
                     <div className="text-center">Current Stock</div>
                     <div className="text-right">Location</div>
                   </div>
-                  {productInventory.warehouses.map((row) => {
+                  {variantInventory.warehouses.map((row) => {
                     const warehouse = warehouses.find(w => w.id === row.warehouse_id);
                     return (
                       <div
@@ -1254,22 +1281,40 @@ export default function VariantForm() {
                 </p>
               )}
 
-              {/* Single‑warehouse quick adjust (reuses existing fields) */}
-                <FormField
-                  control={form.control}
-                  name="warehouse_id"
-                  render={({ field }) => (
-                    <FormItem>
-                    <FormLabel>Adjust Stock in Warehouse</FormLabel>
-                      <Select 
-                        onValueChange={(value) => field.onChange(value === 'none' ? null : value)} 
-                        value={field.value || 'none'}
+              {/* Multiple warehouse stock adjustments */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <FormLabel>Adjust Stock in Warehouses</FormLabel>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setWarehouseStockAdjustments([
+                        ...warehouseStockAdjustments,
+                        { id: Date.now().toString(), warehouse_id: null, stock: null }
+                      ]);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Warehouse
+                  </Button>
+                </div>
+                
+                {warehouseStockAdjustments.map((adjustment, index) => (
+                  <div key={adjustment.id} className="flex gap-2 items-end">
+                    <div className="flex-1">
+                      <Select
+                        value={adjustment.warehouse_id || 'none'}
+                        onValueChange={(value) => {
+                          const updated = [...warehouseStockAdjustments];
+                          updated[index].warehouse_id = value === 'none' ? null : value;
+                          setWarehouseStockAdjustments(updated);
+                        }}
                       >
-                        <FormControl>
-                          <SelectTrigger className={isMobile ? 'h-12 text-base' : ''}>
-                            <SelectValue placeholder="Select warehouse (optional)" />
-                          </SelectTrigger>
-                        </FormControl>
+                        <SelectTrigger className={isMobile ? 'h-12 text-base' : ''}>
+                          <SelectValue placeholder="Select warehouse" />
+                        </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">No Warehouse</SelectItem>
                           {warehouses.map((warehouse) => (
@@ -1279,44 +1324,64 @@ export default function VariantForm() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                    </div>
+                    <div className="flex-1">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="Stock quantity"
+                        value={adjustment.stock ?? ''}
+                        onChange={(e) => {
+                          const updated = [...warehouseStockAdjustments];
+                          const value = e.target.value;
+                          updated[index].stock = value === '' ? null : Math.floor(parseFloat(value) || 0);
+                          setWarehouseStockAdjustments(updated);
+                        }}
+                      />
+                    </div>
+                    {warehouseStockAdjustments.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          setWarehouseStockAdjustments(
+                            warehouseStockAdjustments.filter((_, i) => i !== index)
+                          );
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
 
-                <FormField
-                  control={form.control}
-                  name="initial_stock"
-                  render={({ field }) => (
-                    <FormItem>
-                    <FormLabel>Set Stock Quantity (for selected warehouse)</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min="0"
-                          step="1"
-                          placeholder="0"
-                          {...field}
-                          value={field.value ?? ''}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            // Ensure integer value
-                            const intValue = value === '' ? null : Math.floor(parseFloat(value) || 0);
-                            field.onChange(intValue);
-                          }}
-                          className={isMobile ? 'h-12 text-base' : ''}
-                          disabled={!form.watch('warehouse_id') || form.watch('warehouse_id') === 'none'}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {form.watch('warehouse_id') && form.watch('warehouse_id') !== 'none'
-                        ? 'Enter the desired stock count. A stock movement will be recorded to reconcile to this value.'
-                        : 'Select a warehouse above to adjust its stock.'}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+              {/* Legacy single warehouse fields (hidden, kept for form schema compatibility) */}
+              <FormField
+                control={form.control}
+                name="warehouse_id"
+                render={({ field }) => (
+                  <FormItem className="hidden">
+                    <FormControl>
+                      <Input type="hidden" {...field} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="initial_stock"
+                render={({ field }) => (
+                  <FormItem className="hidden">
+                    <FormControl>
+                      <Input type="hidden" {...field} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
               </CardContent>
             </Card>
 
