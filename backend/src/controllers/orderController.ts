@@ -53,6 +53,10 @@ export const orderController = {
         return res.status(400).json({ error: 'Company context is required' });
       }
 
+      if (!sales_executive_id) {
+        return res.status(401).json({ error: 'User authentication required' });
+      }
+
       // Verify the customer belongs to this sales executive
       const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
         .from('customers')
@@ -122,7 +126,6 @@ export const orderController = {
       // Note: We'll calculate the actual total_amount from order items after they're created
       // because each item has its own tax_amount calculated via PricingService
       // The total_amount will be: sum(quantity * unit_price + tax_amount) for all items + shipping_fee
-      const shipping_fee = 0; // For future implementation
       // Temporarily use provided total_amount or subtotal (will be recalculated from items)
       // This is used for credit limit checks and initial order creation
       const initialTotalAmount = total_amount || subtotal;
