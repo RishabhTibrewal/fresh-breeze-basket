@@ -190,7 +190,7 @@ export default function CreateGoodsReceipt() {
       queryClient.invalidateQueries({ queryKey: ['goods-receipts'] });
       queryClient.invalidateQueries({ queryKey: ['goods-receipt', id] });
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      navigate(isEditMode ? `/admin/goods-receipts/${id}` : '/admin/goods-receipts');
+      navigate(isEditMode ? `/procurement/goods-receipts/${id}` : '/procurement/goods-receipts');
     },
     onError: (error: any) => {
       const errorMessage = getErrorMessage(error) || `Failed to ${isEditMode ? 'update' : 'create'} goods receipt`;
@@ -287,7 +287,7 @@ export default function CreateGoodsReceipt() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate(isEditMode ? `/admin/goods-receipts/${id}` : '/admin/goods-receipts')}
+          onClick={() => navigate(isEditMode ? `/procurement/goods-receipts/${id}` : '/procurement/goods-receipts')}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -506,7 +506,7 @@ export default function CreateGoodsReceipt() {
                 <Button
                   variant="outline"
                   className="flex-1"
-                  onClick={() => navigate(isEditMode ? `/admin/goods-receipts/${id}` : '/admin/goods-receipts')}
+                  onClick={() => navigate(isEditMode ? `/procurement/goods-receipts/${id}` : '/procurement/goods-receipts')}
                 >
                   Cancel
                 </Button>

@@ -158,7 +158,7 @@ export default function PriceForm() {
       queryClient.invalidateQueries({ queryKey: ['prices'] });
       queryClient.invalidateQueries({ queryKey: ['variant-prices'] });
       toast.success('Price created successfully');
-      navigate('/admin/prices');
+      navigate('/inventory/prices');
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to create price');
@@ -171,7 +171,7 @@ export default function PriceForm() {
       queryClient.invalidateQueries({ queryKey: ['prices'] });
       queryClient.invalidateQueries({ queryKey: ['price', priceId] });
       toast.success('Price updated successfully');
-      navigate('/admin/prices');
+      navigate('/inventory/prices');
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to update price');
@@ -191,7 +191,7 @@ export default function PriceForm() {
       <div className="mb-6">
         <Button
           variant="ghost"
-          onClick={() => navigate('/admin/prices')}
+          onClick={() => navigate('/inventory/prices')}
           className="mb-4"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -459,7 +459,7 @@ export default function PriceForm() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => navigate('/admin/prices')}
+              onClick={() => navigate('/inventory/prices')}
               className={isMobile ? 'h-12' : ''}
             >
               Cancel

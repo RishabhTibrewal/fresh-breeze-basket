@@ -176,7 +176,7 @@ export default function PriceList() {
           <h1 className="text-3xl font-bold">Prices</h1>
           <p className="text-muted-foreground mt-1">Manage product variant prices</p>
         </div>
-        <Button onClick={() => window.location.href = '/admin/prices/new'}>
+        <Button onClick={() => window.location.href = '/inventory/prices/new'}>
           <Plus className="h-4 w-4 mr-2" />
           Add Price
         </Button>

@@ -120,7 +120,7 @@ export default function SupplierForm() {
     onSuccess: () => {
       toast.success(`Supplier ${isEditMode ? 'updated' : 'created'} successfully`);
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-      navigate('/admin/suppliers');
+      navigate('/procurement/suppliers');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.error || `Failed to ${isEditMode ? 'update' : 'create'} supplier`);
@@ -175,7 +175,7 @@ export default function SupplierForm() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate('/admin/suppliers')}
+          onClick={() => navigate('/procurement/suppliers')}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -553,7 +553,7 @@ export default function SupplierForm() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => navigate('/admin/suppliers')}
+            onClick={() => navigate('/procurement/suppliers')}
           >
             Cancel
           </Button>

@@ -93,14 +93,14 @@ export default function BrandList() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate(`/admin/brands/${brand.id}`)}
+            onClick={() => navigate(`/inventory/brands/${brand.id}`)}
           >
             <Eye className="h-4 w-4" />
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate(`/admin/brands/${brand.id}/edit`)}
+            onClick={() => navigate(`/inventory/brands/${brand.id}/edit`)}
           >
             <Edit className="h-4 w-4" />
           </Button>
@@ -144,7 +144,7 @@ export default function BrandList() {
                 size="sm"
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate(`/admin/brands/${brand.id}`);
+                  navigate(`/inventory/brands/${brand.id}`);
                 }}
               >
                 <Eye className="h-4 w-4 mr-1" />
@@ -155,7 +155,7 @@ export default function BrandList() {
                 size="sm"
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate(`/admin/brands/${brand.id}/edit`);
+                  navigate(`/inventory/brands/${brand.id}/edit`);
                 }}
               >
                 <Edit className="h-4 w-4 mr-1" />
@@ -186,7 +186,7 @@ export default function BrandList() {
           <h1 className="text-3xl font-bold">Brands</h1>
           <p className="text-muted-foreground mt-1">Manage product brands</p>
         </div>
-        <Button onClick={() => navigate('/admin/brands/new')}>
+        <Button onClick={() => navigate('/inventory/brands/new')}>
           <Plus className="h-4 w-4 mr-2" />
           Add Brand
         </Button>
@@ -212,7 +212,7 @@ export default function BrandList() {
           data={filteredBrands}
           renderCard={renderCard}
           emptyMessage="No brands found"
-          onRowClick={(brand) => navigate(`/admin/brands/${brand.id}`)}
+          onRowClick={(brand) => navigate(`/inventory/brands/${brand.id}`)}
         />
       )}
 

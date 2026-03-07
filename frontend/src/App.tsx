@@ -96,9 +96,10 @@ const SalesDashboard = lazy(() => import("./pages/sales/Dashboard"));
 const Customers = lazy(() => import("./pages/sales/Customers"));
 const CustomerOrders = lazy(() => import("./pages/sales/CustomerOrders"));
 const CreateOrder = lazy(() => import("./pages/sales/CreateOrder"));
-const OrderDetail = lazy(() => import("./pages/sales/OrderDetail"));
 const OrderUpdate = lazy(() => import("./pages/sales/OrderUpdate"));
 const Orders = lazy(() => import("./pages/sales/Orders"));
+const Payments = lazy(() => import("./pages/sales/Payments"));
+const CreatePayment = lazy(() => import("./pages/sales/CreatePayment"));
 const CreditManagement = lazy(() => import("./pages/sales/CreditManagement"));
 const SalesAnalytics = lazy(() => import("./pages/sales/SalesAnalytics"));
 const Leads = lazy(() => import("./pages/sales/Leads"));
@@ -177,31 +178,16 @@ const App: React.FC = () => {
                     {/* Admin Routes - Only accessible to admin users */}
                     <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>}>
                       <Route index element={<AdminHome />} />
-                      <Route path="products" element={<ProductList />} />
-                      <Route path="products/new" element={<ProductForm />} />
-                      <Route path="products/edit/:id" element={<ProductForm />} />
-                      <Route path="products/:productId/variants" element={<VariantList />} />
-                      <Route path="products/:productId/variants/new" element={<VariantForm />} />
-                      <Route path="variants/:variantId" element={<VariantDetail />} />
-                      <Route path="variants/:variantId/edit" element={<VariantForm />} />
-                      <Route path="brands" element={<BrandList />} />
-                      <Route path="brands/new" element={<BrandForm />} />
-                      <Route path="brands/:id" element={<BrandDetail />} />
-                      <Route path="brands/:id/edit" element={<BrandForm />} />
+                      {/* Inventory routes moved to /inventory module */}
+                      {/* Products, Categories, Brands, Variants, Prices, Warehouses, and Inventory operations are now in /inventory module */}
                       <Route path="taxes" element={<TaxList />} />
                       <Route path="taxes/new" element={<TaxForm />} />
                       <Route path="taxes/:id/edit" element={<TaxForm />} />
                       <Route path="taxes/:id" element={<TaxDetail />} />
-                      <Route path="prices" element={<PriceList />} />
-                      <Route path="prices/new" element={<PriceForm />} />
-                      <Route path="categories" element={<CategoryList />} />
-                      <Route path="inventory/adjust" element={<StockAdjustment />} />
-                      <Route path="inventory/transfer" element={<StockTransfer />} />
-                      <Route path="inventory/movements" element={<StockMovements />} />
-                      <Route path="inventory/balance" element={<PlaceholderPage />} />
-                      <Route path="inventory/warehouse-balance" element={<PlaceholderPage />} />
-                      <Route path="orders" element={<AdminOrderList />} />
-                      <Route path="orders/:id" element={<AdminOrderDetails />} />
+                      {/* Orders routes moved to /sales module - redirect admin/orders to sales/orders */}
+                      <Route path="orders" element={<Orders />} />
+                      <Route path="orders/:id" element={<OrderDocumentPage />} />
+                      <Route path="orders/:id/edit" element={<OrderUpdate />} />
                       <Route path="orders/:id/return" element={<CreateReturnOrderPage />} />
                       <Route path="customers" element={<CustomerList />} />
                       <Route path="customers/:id" element={<AdminCustomerDetails />} />
@@ -275,6 +261,8 @@ const App: React.FC = () => {
                       <Route path="brands/new" element={<BrandForm />} />
                       <Route path="brands/:id" element={<BrandDetail />} />
                       <Route path="brands/:id/edit" element={<BrandForm />} />
+                      <Route path="prices" element={<PriceList />} />
+                      <Route path="prices/new" element={<PriceForm />} />
                       <Route path="warehouses" element={<Warehouses />} />
                       <Route path="warehouses/:warehouseId/inventory" element={<WarehouseInventory />} />
                       <Route path="adjust" element={<StockAdjustment />} />
@@ -287,13 +275,17 @@ const App: React.FC = () => {
                     {/* Sales Module */}
                     <Route path="/sales" element={<ProtectedRoute><ModuleLayout /></ProtectedRoute>}>
                       <Route index element={<AdminHome />} />
-                      <Route path="orders" element={<AdminOrderList />} />
+                      <Route path="orders" element={<Orders />} />
                       <Route path="orders/create" element={<CreateOrder />} />
+                      <Route path="orders/:orderId" element={<OrderDocumentPage />} />
                       <Route path="orders/:id" element={<OrderDocumentPage />} />
+                      <Route path="orders/:id/edit" element={<OrderUpdate />} />
+                      <Route path="orders/:orderId/edit" element={<OrderUpdate />} />
                       <Route path="orders/:id/return" element={<CreateReturnOrderPage />} />
                       <Route path="quotations" element={<PlaceholderPage />} />
                       <Route path="invoices" element={<PlaceholderPage />} />
-                      <Route path="payments" element={<PlaceholderPage />} />
+                      <Route path="payments" element={<Payments />} />
+                      <Route path="payments/new" element={<CreatePayment />} />
                       <Route path="customers" element={<Customers />} />
                       <Route path="customers/:customerId/orders" element={<CustomerOrders />} />
                       <Route path="leads" element={<AdminLeads />} />
@@ -313,7 +305,7 @@ const App: React.FC = () => {
                       <Route path="customers" element={<Customers />} />
                       <Route path="customers/:customerId/orders" element={<CustomerOrders />} />
                       <Route path="orders/create" element={<CreateOrder />} />
-                      <Route path="orders/:orderId" element={<OrderDetail />} />
+                      <Route path="orders/:orderId" element={<OrderDocumentPage />} />
                       <Route path="orders/:orderId/edit" element={<OrderUpdate />} />
                       <Route path="orders" element={<Orders />} />
                       <Route path="credit-management" element={<CreditManagement />} />
@@ -350,7 +342,8 @@ const App: React.FC = () => {
                     <Route path="/ecommerce" element={<ProtectedRoute><ModuleLayout /></ProtectedRoute>}>
                       <Route index element={<AdminHome />} />
                       <Route path="products" element={<ProductList />} />
-                      <Route path="orders" element={<AdminOrderList />} />
+                      {/* E-commerce orders are sales orders - use same Orders component */}
+                      <Route path="orders" element={<Orders />} />
                       <Route path="settings" element={<AdminSettings />} />
                     </Route>
                     

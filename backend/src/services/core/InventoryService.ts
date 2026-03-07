@@ -129,15 +129,18 @@ export class InventoryService {
 
   /**
    * Reserve stock for pending orders
-   * Moves stock from available to reserved
+   * ONLY updates reserved_stock - does NOT modify stock_count
+   * stock_count is only updated when order status changes and stock_movements entry is created
    * 
    * @param variantId - MANDATORY: Variant ID (use DEFAULT variant if product has no visible variants)
+   * @param allowNegative - If true, allows reservation even when available stock is insufficient (for sales orders/pre-orders)
    */
   async reserveStock(
     productId: string,
     outletId: string,
     quantity: number,
-    variantId: string // MANDATORY - no longer nullable
+    variantId: string, // MANDATORY - no longer nullable
+    allowNegative: boolean = false
   ): Promise<void> {
     if (!variantId) {
       throw new ApiError(400, 'variantId is required to reserve stock');
@@ -147,10 +150,12 @@ export class InventoryService {
       throw new ApiError(400, 'Quantity must be positive');
     }
 
+    // Get current inventory to check reserved_stock
+    // Note: We do NOT modify stock_count here - it's only updated via stock_movements
     const currentStock = await this.getCurrentStock(productId, outletId, variantId);
     const { data: inventory } = await supabaseAdmin
       .from('warehouse_inventory')
-      .select('reserved_stock')
+      .select('stock_count, reserved_stock')
       .eq('product_id', productId)
       .eq('warehouse_id', outletId)
       .eq('variant_id', variantId) // Now required
@@ -158,13 +163,20 @@ export class InventoryService {
       .maybeSingle();
 
     const reservedStock = inventory?.reserved_stock || 0;
-    const availableStock = currentStock - reservedStock;
+    const currentStockCount = inventory?.stock_count ?? currentStock;
+    const availableStock = currentStockCount - reservedStock;
 
-    if (availableStock < quantity) {
+    // Check stock availability only if negative stock is not allowed
+    // Note: This is just a validation check - we're not updating stock_count
+    if (!allowNegative && availableStock < quantity) {
       throw new ApiError(400, `Insufficient stock. Available: ${availableStock}, Requested: ${quantity}`);
     }
 
-    // Update reserved_stock in warehouse_inventory
+    // Only update reserved_stock - stock_count remains unchanged
+    // stock_count will be updated later when order status changes and stock_movements entry is created
+    const newReservedStock = reservedStock + quantity;
+
+    // Update ONLY reserved_stock in warehouse_inventory (preserve stock_count)
     const { error } = await supabaseAdmin
       .from('warehouse_inventory')
       .upsert(
@@ -173,7 +185,8 @@ export class InventoryService {
           warehouse_id: outletId,
           variant_id: variantId, // Now required
           company_id: this.companyId,
-          reserved_stock: reservedStock + quantity,
+          stock_count: currentStockCount, // Preserve existing stock_count
+          reserved_stock: newReservedStock, // Only update reserved_stock
         },
         {
           onConflict: 'warehouse_id,product_id,variant_id', // Updated constraint

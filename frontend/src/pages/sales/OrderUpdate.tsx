@@ -48,8 +48,11 @@ const orderUpdateSchema = z.object({
   estimated_delivery: z.string().optional(),
   notes: z.string().optional(),
   payment_status: z.enum(['pending', 'full_payment', 'partial_payment', 'full_credit', '']),
-  payment_method: z.enum(['cash', 'card', 'cheque', '']).optional(),
+  payment_method: z.enum(['cash', 'card', 'cheque', 'bank_transfer', 'neft', 'rtgs', 'upi', '']).optional(),
   partial_payment_amount: z.number().optional(),
+  transaction_id: z.string().optional(),
+  cheque_no: z.string().optional(),
+  payment_date: z.string().optional(),
 });
 
 // Define a specific type for payment status to help with type checking
@@ -58,7 +61,8 @@ type PaymentStatusType = z.infer<typeof orderUpdateSchema.shape.payment_status>;
 type OrderUpdateFormValues = z.infer<typeof orderUpdateSchema>;
 
 export default function OrderUpdate() {
-  const { orderId } = useParams<{ orderId: string }>();
+  const params = useParams<{ id?: string; orderId?: string }>();
+  const orderId = params.id || params.orderId; // Support both :id and :orderId for compatibility
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
@@ -107,6 +111,9 @@ export default function OrderUpdate() {
       payment_status: 'pending',
       payment_method: '',
       partial_payment_amount: undefined,
+      transaction_id: '',
+      cheque_no: '',
+      payment_date: '',
     },
   });
 
@@ -140,6 +147,9 @@ export default function OrderUpdate() {
         payment_status: effectiveInitialStatus, // Use the derived effectiveInitialStatus
         payment_method: (order.payment_method as any) || '',
         partial_payment_amount: undefined,
+        transaction_id: '',
+        cheque_no: '',
+        payment_date: '',
       });
     }
   }, [order, form]);
@@ -173,6 +183,17 @@ export default function OrderUpdate() {
         // Add partial payment amount if payment status is partial_payment
         if (data.payment_status === 'partial_payment' && data.partial_payment_amount) {
           updateData.partial_payment_amount = parseFloat(data.partial_payment_amount.toString());
+        }
+        
+        // Add transaction details for bank transfers and cheques
+        if (data.transaction_id) {
+          updateData.transaction_id = data.transaction_id;
+        }
+        if (data.cheque_no) {
+          updateData.cheque_no = data.cheque_no;
+        }
+        if (data.payment_date) {
+          updateData.payment_date = data.payment_date;
         }
       }
       
@@ -535,6 +556,10 @@ export default function OrderUpdate() {
                             <SelectItem value="cash" className="text-sm">Cash</SelectItem>
                             <SelectItem value="card" className="text-sm">Card</SelectItem>
                             <SelectItem value="cheque" className="text-sm">Cheque</SelectItem>
+                            <SelectItem value="bank_transfer" className="text-sm">Bank Transfer</SelectItem>
+                            <SelectItem value="neft" className="text-sm">NEFT</SelectItem>
+                            <SelectItem value="rtgs" className="text-sm">RTGS</SelectItem>
+                            <SelectItem value="upi" className="text-sm">UPI</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormDescription className="text-xs sm:text-sm">
@@ -544,6 +569,99 @@ export default function OrderUpdate() {
                       </FormItem>
                     )}
                   />
+                )}
+                
+                {/* Cheque Number and Payment Date - Only show when payment method is cheque */}
+                {paymentMethodValue === 'cheque' && (currentPaymentStatus === 'full_payment' || currentPaymentStatus === 'partial_payment') && (
+                  <>
+                    <FormField
+                      control={form.control}
+                      name="cheque_no"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs sm:text-sm">Cheque Number *</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Enter cheque number"
+                              className="text-sm sm:text-base h-9 sm:h-10"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs sm:text-sm">
+                            Enter the cheque number
+                          </FormDescription>
+                          <FormMessage className="text-xs" />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="payment_date"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs sm:text-sm">Payment Date *</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="date"
+                              className="text-sm sm:text-base h-9 sm:h-10"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs sm:text-sm">
+                            Date when the cheque was issued
+                          </FormDescription>
+                          <FormMessage className="text-xs" />
+                        </FormItem>
+                      )}
+                    />
+                  </>
+                )}
+                
+                {/* Transaction ID and Payment Date - Only show when payment method is bank transfer, NEFT, RTGS, or UPI */}
+                {(paymentMethodValue === 'bank_transfer' || paymentMethodValue === 'neft' || paymentMethodValue === 'rtgs' || paymentMethodValue === 'upi') && 
+                 (currentPaymentStatus === 'full_payment' || currentPaymentStatus === 'partial_payment') && (
+                  <>
+                    <FormField
+                      control={form.control}
+                      name="transaction_id"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs sm:text-sm">Transaction ID / Reference Number *</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Enter transaction ID or reference number"
+                              className="text-sm sm:text-base h-9 sm:h-10"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs sm:text-sm">
+                            Enter the transaction reference number
+                          </FormDescription>
+                          <FormMessage className="text-xs" />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="payment_date"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs sm:text-sm">Payment Date *</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="date"
+                              className="text-sm sm:text-base h-9 sm:h-10"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs sm:text-sm">
+                            Date when the transaction occurred
+                          </FormDescription>
+                          <FormMessage className="text-xs" />
+                        </FormItem>
+                      )}
+                    />
+                  </>
                 )}
                 
                 {/* Partial Payment Amount - Only show when payment status is partial payment */}

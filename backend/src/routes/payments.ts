@@ -4,6 +4,7 @@ import {
   getPaymentById, 
   createPaymentIntent,
   getPaymentHistory,
+  getAllPayments,
   linkPaymentToOrder,
   createPaymentRecord,
   createMissingPaymentRecords
@@ -19,6 +20,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), handleStripeW
 router.post('/create-payment-intent', createPaymentIntent);
 
 // Protected routes
+router.get('/', protect, getAllPayments);
 router.get('/history', protect, getPaymentHistory);
 router.post('/link-to-order', protect, linkPaymentToOrder);
 router.post('/create-record', protect, createPaymentRecord);

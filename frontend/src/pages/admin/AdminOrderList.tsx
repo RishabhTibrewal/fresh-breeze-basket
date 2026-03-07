@@ -323,7 +323,7 @@ export default function AdminOrderList() {
                   </TableCell>
                   <TableCell>{formatDate(order.created_at)}</TableCell>
                   <TableCell className="text-right">
-                    <Link to={`/admin/orders/${order.id}`}>
+                    <Link to={`/sales/orders/${order.id}`}>
                       <Button variant="ghost" size="sm">
                         View / Manage
                       </Button>

@@ -184,10 +184,15 @@ export const getDefaultWarehouseId = async (companyId?: string): Promise<string 
     query = query.eq('company_id', companyId);
   }
 
-  const { data, error } = await query.single();
+  const { data, error } = await query.maybeSingle();
 
-  if (error || !data) {
+  if (error) {
     console.error('Error getting default warehouse:', error);
+    return null;
+  }
+
+  if (!data) {
+    // No warehouse found - this is expected if WH-001 doesn't exist
     return null;
   }
 

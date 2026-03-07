@@ -179,7 +179,7 @@ export default function Orders() {
               </CardDescription>
             </div>
             <Button 
-              onClick={() => navigate('/sales/customers')}
+              onClick={() => navigate('/sales/orders/create')}
               className="w-full sm:w-auto text-sm sm:text-base flex-shrink-0"
             >
               <Plus className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />

@@ -419,7 +419,7 @@ export function AdminOrderList() {
                   <TableCell>₹ {order.total_amount?.toFixed(2) ?? '0.00'}</TableCell>
                   <TableCell>{order.created_at ? format(new Date(order.created_at), 'MMM dd, yyyy, HH:mm') : 'Unknown'}</TableCell>
                   <TableCell className="text-right">
-                    <Link to={`/admin/orders/${order.id}`}>
+                    <Link to={`/sales/orders/${order.id}`}>
                       <Button variant="ghost" size="sm">
                         View / Manage
                       </Button>

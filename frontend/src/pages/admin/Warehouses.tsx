@@ -189,7 +189,7 @@ export default function Warehouses() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => navigate(`/admin/warehouses/${warehouse.id}/inventory`)}
+                            onClick={() => navigate(`/inventory/warehouses/${warehouse.id}/inventory`)}
                             className="h-8 w-8"
                             title="View Inventory"
                           >

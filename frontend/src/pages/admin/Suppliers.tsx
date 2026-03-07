@@ -84,7 +84,7 @@ export default function Suppliers() {
             Manage suppliers and vendor information
           </p>
         </div>
-        <Button onClick={() => navigate('/admin/suppliers/new')}>
+        <Button onClick={() => navigate('/procurement/suppliers/new')}>
           <Plus className="h-4 w-4 mr-2" />
           Add Supplier
         </Button>
@@ -162,14 +162,14 @@ export default function Suppliers() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => navigate(`/admin/suppliers/${supplier.id}`)}
+                            onClick={() => navigate(`/procurement/suppliers/${supplier.id}`)}
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => navigate(`/admin/suppliers/${supplier.id}/edit`)}
+                            onClick={() => navigate(`/procurement/suppliers/${supplier.id}/edit`)}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>

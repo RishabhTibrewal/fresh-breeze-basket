@@ -199,12 +199,19 @@ export interface OrderItem {
 
 export interface Payment {
   id: string;
-  order_id: string;
-  payment_intent_id: string | null;
+  order_id: string | null;
   amount: number;
-  status: 'completed' | 'failed' | 'refunded';
-  payment_method: string | null;
+  status: 'pending' | 'completed' | 'failed' | 'refunded';
+  payment_method: string;
+  stripe_payment_intent_id: string | null;
+  payment_gateway_response: any | null;
+  transaction_references: any | null;
+  transaction_id: string | null;
+  cheque_no: string | null;
+  payment_date: string | null;
+  company_id: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface Customer {

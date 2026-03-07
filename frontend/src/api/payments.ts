@@ -28,6 +28,10 @@ export interface Payment {
   stripe_payment_intent_id: string | null;
   payment_gateway_response: any;
   transaction_references: any;
+  transaction_id: string | null;
+  cheque_no: string | null;
+  payment_date: string | null;
+  company_id: string;
   created_at: string;
   updated_at: string;
 }
@@ -86,6 +90,9 @@ export const paymentsService = {
     payment_method: string;
     stripe_payment_intent_id?: string;
     status?: string;
+    transaction_id?: string;
+    cheque_no?: string;
+    payment_date?: string;
   }): Promise<Payment> {
     const { data } = await apiClient.post<{ success: boolean; data: Payment }>('/payments/create-record', params);
     return data.data;
@@ -96,6 +103,32 @@ export const paymentsService = {
       payment_intent_id,
       order_id
     });
+    return data.data;
+  },
+
+  async getAll(filters?: {
+    order_id?: string;
+    status?: string;
+    payment_method?: string;
+    date_from?: string;
+    date_to?: string;
+  }): Promise<Payment[]> {
+    const { data } = await apiClient.get<{ success: boolean; data: Payment[] }>('/payments', {
+      params: filters,
+    });
+    return data.data || [];
+  },
+
+  async create(paymentData: {
+    order_id: string;
+    amount: number;
+    payment_method: string;
+    status?: 'pending' | 'completed' | 'failed';
+    transaction_id?: string;
+    cheque_no?: string;
+    payment_date?: string;
+  }): Promise<Payment> {
+    const { data } = await apiClient.post<{ success: boolean; data: Payment }>('/payments/create-record', paymentData);
     return data.data;
   }
 }; 

@@ -114,6 +114,11 @@ export interface CreatePaymentRequest {
   order_id: string;
   payment_method: string;
   amount: number;
+  stripe_payment_intent_id?: string;
+  status?: 'pending' | 'completed' | 'failed';
+  transaction_id?: string;
+  cheque_no?: string;
+  payment_date?: string;
 }
 
 export interface RefundRequest {

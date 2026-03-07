@@ -4,6 +4,9 @@ import { Database } from '../types/database';
 import { getDefaultWarehouseId, findWarehouseWithStock } from '../utils/warehouseInventory';
 import { ProductService } from '../services/core/ProductService';
 import { InventoryService } from '../services/core/InventoryService';
+import { PricingService } from '../services/core/PricingService';
+import { PaymentService } from '../services/core/PaymentService';
+import { hasAnyRole } from '../utils/roles';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -33,7 +36,10 @@ export const orderController = {
         notes,
         credit_details,
         partial_payment_amount,
-        total_amount
+        total_amount,
+        transaction_id,
+        cheque_no,
+        payment_date
       } = req.body;
 
       // Log the received payment_status from frontend
@@ -62,14 +68,21 @@ export const orderController = {
 
       console.log('Customer found:', customer);
       
-      // Check if the customer belongs to this sales executive
-      if (customer.sales_executive_id !== sales_executive_id) {
+      // Check if user is admin - admins can create orders for any customer
+      const isAdmin = await hasAnyRole(sales_executive_id, req.companyId, ['admin']);
+      
+      // Check if the customer belongs to this sales executive (skip for admins)
+      if (!isAdmin && customer.sales_executive_id !== sales_executive_id) {
         console.error(`Customer ${customer_id} does not belong to sales executive ${sales_executive_id}`);
         return res.status(403).json({ 
           error: 'Access denied. This customer is not assigned to your account.',
           customer_sales_executive: customer.sales_executive_id,
           current_user: sales_executive_id
         });
+      }
+      
+      if (isAdmin) {
+        console.log(`Admin user ${sales_executive_id} creating order for customer ${customer_id}`);
       }
 
       // Calculate order total amount using variant pricing
@@ -106,11 +119,14 @@ export const orderController = {
         subtotal += priceToUse * item.quantity;
       }
 
-      // Apply shipping fee and tax to get total amount
+      // Note: We'll calculate the actual total_amount from order items after they're created
+      // because each item has its own tax_amount calculated via PricingService
+      // The total_amount will be: sum(quantity * unit_price + tax_amount) for all items + shipping_fee
       const shipping_fee = 0; // For future implementation
-      const tax = subtotal * 0.05; // 5% tax
-      const calculatedTotalAmount = total_amount || (subtotal + shipping_fee + tax);
-      console.log('Calculated total_amount:', calculatedTotalAmount);
+      // Temporarily use provided total_amount or subtotal (will be recalculated from items)
+      // This is used for credit limit checks and initial order creation
+      const initialTotalAmount = total_amount || subtotal;
+      console.log('Initial total_amount (will be recalculated from items):', initialTotalAmount);
 
       console.log('Creating order with payment status:', payment_status);
 
@@ -146,10 +162,10 @@ export const orderController = {
       const isFullCreditForLimitCheck = orderPaymentStatus === 'credit';
       
       if (isCreditOrder && customer.credit_limit && customer.credit_limit > 0) {
-        // Calculate the credit amount for this order
+        // Calculate the credit amount for this order (use initialTotalAmount for credit limit check)
         const creditAmount = isFullCreditForLimitCheck
-          ? calculatedTotalAmount
-          : (calculatedTotalAmount - (partial_payment_amount || 0));
+          ? initialTotalAmount
+          : (initialTotalAmount - (partial_payment_amount || 0));
         
         // Calculate projected total credit after this order
         const currentCredit = parseFloat(customer.current_credit?.toString() || '0');
@@ -197,7 +213,7 @@ export const orderController = {
         shipping_address_id,
         billing_address_id,
         payment_method,
-        total_amount: calculatedTotalAmount,
+        total_amount: initialTotalAmount, // Will be updated after order items are created
         notes,
         payment_status: orderPaymentStatus,
         order_type: 'sales',
@@ -226,6 +242,7 @@ export const orderController = {
       const productPrices: Record<string, number> = {};
       const variantIds: Record<string, string> = {}; // Track variant_id for each product_id
       const productServiceForVariants = new ProductService(req.companyId!);
+      const pricingService = new PricingService(req.companyId!);
       
       for (const item of items as OrderItemInput[]) {
         let variantId = (item as any).variant_id;
@@ -285,90 +302,150 @@ export const orderController = {
 
       const defaultWarehouseId = defaultWarehouse?.id;
 
-      // Create order items with variant prices and variant_id
-      const orderItems = (items as OrderItemInput[]).map(item => {
-        // Use the price sent from frontend if available, otherwise fallback to variant prices
-        const unitPrice = item.price || item.unit_price || productPrices[item.product_id];
-        
-        if (!unitPrice || isNaN(Number(unitPrice))) {
-          console.error(`Missing or invalid price for product ${item.product_id}`, { 
-            item_price: item.price,
-            item_unit_price: item.unit_price,
-            variant_price: productPrices[item.product_id],
-            item: item
-          });
-          throw new Error(`Missing price for product ${item.product_id}`);
-        }
-        
-        // Get variant_id (from request or from variantIds map)
-        const variantId = (item as any).variant_id || variantIds[item.product_id];
-        
-        return {
-          order_id: order.id,
-          company_id: req.companyId!,
-          product_id: item.product_id,
-          variant_id: variantId || null, // Include variant_id in order items
-          quantity: item.quantity,
-          unit_price: unitPrice,
-          warehouse_id: item.warehouse_id || defaultWarehouseId || null
-        };
-      });
+      // Create order items with variant prices, variant_id and tax_amount
+      const orderItems = await Promise.all(
+        (items as OrderItemInput[]).map(async (item) => {
+          // Use the price sent from frontend if available, otherwise fallback to variant prices
+          const unitPrice = item.price || item.unit_price || productPrices[item.product_id];
+
+          if (!unitPrice || isNaN(Number(unitPrice))) {
+            console.error(`Missing or invalid price for product ${item.product_id}`, {
+              item_price: item.price,
+              item_unit_price: item.unit_price,
+              variant_price: productPrices[item.product_id],
+              item: item,
+            });
+            throw new Error(`Missing price for product ${item.product_id}`);
+          }
+
+          // Get variant_id (from request or from variantIds map)
+          const variantId = (item as any).variant_id || variantIds[item.product_id];
+
+          // Calculate tax amount for this line using PricingService
+          let taxAmount = 0;
+          try {
+            const result = await pricingService.calculateLineTotal(
+              item.product_id,
+              item.quantity,
+              Number(unitPrice),
+              variantId || null
+            );
+            taxAmount = result.taxAmount;
+          } catch (err) {
+            console.error(
+              `Error calculating tax for product ${item.product_id}, falling back to 0`,
+              err
+            );
+            taxAmount = 0;
+          }
+
+          return {
+            order_id: order.id,
+            company_id: req.companyId!,
+            product_id: item.product_id,
+            variant_id: variantId || null, // Include variant_id in order items
+            quantity: item.quantity,
+            unit_price: unitPrice,
+            tax_amount: Math.round(taxAmount * 100) / 100,
+            warehouse_id: item.warehouse_id || defaultWarehouseId || null,
+          };
+        })
+      );
 
       console.log('Final order items to insert:', JSON.stringify(orderItems, null, 2));
 
+      // Calculate actual total_amount from order items (sum of quantity * unit_price + tax_amount for each item)
+      // This ensures the order total matches the sum of item totals, which use per-item tax rates from PricingService
+      const calculatedTotalFromItems = orderItems.reduce((sum, item) => {
+        const itemSubtotal = Number(item.quantity) * Number(item.unit_price);
+        const itemTax = Number(item.tax_amount) || 0;
+        return sum + itemSubtotal + itemTax;
+      }, 0);
+      
+      const shipping_fee = 0; // For future implementation
+      const calculatedTotalAmount = calculatedTotalFromItems + shipping_fee;
+      
+      console.log('Calculated total_amount from items:', calculatedTotalAmount);
+      console.log('  - Items subtotal + tax:', calculatedTotalFromItems);
+      console.log('  - Shipping fee:', shipping_fee);
+      
+      // Update order with the calculated total_amount
+      if (Math.abs(calculatedTotalAmount - Number(order.total_amount)) > 0.01) {
+        console.warn(`Order total_amount mismatch: stored=${order.total_amount}, calculated=${calculatedTotalAmount}. Updating order.`);
+        const { error: updateError } = await (supabaseAdmin || supabase)
+          .from('orders')
+          .update({ total_amount: calculatedTotalAmount })
+          .eq('id', order.id)
+          .eq('company_id', req.companyId);
+        
+        if (updateError) {
+          console.error('Error updating order total_amount:', updateError);
+          // Don't fail the request, but log the error
+        } else {
+          order.total_amount = calculatedTotalAmount;
+        }
+      }
+
       // Reserve stock for all order items (move from stock_count to reserved_stock)
+      // Note: For sales orders, stock reservation is non-blocking - inventory will be updated
+      // when order status changes from 'pending' to next stage (see updateOrderStatus)
       const defaultWarehouseIdForReservation = await getDefaultWarehouseId(req.companyId!);
+      
+      if (!defaultWarehouseIdForReservation) {
+        console.warn('No default warehouse found (WH-001). Stock reservation will be skipped. Inventory will be updated when order status changes.');
+      }
       
       const productServiceForReservation = new ProductService(req.companyId!);
       const inventoryService = new InventoryService(req.companyId!);
-      const reservationErrors: string[] = [];
+      const reservationWarnings: string[] = [];
+      
       for (const item of orderItems) {
         try {
           const warehouseId = item.warehouse_id || defaultWarehouseIdForReservation;
           if (!warehouseId) {
-            reservationErrors.push(`No warehouse_id for product ${item.product_id}`);
+            reservationWarnings.push(`No warehouse_id for product ${item.product_id} - stock reservation skipped`);
             continue;
           }
           
           // Get variant_id (from order item or default variant)
           let variantId: string | undefined = (item as any).variant_id || variantIds[item.product_id];
           if (!variantId) {
-          try {
+            try {
               const defaultVariant = await productServiceForReservation.getDefaultVariant(item.product_id);
-            variantId = defaultVariant.id;
-          } catch (variantError) {
-            reservationErrors.push(`Failed to get default variant for product ${item.product_id}`);
+              variantId = defaultVariant.id;
+            } catch (variantError) {
+              reservationWarnings.push(`Failed to get default variant for product ${item.product_id} - stock reservation skipped`);
               continue;
             }
           }
           
           if (!variantId) {
-            reservationErrors.push(`No variant_id found for product ${item.product_id}`);
+            reservationWarnings.push(`No variant_id found for product ${item.product_id} - stock reservation skipped`);
             continue;
           }
           
+          // For sales orders, allow negative stock (pre-orders, future delivery)
           await inventoryService.reserveStock(
             item.product_id,
             warehouseId,
             item.quantity,
-            variantId
+            variantId,
+            true // allowNegative = true for sales orders
           );
           
           console.log(`Stock reserved for product ${item.product_id} variant ${variantId} in warehouse ${warehouseId}: ${item.quantity}`);
         } catch (err: any) {
-          console.error(`Error reserving stock for product ${item.product_id}:`, err);
-          reservationErrors.push(`Failed to reserve stock for product ${item.product_id}: ${err.message}`);
+          // For sales orders, stock reservation failures are warnings, not errors
+          // Inventory will be updated when order status changes
+          console.warn(`Stock reservation warning for product ${item.product_id}: ${err.message}. Order will proceed - inventory will be updated when order status changes.`);
+          reservationWarnings.push(`Stock reservation skipped for product ${item.product_id}: ${err.message}`);
         }
       }
 
-      // If there were reservation errors, rollback the order
-      if (reservationErrors.length > 0) {
-        console.error('Stock reservation errors:', reservationErrors);
-        await (supabaseAdmin || supabase).from('orders').delete().eq('id', order.id).eq('company_id', req.companyId);
-        return res.status(400).json({ 
-          error: 'Failed to reserve stock for some products',
-          details: reservationErrors
-        });
+      // Log warnings but don't block order creation
+      // Sales orders allow negative stock - inventory is updated when order status changes
+      if (reservationWarnings.length > 0) {
+        console.warn('Stock reservation warnings (non-blocking for sales orders):', reservationWarnings);
       }
 
       const { error: itemsError } = await (supabaseAdmin || supabase)
@@ -422,7 +499,7 @@ export const orderController = {
       const isFullCredit = payment_status === 'full_credit' || payment_method === 'full_credit';
       
       if (isCredit) {
-        // Calculate credit amount
+        // Calculate credit amount (use calculatedTotalAmount from items)
         const creditAmount = isFullCredit
           ? calculatedTotalAmount 
           : (calculatedTotalAmount - (partial_payment_amount || 0));
@@ -463,6 +540,53 @@ export const orderController = {
           }
           
           console.log('Credit period created and customer credit updated');
+        }
+      }
+
+      // Create payment record if order is created with full_payment or partial_payment
+      if ((payment_status === 'full_payment' || payment_status === 'partial_payment') && order) {
+        try {
+          const paymentService = new PaymentService(req.companyId!);
+          
+          // Determine payment amount
+          let paymentAmount = calculatedTotalAmount;
+          if (payment_status === 'partial_payment' && partial_payment_amount) {
+            paymentAmount = partial_payment_amount;
+          }
+          
+          // Only create payment record if amount is greater than 0
+          if (paymentAmount > 0) {
+            const paymentId = await paymentService.processPayment({
+              orderId: order.id,
+              amount: paymentAmount,
+              paymentMethod: payment_method || 'cash',
+              status: 'completed',
+              transactionId: transaction_id,
+              chequeNo: cheque_no,
+              paymentDate: payment_date,
+              preserveOrderPaymentStatus: true, // Preserve the order's payment_status (partial/paid) set during creation
+              paymentGatewayResponse: {
+                source: 'order_creation',
+                created_by: sales_executive_id,
+                created_at: new Date().toISOString(),
+                payment_type: payment_status === 'full_payment' ? 'full_payment' : 'partial_payment',
+              },
+              transactionReferences: {
+                order_payment_status: payment_status,
+                sales_order: true,
+                created_at_order_creation: true
+              }
+            });
+            
+            if (paymentId) {
+              console.log('Payment record created successfully during order creation:', paymentId);
+            } else {
+              console.error('Failed to create payment record during order creation');
+            }
+          }
+        } catch (paymentError) {
+          console.error('Error creating payment record during order creation:', paymentError);
+          // Don't fail order creation if payment record creation fails
         }
       }
 

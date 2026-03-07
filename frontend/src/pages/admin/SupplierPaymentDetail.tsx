@@ -93,7 +93,7 @@ export default function SupplierPaymentDetail() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
-                    onClick={() => navigate(`/admin/purchase-invoices/${payment.purchase_invoice_id}`)}
+                    onClick={() => navigate(`/procurement/purchase-invoices/${payment.purchase_invoice_id}`)}
                   >
                     <ExternalLink className="h-3 w-3" />
                   </Button>

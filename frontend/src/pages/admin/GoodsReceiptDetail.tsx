@@ -65,7 +65,7 @@ export default function GoodsReceiptDetail() {
     onSuccess: (invoice) => {
       toast.success('Invoice created successfully from GRN');
       queryClient.invalidateQueries({ queryKey: ['purchase-invoice-by-grn', id] });
-      navigate(`/admin/purchase-invoices/${invoice.id}`);
+      navigate(`/procurement/purchase-invoices/${invoice.id}`);
     },
     onError: (error: any) => {
       handleApiError(error, 'create invoice from GRN', ['accounts', 'admin']);
@@ -130,7 +130,7 @@ export default function GoodsReceiptDetail() {
           {isAdmin && (grn.status === 'pending' || grn.status === 'inspected') && (
             <Button
               variant="outline"
-              onClick={() => navigate(`/admin/goods-receipts/${grn.id}/edit`)}
+              onClick={() => navigate(`/procurement/goods-receipts/${grn.id}/edit`)}
             >
               <Pencil className="h-4 w-4 mr-2" />
               Edit
@@ -182,7 +182,7 @@ export default function GoodsReceiptDetail() {
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6"
-                          onClick={() => navigate(`/admin/purchase-orders/${grn.purchase_order_id}`)}
+                          onClick={() => navigate(`/procurement/purchase-orders/${grn.purchase_order_id}`)}
                         >
                           <ExternalLink className="h-3 w-3" />
                         </Button>
@@ -295,7 +295,7 @@ export default function GoodsReceiptDetail() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted"
-                    onClick={() => navigate(`/admin/purchase-invoices/${relatedInvoice.id}`)}>
+                    onClick={() => navigate(`/procurement/purchase-invoices/${relatedInvoice.id}`)}>
                     <div>
                       <p className="font-medium">{relatedInvoice.invoice_number}</p>
                       <p className="text-sm text-muted-foreground">
@@ -396,7 +396,7 @@ export default function GoodsReceiptDetail() {
               {relatedInvoice && (
                 <Button
                   variant="outline"
-                  onClick={() => navigate(`/admin/purchase-invoices/${relatedInvoice.id}`)}
+                  onClick={() => navigate(`/procurement/purchase-invoices/${relatedInvoice.id}`)}
                 >
                   <FileText className="h-4 w-4 mr-2" />
                   View Invoice

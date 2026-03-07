@@ -1489,13 +1489,24 @@ export const getCustomerAddresses = async (req: Request, res: Response) => {
       });
     }
     
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+    
     console.log(`Getting addresses for customer ${customerId}`);
     
-    // First, get the customer record to find the user_id
-    const { data: customer, error: customerError } = await supabase
+    // Use supabaseAdmin to bypass RLS and ensure we can access the customer
+    const adminClient = supabaseAdmin || supabase;
+    
+    // First, get the customer record to find the user_id (filtered by company_id)
+    const { data: customer, error: customerError } = await adminClient
       .from('customers')
       .select('user_id')
       .eq('id', customerId)
+      .eq('company_id', req.companyId)
       .single();
     
     if (customerError) {
@@ -1506,11 +1517,19 @@ export const getCustomerAddresses = async (req: Request, res: Response) => {
       });
     }
     
-    // Now fetch addresses using the user_id from the customer record
-    const { data, error } = await supabase
+    if (!customer || !customer.user_id) {
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found or has no associated user'
+      });
+    }
+    
+    // Now fetch addresses using the user_id from the customer record (filtered by company_id)
+    const { data, error } = await adminClient
       .from('addresses')
       .select('*')
       .eq('user_id', customer.user_id)
+      .eq('company_id', req.companyId)
       .order('is_default', { ascending: false });
     
     if (error) {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Card,
@@ -19,10 +19,8 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Search, Eye, DollarSign, CheckCircle, Clock, XCircle } from "lucide-react";
-import { supplierPaymentsService } from '@/api/supplierPayments';
-import { suppliersService } from '@/api/suppliers';
-import { useAuth } from '@/contexts/AuthContext';
-import { StatusBadge } from '@/components/procurement/StatusBadge';
+import { paymentsService, Payment } from '@/api/payments';
+import { useCanAccess } from '@/hooks/usePermissions';
 import {
   Select,
   SelectContent,
@@ -30,72 +28,91 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatCurrency } from '@/lib/utils';
+import { format } from 'date-fns';
 
-export default function SupplierPayments() {
+export default function Payments() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const invoiceId = searchParams.get('invoice');
-  const { isAdmin, isAccounts } = useAuth();
+  const canWrite = useCanAccess('sales.write');
   
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [supplierFilter, setSupplierFilter] = useState<string>('all');
   const [methodFilter, setMethodFilter] = useState<string>('all');
 
   // Fetch payments
   const { data: payments = [], isLoading } = useQuery({
-    queryKey: ['supplier-payments', statusFilter, supplierFilter, methodFilter, invoiceId],
-    queryFn: () => supplierPaymentsService.getAll({
-      supplier_id: supplierFilter !== 'all' ? supplierFilter : undefined,
+    queryKey: ['payments', statusFilter, methodFilter],
+    queryFn: () => paymentsService.getAll({
       status: statusFilter !== 'all' ? statusFilter : undefined,
       payment_method: methodFilter !== 'all' ? methodFilter : undefined,
     }),
   });
 
-  // Fetch suppliers for filter
-  const { data: suppliers = [] } = useQuery({
-    queryKey: ['suppliers'],
-    queryFn: () => suppliersService.getAll({ is_active: true }),
-  });
-
   // Calculate summary statistics
-  const totalAmount = payments.reduce((sum, p: any) => sum + (p.amount || 0), 0);
+  const totalAmount = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
   const completedAmount = payments
-    .filter((p: any) => p.status === 'completed')
-    .reduce((sum, p: any) => sum + (p.amount || 0), 0);
+    .filter((p) => p.status === 'completed')
+    .reduce((sum, p) => sum + (p.amount || 0), 0);
   const pendingAmount = payments
-    .filter((p: any) => p.status === 'pending' || p.status === 'processing')
-    .reduce((sum, p: any) => sum + (p.amount || 0), 0);
+    .filter((p) => p.status === 'pending')
+    .reduce((sum, p) => sum + (p.amount || 0), 0);
   const failedAmount = payments
-    .filter((p: any) => p.status === 'failed' || p.status === 'cancelled')
-    .reduce((sum, p: any) => sum + (p.amount || 0), 0);
+    .filter((p) => p.status === 'failed' || p.status === 'refunded')
+    .reduce((sum, p) => sum + (p.amount || 0), 0);
 
   // Filter payments by search query
-  const filteredPayments = payments.filter((payment: any) => {
+  const filteredPayments = payments.filter((payment: Payment & { order?: any; customer?: any }) => {
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       return (
-        payment.payment_number?.toLowerCase().includes(query) ||
-        payment.suppliers?.name?.toLowerCase().includes(query) ||
-        payment.purchase_invoices?.invoice_number?.toLowerCase().includes(query)
+        payment.id?.toLowerCase().includes(query) ||
+        payment.order?.order_number?.toLowerCase().includes(query) ||
+        payment.customer?.name?.toLowerCase().includes(query) ||
+        payment.transaction_id?.toLowerCase().includes(query) ||
+        payment.cheque_no?.toLowerCase().includes(query)
       );
     }
     return true;
   });
 
+  const getStatusBadge = (status: Payment['status']) => {
+    const statusConfig = {
+      completed: { variant: 'default' as const, label: 'Completed', className: 'bg-green-100 text-green-800' },
+      pending: { variant: 'secondary' as const, label: 'Pending', className: 'bg-yellow-100 text-yellow-800' },
+      failed: { variant: 'destructive' as const, label: 'Failed', className: 'bg-red-100 text-red-800' },
+      refunded: { variant: 'outline' as const, label: 'Refunded', className: 'bg-gray-100 text-gray-800' }
+    };
+
+    const config = statusConfig[status];
+    return <Badge variant={config.variant} className={config.className}>{config.label}</Badge>;
+  };
+
+  const getPaymentMethodLabel = (method: string) => {
+    const methodMap: Record<string, string> = {
+      cash: 'Cash',
+      card: 'Card',
+      bank_transfer: 'Bank Transfer',
+      neft: 'NEFT',
+      rtgs: 'RTGS',
+      upi: 'UPI',
+      cheque: 'Cheque',
+    };
+    return methodMap[method] || method;
+  };
+
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold">Supplier Payments</h1>
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold">Payments</h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            Manage supplier payments and transactions
+            Manage customer payments and transactions
           </p>
         </div>
-        {(isAdmin || isAccounts) && (
-          <Button onClick={() => navigate('/procurement/supplier-payments/new' + (invoiceId ? `?invoice=${invoiceId}` : ''))}>
+        {canWrite && (
+          <Button onClick={() => navigate('/sales/payments/new')}>
             <Plus className="h-4 w-4 mr-2" />
-            Record Payment
+            Add Payment
           </Button>
         )}
       </div>
@@ -108,7 +125,7 @@ export default function SupplierPayments() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹{totalAmount.toFixed(2)}</div>
+            <div className="text-2xl font-bold">{formatCurrency(totalAmount)}</div>
             <p className="text-xs text-muted-foreground">{payments.length} payments</p>
           </CardContent>
         </Card>
@@ -118,33 +135,33 @@ export default function SupplierPayments() {
             <CheckCircle className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">₹{completedAmount.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-green-600">{formatCurrency(completedAmount)}</div>
             <p className="text-xs text-muted-foreground">
-              {payments.filter((p: any) => p.status === 'completed').length} payments
+              {payments.filter((p) => p.status === 'completed').length} payments
             </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending/Processing</CardTitle>
+            <CardTitle className="text-sm font-medium">Pending</CardTitle>
             <Clock className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">₹{pendingAmount.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-yellow-600">{formatCurrency(pendingAmount)}</div>
             <p className="text-xs text-muted-foreground">
-              {payments.filter((p: any) => p.status === 'pending' || p.status === 'processing').length} payments
+              {payments.filter((p) => p.status === 'pending').length} payments
             </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Failed/Cancelled</CardTitle>
+            <CardTitle className="text-sm font-medium">Failed/Refunded</CardTitle>
             <XCircle className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">₹{failedAmount.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-red-600">{formatCurrency(failedAmount)}</div>
             <p className="text-xs text-muted-foreground">
-              {payments.filter((p: any) => p.status === 'failed' || p.status === 'cancelled').length} payments
+              {payments.filter((p) => p.status === 'failed' || p.status === 'refunded').length} payments
             </p>
           </CardContent>
         </Card>
@@ -153,11 +170,11 @@ export default function SupplierPayments() {
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search payment number..."
+                placeholder="Search by order, customer, transaction ID..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-8"
@@ -170,23 +187,9 @@ export default function SupplierPayments() {
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="processing">Processing</SelectItem>
                 <SelectItem value="completed">Completed</SelectItem>
                 <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Filter by supplier" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Suppliers</SelectItem>
-                {suppliers.map((supplier) => (
-                  <SelectItem key={supplier.id} value={supplier.id}>
-                    {supplier.supplier_code || supplier.name}
-                  </SelectItem>
-                ))}
+                <SelectItem value="refunded">Refunded</SelectItem>
               </SelectContent>
             </Select>
             <Select value={methodFilter} onValueChange={setMethodFilter}>
@@ -196,10 +199,12 @@ export default function SupplierPayments() {
               <SelectContent>
                 <SelectItem value="all">All Methods</SelectItem>
                 <SelectItem value="cash">Cash</SelectItem>
-                <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                <SelectItem value="cheque">Cheque</SelectItem>
                 <SelectItem value="card">Card</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                <SelectItem value="neft">NEFT</SelectItem>
+                <SelectItem value="rtgs">RTGS</SelectItem>
+                <SelectItem value="upi">UPI</SelectItem>
+                <SelectItem value="cheque">Cheque</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -223,52 +228,63 @@ export default function SupplierPayments() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Payment #</TableHead>
-                    <TableHead>Supplier</TableHead>
-                    <TableHead>Invoice</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Method</TableHead>
+                    <TableHead>Payment Date</TableHead>
+                    <TableHead>Order Number</TableHead>
+                    <TableHead>Customer</TableHead>
                     <TableHead>Amount</TableHead>
+                    <TableHead>Payment Method</TableHead>
+                    <TableHead>Transaction/Cheque</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredPayments.map((payment: any) => (
+                  {filteredPayments.map((payment: Payment & { order?: any; customer?: any }) => (
                     <TableRow key={payment.id}>
-                      <TableCell className="font-medium">{payment.payment_number}</TableCell>
                       <TableCell>
-                        {payment.suppliers?.name || 'N/A'}
+                        {payment.payment_date 
+                          ? format(new Date(payment.payment_date), 'MMM dd, yyyy')
+                          : format(new Date(payment.created_at), 'MMM dd, yyyy')
+                        }
                       </TableCell>
                       <TableCell>
-                        {payment.purchase_invoices?.invoice_number ? (
+                        {payment.order?.order_number ? (
                           <button
-                            onClick={() => navigate(`/procurement/purchase-invoices/${payment.purchase_invoice_id}`)}
+                            onClick={() => navigate(`/sales/orders/${payment.order_id}`)}
                             className="text-primary hover:underline"
                           >
-                            {payment.purchase_invoices.invoice_number}
+                            {payment.order.order_number}
                           </button>
                         ) : (
                           'N/A'
                         )}
                       </TableCell>
                       <TableCell>
-                        {new Date(payment.payment_date).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="capitalize">
-                        {payment.payment_method?.replace('_', ' ') || 'N/A'}
+                        {payment.customer?.name || 'N/A'}
                       </TableCell>
                       <TableCell className="font-medium">
-                        ₹{payment.amount.toFixed(2)}
+                        {formatCurrency(payment.amount)}
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={payment.status} />
+                        {getPaymentMethodLabel(payment.payment_method)}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {payment.transaction_id && (
+                          <div>TX: {payment.transaction_id}</div>
+                        )}
+                        {payment.cheque_no && (
+                          <div>Cheque: {payment.cheque_no}</div>
+                        )}
+                        {!payment.transaction_id && !payment.cheque_no && '-'}
+                      </TableCell>
+                      <TableCell>
+                        {getStatusBadge(payment.status)}
                       </TableCell>
                       <TableCell>
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => navigate(`/procurement/supplier-payments/${payment.id}`)}
+                          onClick={() => navigate(`/sales/orders/${payment.order_id}`)}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -284,3 +300,4 @@ export default function SupplierPayments() {
     </div>
   );
 }
+

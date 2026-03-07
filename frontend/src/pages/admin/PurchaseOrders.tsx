@@ -142,7 +142,7 @@ export default function PurchaseOrders() {
           </p>
         </div>
         {(isAdmin || isWarehouseManager) && (
-          <Button onClick={() => navigate('/admin/purchase-orders/new')}>
+          <Button onClick={() => navigate('/procurement/purchase-orders/new')}>
             <Plus className="h-4 w-4 mr-2" />
             Create PO
           </Button>
@@ -283,7 +283,7 @@ export default function PurchaseOrders() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => navigate(`/admin/goods-receipts?po=${po.id}`)}
+                                onClick={() => navigate(`/procurement/goods-receipts?po=${po.id}`)}
                                 className="h-7 text-xs"
                               >
                                 <FileText className="h-3 w-3 mr-1" />
@@ -294,7 +294,7 @@ export default function PurchaseOrders() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => navigate(`/admin/purchase-invoices?po=${po.id}`)}
+                                onClick={() => navigate(`/procurement/purchase-invoices?po=${po.id}`)}
                                 className="h-7 text-xs"
                               >
                                 <FileText className="h-3 w-3 mr-1" />
@@ -311,7 +311,7 @@ export default function PurchaseOrders() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => navigate(`/admin/purchase-orders/${po.id}`)}>
+                              <DropdownMenuItem onClick={() => navigate(`/procurement/purchase-orders/${po.id}`)}>
                                 <Eye className="h-4 w-4 mr-2" />
                                 View Details
                               </DropdownMenuItem>
@@ -326,20 +326,20 @@ export default function PurchaseOrders() {
                               )}
                               {(po.status === 'approved' || po.status === 'ordered' || po.status === 'partially_received') && (isAdmin || isWarehouseManager) && (
                                 <DropdownMenuItem 
-                                  onClick={() => navigate(`/admin/goods-receipts/new?po=${po.id}`)}
+                                  onClick={() => navigate(`/procurement/goods-receipts/new?po=${po.id}`)}
                                 >
                                   <FileText className="h-4 w-4 mr-2" />
                                   Create GRN
                                 </DropdownMenuItem>
                               )}
                               {relatedGRNs.length > 0 && (
-                                <DropdownMenuItem onClick={() => navigate(`/admin/goods-receipts?po=${po.id}`)}>
+                                <DropdownMenuItem onClick={() => navigate(`/procurement/goods-receipts?po=${po.id}`)}>
                                   <FileText className="h-4 w-4 mr-2" />
                                   View GRNs ({relatedGRNs.length})
                                 </DropdownMenuItem>
                               )}
                               {relatedInvoices.length > 0 && (
-                                <DropdownMenuItem onClick={() => navigate(`/admin/purchase-invoices?po=${po.id}`)}>
+                                <DropdownMenuItem onClick={() => navigate(`/procurement/purchase-invoices?po=${po.id}`)}>
                                   <FileText className="h-4 w-4 mr-2" />
                                   View Invoices ({relatedInvoices.length})
                                 </DropdownMenuItem>

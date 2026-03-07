@@ -245,7 +245,7 @@ export default function VariantDetail() {
         <TabsContent value="prices" className="space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-semibold">Price History</h2>
-            <Button onClick={() => navigate(`/admin/prices/new?variant_id=${variantId}`)}>
+            <Button onClick={() => navigate(`/inventory/prices/new?variant_id=${variantId}`)}>
               Add Price
             </Button>
           </div>

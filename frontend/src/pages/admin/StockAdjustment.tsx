@@ -185,7 +185,7 @@ export default function StockAdjustment() {
       setItems([]);
       setReason('');
       setCurrentStep(1);
-      navigate('/admin/warehouses');
+      navigate('/inventory/warehouses');
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to adjust stock');
@@ -248,7 +248,7 @@ export default function StockAdjustment() {
       <div className="mb-6">
         <Button
           variant="ghost"
-          onClick={() => navigate('/admin/warehouses')}
+          onClick={() => navigate('/inventory/warehouses')}
           className="mb-4"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -518,7 +518,7 @@ export default function StockAdjustment() {
                 setItems([]);
                 setReason('');
                 setCurrentStep(1);
-                navigate('/admin/warehouses');
+                navigate('/inventory/warehouses');
               }}
               className={isMobile ? 'h-12' : ''}
             >

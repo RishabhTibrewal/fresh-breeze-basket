@@ -25,7 +25,8 @@ import {
   Wallet,
   Hash,
   UserCog,
-  Percent
+  Percent,
+  Plus
 } from 'lucide-react';
 
 export interface ModuleKPI {
@@ -113,6 +114,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     sidebarItems: [
       { label: 'Dashboard', route: '/sales', icon: LayoutDashboard, permission: 'sales.read' },
       { label: 'Orders', route: '/sales/orders', icon: ShoppingCart, permission: 'sales.read' },
+      { label: 'Create Order', route: '/sales/orders/create', icon: Plus, permission: 'sales.write' },
       { label: 'Quotations', route: '/sales/quotations', icon: FileText, permission: 'sales.read' },
       { label: 'Order Invoices', route: '/sales/invoices', icon: Receipt, permission: 'sales.read' },
       { label: 'Payments', route: '/sales/payments', icon: CreditCard, permission: 'sales.read' },

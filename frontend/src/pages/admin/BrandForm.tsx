@@ -82,7 +82,7 @@ export default function BrandForm() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['brands'] });
       toast.success('Brand created successfully');
-      navigate('/admin/brands');
+      navigate('/inventory/brands');
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to create brand');
@@ -95,7 +95,7 @@ export default function BrandForm() {
       queryClient.invalidateQueries({ queryKey: ['brands'] });
       queryClient.invalidateQueries({ queryKey: ['brand', id] });
       toast.success('Brand updated successfully');
-      navigate('/admin/brands');
+      navigate('/inventory/brands');
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to update brand');
@@ -145,7 +145,7 @@ export default function BrandForm() {
       <div className="mb-6">
         <Button
           variant="ghost"
-          onClick={() => navigate('/admin/brands')}
+          onClick={() => navigate('/inventory/brands')}
           className="mb-4"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -303,7 +303,7 @@ export default function BrandForm() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => navigate('/admin/brands')}
+              onClick={() => navigate('/inventory/brands')}
               className={isMobile ? 'h-12' : ''}
             >
               Cancel

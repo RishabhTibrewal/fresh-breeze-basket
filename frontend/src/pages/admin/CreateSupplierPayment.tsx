@@ -80,7 +80,7 @@ export default function CreateSupplierPayment() {
       toast.success('Payment recorded successfully');
       queryClient.invalidateQueries({ queryKey: ['supplier-payments'] });
       queryClient.invalidateQueries({ queryKey: ['purchase-invoices'] });
-      navigate('/admin/supplier-payments');
+      navigate('/procurement/supplier-payments');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.error || 'Failed to record payment');
@@ -124,7 +124,7 @@ export default function CreateSupplierPayment() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate('/admin/supplier-payments')}
+          onClick={() => navigate('/procurement/supplier-payments')}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -302,7 +302,7 @@ export default function CreateSupplierPayment() {
                     type="button"
                     variant="outline"
                     className="flex-1"
-                    onClick={() => navigate('/admin/supplier-payments')}
+                    onClick={() => navigate('/procurement/supplier-payments')}
                   >
                     Cancel
                   </Button>

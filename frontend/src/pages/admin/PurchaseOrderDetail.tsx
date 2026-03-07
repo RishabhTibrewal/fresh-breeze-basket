@@ -249,7 +249,7 @@ export default function PurchaseOrderDetail() {
                     <div
                       key={grn.id}
                       className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted"
-                      onClick={() => navigate(`/admin/goods-receipts/${grn.id}`)}
+                      onClick={() => navigate(`/procurement/goods-receipts/${grn.id}`)}
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
@@ -260,7 +260,7 @@ export default function PurchaseOrderDetail() {
                             className="h-6 w-6"
                             onClick={(e) => {
                               e.stopPropagation();
-                              navigate(`/admin/goods-receipts/${grn.id}`);
+                              navigate(`/procurement/goods-receipts/${grn.id}`);
                             }}
                           >
                             <ExternalLink className="h-3 w-3" />
@@ -291,7 +291,7 @@ export default function PurchaseOrderDetail() {
                       <div
                         key={invoice.id}
                         className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted"
-                        onClick={() => navigate(`/admin/purchase-invoices/${invoice.id}`)}
+                        onClick={() => navigate(`/procurement/purchase-invoices/${invoice.id}`)}
                       >
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
@@ -302,7 +302,7 @@ export default function PurchaseOrderDetail() {
                               className="h-6 w-6"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigate(`/admin/purchase-invoices/${invoice.id}`);
+                                navigate(`/procurement/purchase-invoices/${invoice.id}`);
                               }}
                             >
                               <ExternalLink className="h-3 w-3" />
@@ -387,7 +387,7 @@ export default function PurchaseOrderDetail() {
               <div className="flex flex-wrap gap-2">
                 {purchaseOrder.status === 'draft' && isAdmin && (
                   <Button
-                    onClick={() => navigate(`/admin/purchase-orders/${id}/edit`)}
+                    onClick={() => navigate(`/procurement/purchase-orders/${id}/edit`)}
                   >
                     Edit PO
                   </Button>
@@ -444,7 +444,7 @@ export default function PurchaseOrderDetail() {
                   >
                     <StatusTransitionButton
                       label="Create GRN"
-                      onClick={() => navigate(`/admin/goods-receipts/new?po=${id}`)}
+                      onClick={() => navigate(`/procurement/goods-receipts/new?po=${id}`)}
                       requiredRoles={['warehouse_manager', 'admin']}
                       requiredWarehouseAccess={purchaseOrder.warehouse_id}
                       currentStatus={purchaseOrder.status}

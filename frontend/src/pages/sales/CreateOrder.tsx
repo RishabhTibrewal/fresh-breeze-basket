@@ -35,7 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Plus, Trash2, ShoppingCart, MapPin, X } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, ShoppingCart, MapPin, X, Minus, Check, ChevronsUpDown, Package } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -44,9 +44,12 @@ import { customerService } from '@/api/customer';
 import apiClient from '@/lib/apiClient';
 import { addressApi } from '@/api/addresses';
 import { warehousesService } from '@/api/warehouses';
+import { productsService } from '@/api/products';
+import { variantsService } from '@/api/variants';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -55,8 +58,22 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import CustomerAddressForm from "./CustomerAddressForm";
 import WarehouseStockDisplay from "@/components/products/WarehouseStockDisplay";
+import { cn } from "@/lib/utils";
 
 // Enhanced schema for the order form with payment method options
 const orderFormSchema = z.object({
@@ -65,12 +82,15 @@ const orderFormSchema = z.object({
   payment_status: z.enum(['full_payment', 'partial_payment', 'full_credit'], {
     required_error: "Payment status is required",
   }),
-  payment_method: z.enum(['cash', 'card', 'cheque']).optional(),
+  payment_method: z.enum(['cash', 'card', 'cheque', 'bank_transfer', 'neft', 'rtgs', 'upi']).optional(),
   payment_type: z.enum(['full_payment', 'partial_payment', 'full_credit']).optional(),
   shipping_address_id: z.string().min(1, "Shipping address is required"),
   billing_address_id: z.string().optional(),
   partial_payment_amount: z.number().optional(),
   credit_period: z.number().optional(),
+  transaction_id: z.string().optional(),
+  cheque_no: z.string().optional(),
+  payment_date: z.string().optional(),
 });
 
 // Custom type with context for form submission
@@ -99,26 +119,58 @@ export default function CreateOrder() {
   // Active tab state (products or checkout)
   const [activeTab, setActiveTab] = useState("products");
   
-  const [items, setItems] = useState<Array<{
+  interface OrderItem {
+    id: string; // Unique ID for each row
     product_id: string;
+    variant_id?: string | null;
+    variant_name?: string;
     product_name: string;
+    product_code?: string;
+    hsn_code?: string;
+    unit?: string;
+    tax_percentage?: number;
     quantity: number;
     unit_price: number;
     original_price: number; // Store original product price for reference
-    price: number;
-    subtotal: number;
+    line_total: number;
     discount?: number; // Optional discount percentage
     image_url?: string;
     origin?: string;
     stock_count?: number;
-    unit?: number;
-    unit_type?: string;
     warehouse_id?: string; // Warehouse ID for this item
-  }>>([]);
+  }
+  
+  const [items, setItems] = useState<OrderItem[]>([]);
+  
+  // State to store variants for each product
+  const [productVariants, setProductVariants] = useState<Record<string, any[]>>({});
+  
+  // State for product search combobox
+  const [productSearchOpen, setProductSearchOpen] = useState<Record<string, boolean>>({});
+  const [productSearchQuery, setProductSearchQuery] = useState<Record<string, string>>({});
   
   const [totalAmount, setTotalAmount] = useState(0);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+  const [useSameAsShipping, setUseSameAsShipping] = useState(true);
+  
+  // State for customer search combobox
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  
+  // Get all customers for selection
+  const { data: allCustomers = [], isLoading: customersLoading } = useQuery({
+    queryKey: ['customers'],
+    queryFn: async () => {
+      try {
+        const response = await apiClient.get('/customer');
+        return Array.isArray(response.data) ? response.data : response.data.data || [];
+      } catch (error) {
+        console.error('Error fetching customers:', error);
+        return [];
+      }
+    },
+  });
   
   // Get customer details if ID is provided
   const { data: customer, isLoading: customerLoading } = useQuery({
@@ -130,31 +182,7 @@ export default function CreateOrder() {
   // Get products for the order
   const { data: products = [], isLoading: productsLoading } = useQuery({
     queryKey: ['products'],
-    queryFn: async () => {
-      try {
-        // Request all products by setting a high limit (or fetch all pages)
-        const response = await apiClient.get('/products', {
-          params: {
-            limit: 1000, // Set high limit to get all products
-            page: 1
-          }
-        });
-        console.log('Product API response:', response.data);
-        
-        // Based on the API response structure, extract the data array
-        if (response.data && response.data.success && Array.isArray(response.data.data)) {
-          return response.data.data;
-        } else if (Array.isArray(response.data)) {
-          return response.data;
-        } else {
-          console.error('Unexpected products API response structure:', response.data);
-          return [];
-        }
-      } catch (error) {
-        console.error('Error fetching products:', error);
-        return [];
-      }
-    },
+    queryFn: () => productsService.getAll(),
   });
 
   // Fetch all product stocks at once to avoid multiple API calls
@@ -174,27 +202,6 @@ export default function CreateOrder() {
     queryFn: () => warehousesService.getAll(true), // Only get active warehouses
   });
   
-  // Get customer addresses
-  const { data: addresses = [], isLoading: addressesLoading } = useQuery({
-    queryKey: ['customer-addresses', customerId],
-    queryFn: async () => {
-      // If we have a customerId, fetch the addresses for that customer
-      if (customerId) {
-        try {
-          // Use the customer addresses endpoint
-          const response = await apiClient.get(`/customer/${customerId}/addresses`);
-          // API now returns the array directly
-          return Array.isArray(response.data) ? response.data : [];
-        } catch (error) {
-          console.error('Error fetching addresses:', error);
-          return [];
-        }
-      }
-      return [];
-    },
-    enabled: !!customerId,
-  });
-  
   const form = useForm<OrderFormValues>({
     resolver: zodResolver(orderFormSchema),
     defaultValues: {
@@ -207,15 +214,45 @@ export default function CreateOrder() {
       billing_address_id: "",
       partial_payment_amount: undefined,
       credit_period: undefined,
+      transaction_id: "",
+      cheque_no: "",
+      payment_date: "",
     },
   });
   
-  const isLoading = customerLoading || productsLoading || addressesLoading;
+  // Get selected customer from form or URL param (after form is declared)
+  const selectedCustomerId = form.watch('customer_id') || customerId;
+  const selectedCustomer = customer || allCustomers.find((c: any) => c.id === selectedCustomerId);
+  
+  // Get customer addresses - update when selected customer changes
+  const { data: addresses = [], isLoading: addressesLoading } = useQuery({
+    queryKey: ['customer-addresses', selectedCustomerId],
+    queryFn: async () => {
+      // If we have a selectedCustomerId, fetch the addresses for that customer
+      if (selectedCustomerId) {
+        try {
+          // Use the customer addresses endpoint
+          const response = await apiClient.get(`/customer/${selectedCustomerId}/addresses`);
+          // API now returns the array directly
+          return Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+          console.error('Error fetching addresses:', error);
+          return [];
+        }
+      }
+      return [];
+    },
+    enabled: !!selectedCustomerId,
+  });
+  
+  const isLoading = (customerId ? customerLoading : customersLoading) || productsLoading || addressesLoading;
   
   // Watch payment status to conditionally render fields
   const paymentStatus = form.watch("payment_status");
   // Watch payment type for backward compatibility with existing code
   const paymentType = form.watch("payment_type");
+  // Watch payment method to conditionally render transaction/cheque fields
+  const paymentMethod = form.watch("payment_method");
   
   // Debug products loading
   useEffect(() => {
@@ -230,16 +267,39 @@ export default function CreateOrder() {
   
   useEffect(() => {
     // Calculate total amount whenever items change
-    const total = items.reduce((sum, item) => sum + item.subtotal, 0);
+    const total = items
+      .filter(item => item.product_id && item.product_id !== '')
+      .reduce((sum, item) => sum + item.line_total, 0);
     setTotalAmount(total);
   }, [items]);
   
-  // Fill in customer details when loaded
+  // Fill in customer details when loaded from URL param
   useEffect(() => {
-    if (customer) {
+    if (customer && customerId) {
       form.setValue('customer_id', customer.id);
     }
-  }, [customer, form]);
+  }, [customer, customerId, form]);
+  
+  // Update addresses when selected customer changes
+  useEffect(() => {
+    if (selectedCustomerId && selectedCustomerId !== customerId) {
+      // Clear addresses when customer changes (they will be refetched by the query)
+      form.setValue('shipping_address_id', '');
+      form.setValue('billing_address_id', '');
+    }
+  }, [selectedCustomerId, customerId, form]);
+  
+  // Auto-fill credit period when customer with credit period is selected
+  useEffect(() => {
+    if (selectedCustomer && selectedCustomer.credit_period_days && 
+        (paymentStatus === 'full_credit' || paymentStatus === 'partial_payment')) {
+      const currentCreditPeriod = form.getValues('credit_period');
+      // Only auto-fill if not already set or if it exceeds the customer's limit
+      if (!currentCreditPeriod || currentCreditPeriod > selectedCustomer.credit_period_days) {
+        form.setValue('credit_period', selectedCustomer.credit_period_days);
+      }
+    }
+  }, [selectedCustomer, paymentStatus, form]);
   
   // Set default address if available
   useEffect(() => {
@@ -250,13 +310,25 @@ export default function CreateOrder() {
       if (defaultAddress) {
         form.setValue('shipping_address_id', defaultAddress.id);
         form.setValue('billing_address_id', defaultAddress.id);
+        setUseSameAsShipping(true);
       } else if (addresses[0]) {
         // Use the first address as default if no default address exists
         form.setValue('shipping_address_id', addresses[0].id);
         form.setValue('billing_address_id', addresses[0].id);
+        setUseSameAsShipping(true);
       }
     }
   }, [addresses, form]);
+  
+  // Sync billing address with shipping address when checkbox is checked
+  useEffect(() => {
+    if (useSameAsShipping) {
+      const shippingAddressId = form.getValues('shipping_address_id');
+      if (shippingAddressId) {
+        form.setValue('billing_address_id', shippingAddressId);
+      }
+    }
+  }, [useSameAsShipping, form.watch('shipping_address_id'), form]);
   
   // Handle payment status change
   useEffect(() => {
@@ -291,7 +363,7 @@ export default function CreateOrder() {
     setEditingAddressId(null);
     
     // Refetch addresses - ensure we clear the cache completely
-    queryClient.invalidateQueries({ queryKey: ['customer-addresses', customerId] });
+    queryClient.invalidateQueries({ queryKey: ['customer-addresses', selectedCustomerId] });
     
     // Set the new address as the shipping/billing address after a small delay to ensure the data is refetched
     setTimeout(() => {
@@ -302,113 +374,213 @@ export default function CreateOrder() {
     }, 500);
   };
   
-  // Add a product to the order
-  const addProduct = (productId: string) => {
-    console.log('Adding product with ID:', productId);
-    console.log('Available products:', products);
+  // Add a new empty row
+  const addRow = () => {
+    setItems([
+      ...items,
+      {
+        id: `row-${Date.now()}-${Math.random()}`,
+        product_id: '',
+        variant_id: null,
+        variant_name: '',
+        product_name: '',
+        product_code: '',
+        hsn_code: '',
+        unit: '',
+        tax_percentage: 0,
+        quantity: 1,
+        unit_price: 0,
+        original_price: 0,
+        line_total: 0,
+        discount: 0,
+        warehouse_id: warehouses.length > 0 ? warehouses[0].id : undefined
+      }
+    ]);
+  };
+
+  // Fetch variants for a product
+  const fetchVariantsForProduct = async (productId: string) => {
+    if (productVariants[productId]) {
+      return productVariants[productId];
+    }
+    try {
+      const variants = await variantsService.getByProduct(productId);
+      setProductVariants(prev => ({ ...prev, [productId]: variants }));
+      return variants;
+    } catch (error) {
+      console.error('Error fetching variants:', error);
+      return [];
+    }
+  };
+
+  // Update product for a specific row
+  const updateProductForRow = async (rowId: string, productId: string) => {
+    const product = products.find((p: any) => p.id === productId);
+    if (!product) return;
+
+    // Fetch variants for this product
+    const variants = await fetchVariantsForProduct(productId);
     
-    const product = products.find(p => p.id === productId);
-    console.log('Found product:', product);
+    // Use default variant if available, otherwise use product-level data
+    const defaultVariant = variants.find((v: any) => v.is_default) || variants[0];
     
-    if (!product) {
-      console.error(`Product with ID ${productId} not found in the products list`);
-      return;
+    let price = 0;
+    let originalPrice = 0;
+    let taxPercentage = 0;
+    let hsnCode = '';
+    let unit = 'piece';
+    let variantId: string | null = null;
+    let variantName = '';
+
+    if (defaultVariant) {
+      variantId = defaultVariant.id;
+      variantName = defaultVariant.name;
+      price = defaultVariant.price?.sale_price || product.sale_price || product.price || 0;
+      originalPrice = price;
+      taxPercentage = defaultVariant.tax?.rate || product.tax || 0;
+      hsnCode = defaultVariant.hsn || product.hsn_code || '';
+      unit = defaultVariant.unit_type || product.unit_type || 'piece';
+    } else {
+      // Fallback to product-level data
+      price = product.sale_price || product.price || 0;
+      originalPrice = price;
+      taxPercentage = product.tax || 0;
+      hsnCode = product.hsn_code || '';
+      unit = product.unit_type || 'piece';
     }
     
-    // Use sale price if available, otherwise use regular price
-    const priceToUse = product.sale_price || product.price;
-    const originalPrice = product.sale_price || product.price;
-    
-    // Check if product already exists in the order
-    const existingIndex = items.findIndex(item => item.product_id === productId);
-    
-    if (existingIndex >= 0) {
-      // Update quantity if product already exists
-      const newItems = [...items];
-      newItems[existingIndex].quantity += 1;
-      newItems[existingIndex].subtotal = newItems[existingIndex].quantity * newItems[existingIndex].unit_price;
-      setItems(newItems);
-      console.log('Updated existing item quantity', newItems[existingIndex]);
-    } else {
-      // Add new product to the order
-      // Set default warehouse (first active warehouse or null)
-      const defaultWarehouseId = warehouses.length > 0 ? warehouses[0].id : undefined;
-      
-      const newItem = {
+    setItems(items.map(item => {
+      if (item.id === rowId) {
+        // Calculate line total with tax (consistent with other update functions)
+        const taxAmount = (item.quantity * price * taxPercentage) / 100;
+        const lineTotal = (item.quantity * price) + taxAmount;
+        return {
+          ...item,
         product_id: product.id,
+          variant_id: variantId,
+          variant_name: variantName,
         product_name: product.name,
-        quantity: 1,
-        unit_price: priceToUse,
-        original_price: originalPrice, // Store original price
-        price: priceToUse,
-        subtotal: priceToUse,
-        discount: 0, // No discount initially
+          product_code: product.product_code || '',
+          hsn_code: hsnCode,
+          unit: unit,
+          tax_percentage: taxPercentage,
+          unit_price: price,
+          original_price: originalPrice,
+          line_total: lineTotal,
         image_url: product.image_url,
         origin: product.origin,
-        stock_count: product.stock_count,
-        unit: product.unit || 1,
-        unit_type: product.unit_type || 'piece',
-        warehouse_id: defaultWarehouseId
-      };
-      
-      setItems([...items, newItem]);
-      console.log('Added new item to order:', newItem);
-    }
+          stock_count: product.stock_count
+        };
+      }
+      return item;
+    }));
+  };
+
+  // Update variant for a specific row
+  const updateVariantForRow = (rowId: string, variantId: string) => {
+    const item = items.find(i => i.id === rowId);
+    if (!item || !item.product_id) return;
+
+    const variants = productVariants[item.product_id] || [];
+    const variant = variants.find((v: any) => v.id === variantId);
+    if (!variant) return;
+
+    const price = variant.price?.sale_price || 0;
+    const taxPercentage = variant.tax?.rate || 0;
+    const hsnCode = variant.hsn || '';
+    const unit = variant.unit_type || 'piece';
+
+    setItems(items.map(i => {
+      if (i.id === rowId) {
+        // Calculate line total with tax (consistent with other update functions)
+        const taxAmount = (i.quantity * price * taxPercentage) / 100;
+        const lineTotal = (i.quantity * price) + taxAmount;
+        return {
+          ...i,
+          variant_id: variant.id,
+          variant_name: variant.name,
+          hsn_code: hsnCode,
+          unit: unit,
+          tax_percentage: taxPercentage,
+          unit_price: price,
+          original_price: price,
+          line_total: lineTotal
+        };
+      }
+      return i;
+    }));
+  };
+
+  // Update quantity
+  const updateQuantity = (rowId: string, delta: number) => {
+    setItems(items.map(item => {
+      if (item.id === rowId) {
+        const newQuantity = Math.max(1, item.quantity + delta);
+        const taxAmount = (newQuantity * item.unit_price * (item.tax_percentage || 0)) / 100;
+        return {
+          ...item,
+          quantity: newQuantity,
+          line_total: (newQuantity * item.unit_price) + taxAmount
+        };
+      }
+      return item;
+    }));
+  };
+
+  // Update quantity by direct input
+  const updateQuantityDirect = (rowId: string, quantity: number) => {
+    setItems(items.map(item => {
+      if (item.id === rowId) {
+        const newQuantity = Math.max(1, quantity);
+        const taxAmount = (newQuantity * item.unit_price * (item.tax_percentage || 0)) / 100;
+        return {
+          ...item,
+          quantity: newQuantity,
+          line_total: (newQuantity * item.unit_price) + taxAmount
+        };
+      }
+      return item;
+    }));
+  };
+
+  // Update price
+  const updatePrice = (rowId: string, price: number) => {
+    setItems(items.map(item => {
+      if (item.id === rowId) {
+        const taxAmount = (item.quantity * price * (item.tax_percentage || 0)) / 100;
+        const newLineTotal = (item.quantity * price) + taxAmount;
+    
+    // Calculate discount percentage if price is different from original
+        let discount = 0;
+        if (item.original_price > 0 && price < item.original_price) {
+          const discountAmount = item.original_price - price;
+          discount = (discountAmount / item.original_price) * 100;
+        }
+        
+        return {
+          ...item,
+          unit_price: price,
+          line_total: newLineTotal,
+          discount: discount
+        };
+      }
+      return item;
+    }));
   };
 
   // Update warehouse for an item
-  const updateWarehouse = (index: number, warehouseId: string) => {
-    const newItems = [...items];
-    newItems[index].warehouse_id = warehouseId;
-    setItems(newItems);
-  };
-  
-  // Update item quantity
-  const updateQuantity = (index: number, quantity: number) => {
-    if (quantity < 1) return;
-    
-    const newItems = [...items];
-    newItems[index].quantity = quantity;
-    newItems[index].subtotal = quantity * newItems[index].unit_price;
-    newItems[index].price = newItems[index].unit_price;
-    setItems(newItems);
+  const updateWarehouse = (rowId: string, warehouseId: string) => {
+    setItems(items.map(item => {
+      if (item.id === rowId) {
+        return { ...item, warehouse_id: warehouseId };
+      }
+      return item;
+    }));
   };
 
-  // Update unit price for an item
-  const updateUnitPrice = (index: number, newPrice: number) => {
-    if (newPrice < 0) return;
-    
-    const newItems = [...items];
-    newItems[index].unit_price = newPrice;
-    newItems[index].subtotal = newItems[index].quantity * newPrice;
-    newItems[index].price = newPrice;
-    
-    // Calculate discount percentage if price is different from original
-    if (newItems[index].original_price > 0) {
-      const discountAmount = newItems[index].original_price - newPrice;
-      newItems[index].discount = (discountAmount / newItems[index].original_price) * 100;
-    }
-    
-    setItems(newItems);
-  };
-
-  // Update discount percentage for an item
-  const updateDiscount = (index: number, discountPercent: number) => {
-    if (discountPercent < 0 || discountPercent > 100) return;
-    
-    const newItems = [...items];
-    newItems[index].discount = discountPercent;
-    const discountAmount = (newItems[index].original_price * discountPercent) / 100;
-    newItems[index].unit_price = newItems[index].original_price - discountAmount;
-    newItems[index].subtotal = newItems[index].quantity * newItems[index].unit_price;
-    newItems[index].price = newItems[index].unit_price;
-    
-    setItems(newItems);
-  };
-  
-  // Remove item from order
-  const removeItem = (index: number) => {
-    setItems(items.filter((_, i) => i !== index));
+  // Remove item
+  const removeItem = (rowId: string) => {
+    setItems(items.filter(item => item.id !== rowId));
   };
   
   // Create order mutation
@@ -466,11 +638,14 @@ export default function CreateOrder() {
       
       return await customerService.createOrderForCustomer(data.customer_id, orderData);
     },
-    onSuccess: (response) => { // Add response to onSuccess to log it
+    onSuccess: (response, variables) => { // Add response and variables to onSuccess
       console.log('Order creation API response in onSuccess:', response);
-      queryClient.invalidateQueries({ queryKey: ['customerOrders', customerId] });
+      const orderCustomerId = variables.customer_id; // Use customer_id from the form data
+      queryClient.invalidateQueries({ queryKey: ['customerOrders', orderCustomerId] });
+      queryClient.invalidateQueries({ queryKey: ['salesOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
       toast.success('Order created successfully');
-      navigate(`/sales/customers/${customerId}/orders`);
+      navigate(`/sales/customers/${orderCustomerId}/orders`);
     },
     onError: (error: any) => {
       console.error('Order creation mutation error:', error.response ? error.response.data : error.message);
@@ -508,9 +683,20 @@ export default function CreateOrder() {
       return;
     }
     
+    // Filter out items without products selected and format for API
+    const validItems = items.filter(item => item.product_id && item.product_id !== '');
+    
+    if (validItems.length === 0) {
+      toast.error('Please add at least one item with a product selected');
+      setActiveTab('products');
+      return;
+    }
+    
     // Ensure all items have the price field set correctly and include warehouse_id
-    const processedItems = items.map(item => ({
-      ...item,
+    const processedItems: any[] = validItems.map(item => ({
+      product_id: item.product_id,
+      variant_id: item.variant_id || undefined,
+      quantity: item.quantity,
       price: item.unit_price,
       warehouse_id: item.warehouse_id // Include warehouse_id for each item
     }));
@@ -530,10 +716,14 @@ export default function CreateOrder() {
       <Button 
         variant="outline" 
         className="mb-3 sm:mb-4 w-full sm:w-auto text-sm sm:text-base"
-        onClick={() => customerId 
-          ? navigate(`/sales/customers/${customerId}/orders`) 
-          : navigate('/sales/customers')
-        }
+        onClick={() => {
+          const currentCustomerId = selectedCustomerId || customerId;
+          if (currentCustomerId) {
+            navigate(`/sales/customers/${currentCustomerId}/orders`);
+          } else {
+            navigate('/sales/customers');
+          }
+        }}
       >
         <ArrowLeft className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
         Back
@@ -543,7 +733,7 @@ export default function CreateOrder() {
         <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
           <CardTitle className="text-xl sm:text-2xl lg:text-3xl break-words">Create New Order</CardTitle>
           <CardDescription className="text-xs sm:text-sm mt-1 break-words">
-            {customer ? `Creating order for ${customer.name}` : 'Select a customer and add products'}
+            {selectedCustomer ? `Creating order for ${selectedCustomer.name}` : 'Select a customer and add products'}
           </CardDescription>
         </CardHeader>
         
@@ -558,22 +748,117 @@ export default function CreateOrder() {
                     <FormItem>
                       <FormLabel className="text-xs sm:text-sm">Customer *</FormLabel>
                       <FormControl>
+                        {customerId ? (
+                          // If customerId is provided in URL, show disabled select with customer name
                         <Select 
-                          disabled={!!customerId}
-                          onValueChange={field.onChange} 
-                          defaultValue={field.value}
+                            disabled={true}
+                            value={field.value}
                         >
                           <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
                             <SelectValue placeholder="Select a customer" />
                           </SelectTrigger>
                           <SelectContent>
-                            {customer && (
-                              <SelectItem value={customer.id} className="text-sm">{customer.name}</SelectItem>
-                            )}
-                            {/* Additional customers would be listed here in a full implementation */}
+                              {selectedCustomer && (
+                                <SelectItem value={selectedCustomer.id} className="text-sm">
+                                  {selectedCustomer.name} {selectedCustomer.email ? `(${selectedCustomer.email})` : ''}
+                                </SelectItem>
+                              )}
                           </SelectContent>
                         </Select>
+                        ) : (
+                          // If no customerId, show searchable combobox
+                          <Popover open={customerSearchOpen} onOpenChange={setCustomerSearchOpen}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={customerSearchOpen}
+                                className="w-full justify-between text-sm sm:text-base h-9 sm:h-10"
+                              >
+                                {selectedCustomer ? (
+                                  <span className="truncate">
+                                    {selectedCustomer.name} 
+                                    {selectedCustomer.email ? ` (${selectedCustomer.email})` : ''}
+                                    {selectedCustomer.phone ? ` - ${selectedCustomer.phone}` : ''}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">Select customer...</span>
+                                )}
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[400px] p-0" align="start">
+                              <Command>
+                                <CommandInput 
+                                  placeholder="Search customers by name, email, or phone..." 
+                                  value={customerSearchQuery}
+                                  onValueChange={setCustomerSearchQuery}
+                                />
+                                <CommandList>
+                                  <CommandEmpty>No customer found.</CommandEmpty>
+                                  <CommandGroup>
+                                    {allCustomers
+                                      .filter((cust: any) => {
+                                        const query = customerSearchQuery.toLowerCase();
+                                        if (!query) return true;
+                                        
+                                        const nameMatch = cust.name?.toLowerCase().includes(query);
+                                        const emailMatch = cust.email?.toLowerCase().includes(query);
+                                        const phoneMatch = cust.phone?.toLowerCase().includes(query);
+                                        return nameMatch || emailMatch || phoneMatch;
+                                      })
+                                      .map((cust: any) => (
+                                        <CommandItem
+                                          key={cust.id}
+                                          value={`${cust.name} ${cust.email || ''} ${cust.phone || ''}`}
+                                          onSelect={() => {
+                                            field.onChange(cust.id);
+                                            setCustomerSearchOpen(false);
+                                            setCustomerSearchQuery('');
+                                          }}
+                                        >
+                                          <Check
+                                            className={cn(
+                                              "mr-2 h-4 w-4",
+                                              field.value === cust.id ? "opacity-100" : "opacity-0"
+                                            )}
+                                          />
+                                          <div className="flex flex-col">
+                                            <span className="font-medium">{cust.name}</span>
+                                            {cust.email && (
+                                              <span className="text-xs text-muted-foreground">{cust.email}</span>
+                                            )}
+                                            {cust.phone && (
+                                              <span className="text-xs text-muted-foreground">{cust.phone}</span>
+                                            )}
+                                            {cust.credit_period_days && (
+                                              <span className="text-xs text-muted-foreground">
+                                                Credit: {cust.credit_period_days} days
+                                              </span>
+                                            )}
+                                          </div>
+                                        </CommandItem>
+                                      ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
+                        )}
                       </FormControl>
+                      {selectedCustomer && (
+                        <FormDescription className="text-xs sm:text-sm">
+                          {selectedCustomer.credit_period_days && (
+                            <span>Credit Period: {selectedCustomer.credit_period_days} days</span>
+                          )}
+                          {selectedCustomer.credit_limit && (
+                            <span className="ml-2">Credit Limit: ₹{selectedCustomer.credit_limit.toLocaleString()}</span>
+                          )}
+                          {selectedCustomer.current_credit !== undefined && (
+                            <span className="ml-2">Current Credit: ₹{selectedCustomer.current_credit.toLocaleString()}</span>
+                          )}
+                        </FormDescription>
+                      )}
                       <FormMessage className="text-xs" />
                     </FormItem>
                   )}
@@ -596,267 +881,244 @@ export default function CreateOrder() {
                   </TabsList>
                   
                   <TabsContent value="products" className="w-full min-w-0">
-                    <div className="space-y-3 sm:space-y-4">
-                      <div className="mb-3 sm:mb-4">
-                        <h3 className="text-base sm:text-lg font-medium mb-2">Select Products</h3>
-                        
-                        {productsLoading ? (
-                          <div className="text-center py-4 text-sm sm:text-base">Loading products...</div>
-                        ) : !products || products.length === 0 ? (
-                          <div className="text-center py-4 text-sm sm:text-base">No products available</div>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                            {products.map(product => (
-                              <div 
-                                key={product?.id || 'unknown'} 
-                                className="border rounded-md p-2.5 sm:p-3 cursor-pointer hover:bg-gray-50 transition-colors min-w-0 overflow-hidden"
-                                onClick={() => addProduct(product.id)}
-                              >
-                                <div className="flex items-start gap-2 sm:gap-3 min-w-0">
-                                  {product.image_url && (
-                                    <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-md overflow-hidden flex-shrink-0">
-                                      <img
-                                        src={product.image_url}
-                                        alt={product.name}
-                                        className="w-full h-full object-cover"
-                                      />
-                                    </div>
-                                  )}
-                                  <div className="flex-grow min-w-0">
-                                    <div className="font-medium text-sm sm:text-base truncate">{product?.name || 'Unknown'}</div>
-                                    <div className="text-xs sm:text-sm text-muted-foreground truncate">{product.origin || 'N/A'}</div>
-                                    <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1 flex-wrap">
-                                      {product.sale_price ? (
-                                        <>
-                                          <span className="font-medium text-green-600 text-xs sm:text-sm">
-                                            ₹ {product.sale_price.toFixed(2)}
-                                          </span>
-                                          <span className="text-xs line-through text-muted-foreground">
-                                            ₹ {product.price.toFixed(2)}
-                                          </span>
-                                        </>
-                                      ) : (
-                                        <span className="font-medium text-xs sm:text-sm">
-                                          ₹ {product.price.toFixed(2)}
-                                        </span>
-                                      )}
-                                      <span className="text-xs text-muted-foreground">
-                                        per {product.unit || 1} {product.unit_type || 'piece'}
-                                      </span>
-                                    </div>
-                                    <div className="flex justify-between items-center mt-1 gap-2">
-                                      <div className="text-xs">
-                                        Stock:{' '}
-                                        <WarehouseStockDisplay
-                                          productId={product.id}
-                                          totalStock={product.stock_count}
-                                          compact={true}
-                                          bulkStockData={bulkStockData[product.id]}
-                                        />
-                                      </div>
-                                      <span className="text-xs px-1.5 sm:px-2 py-0.5 bg-primary/10 text-primary rounded-full whitespace-nowrap">
-                                        Click to add
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* Mobile Card View for Order Items */}
-                      <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
+                    <Card>
+                      <CardHeader className="flex flex-row items-center justify-between">
+                        <CardTitle>Order Items ({items.filter(item => item.product_id).length})</CardTitle>
+                        <Button onClick={addRow} size="sm" variant="outline">
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add Row
+                        </Button>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
                         {items.length === 0 ? (
-                          <div className="text-center py-6 text-sm text-muted-foreground">
-                            No items added to the order yet
+                          <div className="text-center py-8 text-muted-foreground text-sm">
+                            <p>No items added. Click "Add Row" to add products.</p>
+                            <Button onClick={addRow} className="mt-4" variant="outline">
+                              <Plus className="h-4 w-4 mr-2" />
+                              Add First Row
+                            </Button>
                           </div>
                         ) : (
-                          items.map((item, index) => (
-                            <Card key={`${item.product_id}-${index}`} className="p-3 w-full min-w-0 overflow-hidden">
-                              <div className="space-y-2.5 min-w-0">
-                                <div className="flex items-start gap-2.5 min-w-0">
-                                  {item.image_url && (
-                                    <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0">
-                                      <img
-                                        src={item.image_url || '/placeholder.svg'}
-                                        alt={item.product_name}
-                                        className="w-full h-full object-cover"
-                                      />
-                                    </div>
-                                  )}
-                                  <div className="flex-1 min-w-0">
-                                    <div className="font-medium text-sm mb-1 break-words">{item.product_name}</div>
-                                    <div className="text-xs text-muted-foreground mb-2">
-                                      {item.origin || 'N/A'} • Stock: {item.stock_count || 'N/A'}
-                                    </div>
-                                    <div className="text-base font-bold text-green-600 mb-2">
-                                      ₹ {item.subtotal.toFixed(2)}
-                                    </div>
-                                  </div>
+                          <div className="space-y-2">
+                            <div className="overflow-x-auto">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead className="min-w-[150px]">Product Code</TableHead>
+                                    <TableHead className="min-w-[200px]">Product Name</TableHead>
+                                    <TableHead className="min-w-[150px]">Variant</TableHead>
+                                    <TableHead className="min-w-[100px]">HSN Code</TableHead>
+                                    <TableHead className="min-w-[80px]">Qty</TableHead>
+                                    <TableHead className="min-w-[80px]">Unit</TableHead>
+                                    <TableHead className="min-w-[100px]">Price</TableHead>
+                                    <TableHead className="min-w-[80px]">Tax %</TableHead>
+                                    <TableHead className="min-w-[100px]">Warehouse</TableHead>
+                                    <TableHead className="min-w-[120px]">Total</TableHead>
+                                    <TableHead className="w-[50px]"></TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {items.map((item) => {
+                                    const taxAmount = item.product_id ? (item.quantity * item.unit_price * (item.tax_percentage || 0)) / 100 : 0;
+                                    // Use line_total from item to ensure consistency
+                                    const totalWithTax = item.line_total || 0;
+                                    return (
+                                      <TableRow key={item.id}>
+                                        <TableCell className="text-sm">
+                                          {item.product_code || '-'}
+                                        </TableCell>
+                                        <TableCell>
+                                          <Popover 
+                                            open={productSearchOpen[item.id] || false} 
+                                            onOpenChange={(open) => {
+                                              setProductSearchOpen(prev => ({ ...prev, [item.id]: open }));
+                                              if (!open) {
+                                                setProductSearchQuery(prev => ({ ...prev, [item.id]: '' }));
+                                              }
+                                            }}
+                                          >
+                                            <PopoverTrigger asChild>
                                   <Button 
-                                    variant="ghost" 
-                                    size="icon"
-                                    onClick={() => removeItem(index)}
-                                    className="h-8 w-8 flex-shrink-0"
-                                  >
-                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                                variant="outline"
+                                                role="combobox"
+                                                aria-expanded={productSearchOpen[item.id] || false}
+                                                className="w-full justify-between"
+                                              >
+                                                {item.product_name ? (
+                                                  <span className="truncate">{item.product_name}</span>
+                                                ) : (
+                                                  <span className="text-muted-foreground">Select product...</span>
+                                                )}
+                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                   </Button>
-                                </div>
-                                
-                                <div className="space-y-2 text-xs min-w-0 border-t pt-2">
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <div className="min-w-0">
-                                      <label className="text-muted-foreground">Qty:</label>
-                                      <Input
-                                        type="number"
-                                        min="1"
-                                        value={item.quantity}
-                                        onChange={(e) => updateQuantity(index, parseInt(e.target.value) || 1)}
-                                        className="h-8 text-xs mt-1"
-                                      />
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-[400px] p-0" align="start">
+                                              <Command>
+                                                <CommandInput 
+                                                  placeholder="Search products by name or code..." 
+                                                  value={productSearchQuery[item.id] || ''}
+                                                  onValueChange={(value) => {
+                                                    setProductSearchQuery(prev => ({ ...prev, [item.id]: value }));
+                                                  }}
+                                                />
+                                                <CommandList>
+                                                  <CommandEmpty>No product found.</CommandEmpty>
+                                                  <CommandGroup>
+                                                    {products
+                                                      .filter((product: any) => {
+                                                        const query = (productSearchQuery[item.id] || '').toLowerCase();
+                                                        if (!query) return true;
+                                                        
+                                                        const nameMatch = product.name?.toLowerCase().includes(query);
+                                                        const codeMatch = product.product_code?.toLowerCase().includes(query);
+                                                        return nameMatch || codeMatch;
+                                                      })
+                                                      .map((product: any) => {
+                                                        // Check if product is already used in another row
+                                                        const isUsedInOtherRow = items.some(
+                                                          (i) => i.product_id === product.id && i.id !== item.id
+                                                        );
+                                                        
+                                                        // Get variant information
+                                                        const variants = product.variants || [];
+                                                        const defaultVariant = variants.find((v: any) => v.is_default) || variants[0];
+                                                        const variantCount = variants.length;
+                                                        
+                                                        // Build variant display text
+                                                        let variantInfo = '';
+                                                        if (variantCount > 0) {
+                                                          if (variantCount === 1) {
+                                                            variantInfo = ` - ${defaultVariant.name} (₹${defaultVariant.price?.sale_price || 0})`;
+                                                          } else {
+                                                            const prices = variants
+                                                              .map((v: any) => v.price?.sale_price || 0)
+                                                              .filter((p: number) => p > 0);
+                                                            const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+                                                            const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
+                                                            if (minPrice === maxPrice) {
+                                                              variantInfo = ` - ${variantCount} variants (₹${minPrice})`;
+                                                            } else {
+                                                              variantInfo = ` - ${variantCount} variants (₹${minPrice}-₹${maxPrice})`;
+                                                            }
+                                                          }
+                                                        } else {
+                                                          // Fallback to product-level price if no variants
+                                                          variantInfo = ` - ₹${product.sale_price || product.price || 0}`;
+                                                        }
+                                                        
+                                                        const displayText = `${product.name}${variantInfo}${isUsedInOtherRow ? ' (Already added)' : ''}`;
+                                                        
+                                                        return (
+                                                          <CommandItem
+                                                            key={product.id}
+                                                            value={displayText}
+                                                            disabled={isUsedInOtherRow}
+                                                            onSelect={async () => {
+                                                              await updateProductForRow(item.id, product.id);
+                                                              setProductSearchOpen(prev => ({ ...prev, [item.id]: false }));
+                                                              setProductSearchQuery(prev => ({ ...prev, [item.id]: '' }));
+                                                            }}
+                                                          >
+                                                            <Check
+                                                              className={cn(
+                                                                "mr-2 h-4 w-4",
+                                                                item.product_id === product.id ? "opacity-100" : "opacity-0"
+                                                              )}
+                                                            />
+                                                            <div className="flex items-center gap-2">
+                                                              <Package className="h-4 w-4 text-muted-foreground" />
+                                                              <span className="flex-1">{displayText}</span>
                                     </div>
-                                    <div className="min-w-0">
-                                      <label className="text-muted-foreground">Discount %:</label>
-                                      <Input
-                                        type="number"
-                                        min="0"
-                                        max="100"
-                                        step="0.1"
-                                        value={item.discount || 0}
-                                        onChange={(e) => updateDiscount(index, parseFloat(e.target.value) || 0)}
-                                        className="h-8 text-xs mt-1"
-                                        placeholder="0%"
-                                      />
-                                    </div>
-                                  </div>
-                                  <div className="min-w-0">
-                                    <label className="text-muted-foreground">Warehouse:</label>
-                                    {warehousesLoading ? (
-                                      <div className="text-xs text-muted-foreground mt-1">Loading...</div>
-                                    ) : (
+                                                          </CommandItem>
+                                                        );
+                                                      })}
+                                                  </CommandGroup>
+                                                </CommandList>
+                                              </Command>
+                                            </PopoverContent>
+                                          </Popover>
+                                        </TableCell>
+                                        <TableCell>
+                                          {item.product_id ? (
                                       <Select
-                                        value={item.warehouse_id || ''}
-                                        onValueChange={(value) => updateWarehouse(index, value)}
+                                              value={item.variant_id || ''}
+                                              onValueChange={(variantId) => updateVariantForRow(item.id, variantId)}
                                       >
-                                        <SelectTrigger className="h-8 text-xs mt-1">
-                                          <SelectValue placeholder="Select warehouse" />
+                                              <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="Select variant" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                          {warehouses.map((warehouse) => (
-                                            <SelectItem key={warehouse.id} value={warehouse.id} className="text-xs">
-                                              {warehouse.code} - {warehouse.name}
+                                                {(productVariants[item.product_id] || []).map((variant: any) => (
+                                                  <SelectItem key={variant.id} value={variant.id}>
+                                                    {variant.name} {variant.is_default && '(Default)'} - ₹{variant.price?.sale_price || 0}
                                             </SelectItem>
                                           ))}
                                         </SelectContent>
                                       </Select>
-                                    )}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <label className="text-muted-foreground">Unit Price:</label>
+                                          ) : (
+                                            <span className="text-muted-foreground text-sm">Select product first</span>
+                                          )}
+                                        </TableCell>
+                                        <TableCell className="text-sm">
+                                          {item.hsn_code || '-'}
+                                        </TableCell>
+                                        <TableCell>
+                                          <div className="flex items-center gap-1">
+                                            <Button
+                                              variant="outline"
+                                              size="icon"
+                                              className="h-6 w-6"
+                                              onClick={() => updateQuantity(item.id, -1)}
+                                              disabled={!item.product_id}
+                                            >
+                                              <Minus className="h-3 w-3" />
+                                            </Button>
                                     <Input
                                       type="number"
-                                      min="0"
-                                      step="0.01"
-                                      value={item.unit_price}
-                                      onChange={(e) => updateUnitPrice(index, parseFloat(e.target.value) || 0)}
-                                      className="h-8 text-xs mt-1"
-                                    />
-                                    {item.unit_price < item.original_price && (
-                                      <div className="text-xs text-green-600 mt-1">
-                                        Save: ₹ {((item.original_price - item.unit_price) * item.quantity).toFixed(2)}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    Original: ₹ {item.original_price.toFixed(2)} per {item.unit || 1} {item.unit_type || 'piece'}
-                                  </div>
-                                </div>
-                              </div>
-                            </Card>
-                          ))
-                        )}
-                        {items.length > 0 && (
-                          <div className="flex justify-between items-center p-3 bg-muted/50 rounded-md">
-                            <span className="font-medium text-sm sm:text-base">Total:</span>
-                            <span className="font-bold text-base sm:text-lg">₹ {totalAmount.toFixed(2)}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Desktop Table View */}
-                      <div className="hidden md:block w-full min-w-0 overflow-x-auto">
-                        <div className="rounded-md border w-full min-w-0">
-                          <Table className="min-w-[800px]">
-                          <TableHeader>
-                            <TableRow>
-                                <TableHead className="px-2 w-12">Image</TableHead>
-                                <TableHead className="px-2">Product</TableHead>
-                                <TableHead className="px-2">Origin</TableHead>
-                                <TableHead className="px-2 min-w-[100px]">Stock</TableHead>
-                                <TableHead className="px-2 w-24">Quantity</TableHead>
-                                <TableHead className="px-2 w-32">Warehouse</TableHead>
-                                <TableHead className="px-2 w-32">Original Price</TableHead>
-                                <TableHead className="px-2 w-32">Discount %</TableHead>
-                                <TableHead className="px-2 w-32">Unit Price</TableHead>
-                                <TableHead className="px-2 w-32">Subtotal</TableHead>
-                                <TableHead className="px-2 w-16"></TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {items.length === 0 ? (
-                                <TableRow>
-                                  <TableCell colSpan={10} className="text-center py-6 text-sm">
-                                    No items added to the order yet
-                                  </TableCell>
-                                </TableRow>
-                              ) : (
-                                items.map((item, index) => (
-                                  <TableRow key={`${item.product_id}-${index}`}>
-                                    <TableCell className="px-2 py-2">
-                                          <div className="w-10 h-10 rounded-md overflow-hidden">
-                                            <img
-                                              src={item.image_url || '/placeholder.svg'}
-                                              alt={item.product_name}
-                                              className="w-full h-full object-cover"
+                                              value={item.quantity}
+                                              onChange={(e) => updateQuantityDirect(item.id, parseInt(e.target.value) || 1)}
+                                              className="h-8 w-16 text-center text-sm"
+                                              min="1"
+                                              step="1"
+                                              disabled={!item.product_id}
                                             />
-                                          </div>
+                                            <Button
+                                              variant="outline"
+                                              size="icon"
+                                              className="h-6 w-6"
+                                              onClick={() => updateQuantity(item.id, 1)}
+                                              disabled={!item.product_id}
+                                            >
+                                              <Plus className="h-3 w-3" />
+                                            </Button>
+                                      </div>
+                                  </TableCell>
+                                        <TableCell className="text-sm">
+                                          {item.unit || '-'}
                                         </TableCell>
-                                    <TableCell className="px-2 py-2 font-medium text-sm min-w-0">
-                                      <div className="truncate" title={item.product_name}>{item.product_name}</div>
-                                    </TableCell>
-                                    <TableCell className="px-2 py-2 text-sm">{item.origin || 'N/A'}</TableCell>
-                                    <TableCell className="px-2 py-2 text-sm">
-                                      {item.warehouse_id ? (
-                                        <WarehouseStockDisplay
-                                          productId={item.product_id}
-                                          totalStock={item.stock_count}
-                                          compact={true}
-                                          bulkStockData={bulkStockData[item.product_id]}
-                                        />
-                                      ) : (
-                                        item.stock_count || 'N/A'
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="px-2 py-2">
+                                        <TableCell>
                                       <Input
                                         type="number"
-                                        min="1"
-                                        value={item.quantity}
-                                        onChange={(e) => updateQuantity(index, parseInt(e.target.value) || 1)}
-                                        className="w-16 h-8 text-sm"
+                                            value={item.unit_price}
+                                            onChange={(e) => updatePrice(item.id, parseFloat(e.target.value) || 0)}
+                                            className="h-8 w-24 text-sm"
+                                            min="0"
+                                            step="0.01"
+                                            disabled={!item.product_id}
                                       />
                                     </TableCell>
-                                    <TableCell className="px-2 py-2">
+                                        <TableCell className="text-sm">
+                                          {item.tax_percentage ? `${item.tax_percentage}%` : '-'}
+                                        </TableCell>
+                                        <TableCell>
                                       {warehousesLoading ? (
                                         <div className="text-xs text-muted-foreground">Loading...</div>
                                       ) : (
                                         <Select
                                           value={item.warehouse_id || ''}
-                                          onValueChange={(value) => updateWarehouse(index, value)}
+                                              onValueChange={(value) => updateWarehouse(item.id, value)}
                                         >
-                                          <SelectTrigger className="w-32 h-8 text-xs">
+                                              <SelectTrigger className="w-full h-8 text-xs">
                                             <SelectValue placeholder="Select warehouse" />
                                           </SelectTrigger>
                                           <SelectContent>
@@ -869,74 +1131,42 @@ export default function CreateOrder() {
                                         </Select>
                                       )}
                                     </TableCell>
-                                    <TableCell className="px-2 py-2">
-                                      <div className="text-sm">
-                                        ₹ {item.original_price.toFixed(2)}
-                                      <div className="text-xs text-muted-foreground">
-                                        per {item.unit || 1} {item.unit_type || 'piece'}
-                                        </div>
-                                      </div>
+                                        <TableCell className="font-medium text-sm">
+                                          {item.product_id ? `₹${totalWithTax.toFixed(2)}` : '-'}
                                     </TableCell>
-                                    <TableCell className="px-2 py-2">
-                                      <Input
-                                        type="number"
-                                        min="0"
-                                        max="100"
-                                        step="0.1"
-                                        value={item.discount || 0}
-                                        onChange={(e) => updateDiscount(index, parseFloat(e.target.value) || 0)}
-                                        className="w-20 h-8 text-sm"
-                                        placeholder="0%"
-                                      />
-                                    </TableCell>
-                                    <TableCell className="px-2 py-2">
-                                      <Input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={item.unit_price}
-                                        onChange={(e) => updateUnitPrice(index, parseFloat(e.target.value) || 0)}
-                                        className="w-24 h-8 text-sm"
-                                      />
-                                      {item.unit_price < item.original_price && (
-                                        <div className="text-xs text-green-600 mt-1">
-                                          Save: ₹ {((item.original_price - item.unit_price) * item.quantity).toFixed(2)}
-                                        </div>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="px-2 py-2 font-medium text-sm">₹ {item.subtotal.toFixed(2)}</TableCell>
-                                    <TableCell className="px-2 py-2">
+                                        <TableCell>
                                       <Button 
                                         variant="ghost" 
                                             size="icon"
-                                        onClick={() => removeItem(index)}
-                                        className="h-8 w-8"
+                                            className="h-6 w-6"
+                                            onClick={() => removeItem(item.id)}
                                       >
-                                            <Trash2 className="h-4 w-4 text-destructive" />
+                                            <Trash2 className="h-4 w-4" />
                                       </Button>
                                     </TableCell>
                                   </TableRow>
-                                ))
-                              )}
-                                  
-                                  {items.length > 0 && (
-                                    <TableRow>
-                                  <TableCell colSpan={9} className="text-right font-medium px-2 py-2 text-sm">
-                                        Total:
-                                      </TableCell>
-                                  <TableCell className="font-bold px-2 py-2 text-sm sm:text-base">
-                                        ₹ {totalAmount.toFixed(2)}
-                                      </TableCell>
-                                  <TableCell className="px-2 py-2"></TableCell>
-                                    </TableRow>
-                                  )}
+                                    );
+                                  })}
                             </TableBody>
                           </Table>
                         </div>
+                            <div className="flex justify-between items-center pt-4 border-t">
+                              <Button onClick={addRow} variant="outline" size="sm">
+                                <Plus className="h-4 w-4 mr-2" />
+                                Add Row
+                              </Button>
+                              <div className="flex justify-between font-bold text-lg min-w-[200px]">
+                                <span>Total:</span>
+                                <span>₹{totalAmount.toFixed(2)}</span>
                         </div>
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
                         
                             {items.length > 0 && (
-                              <div className="flex justify-end">
+                      <div className="flex justify-end mt-4">
                                 <Button
                                   type="button"
                                   onClick={() => setActiveTab('checkout')}
@@ -946,18 +1176,31 @@ export default function CreateOrder() {
                                 </Button>
                               </div>
                             )}
-                          </div>
                         </TabsContent>
                         
                   <TabsContent value="checkout" className="w-full min-w-0">
                           {showAddressForm && (
                             <Card className="mb-4 sm:mb-6 p-3 sm:p-4 w-full min-w-0 overflow-hidden">
                               <CardContent className="p-0">
-                                <CustomerAddressForm
-                                  customerId={customerId}
-                                  onClose={() => setShowAddressForm(false)}
-                                  onAddressAdded={handleAddressAdded}
-                                />
+                                {selectedCustomerId ? (
+                                  <CustomerAddressForm
+                                    customerId={selectedCustomerId}
+                                    onClose={() => setShowAddressForm(false)}
+                                    onAddressAdded={handleAddressAdded}
+                                  />
+                                ) : (
+                                  <div className="p-4 text-center text-muted-foreground">
+                                    <p className="text-sm">Please select a customer first before adding an address.</p>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => setShowAddressForm(false)}
+                                      className="mt-4"
+                                    >
+                                      Close
+                                    </Button>
+                                  </div>
+                                )}
                               </CardContent>
                             </Card>
                           )}
@@ -982,7 +1225,13 @@ export default function CreateOrder() {
                                     <div className="text-xs sm:text-sm text-muted-foreground">No addresses found</div>
                                         ) : (
                                           <RadioGroup
-                                            onValueChange={field.onChange}
+                                            onValueChange={(value) => {
+                                              field.onChange(value);
+                                              // If "use same as shipping" is checked, update billing too
+                                              if (useSameAsShipping) {
+                                                form.setValue('billing_address_id', value);
+                                              }
+                                            }}
                                             defaultValue={field.value}
                                       className="flex flex-col space-y-2.5 sm:space-y-3"
                                           >
@@ -1013,6 +1262,84 @@ export default function CreateOrder() {
                                     <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                                           Add New Address
                                         </Button>
+                                      </div>
+                                <FormMessage className="text-xs" />
+                                    </FormItem>
+                                  )}
+                                />
+                                
+                                {/* Billing Address */}
+                                <FormField
+                                  control={form.control}
+                                  name="billing_address_id"
+                                  render={({ field }) => (
+                              <FormItem className="space-y-2 min-w-0">
+                                <div className="flex items-center justify-between mb-2">
+                                  <FormLabel className="text-xs sm:text-sm">Billing Address</FormLabel>
+                                  <div className="flex items-center space-x-2">
+                                    <Checkbox
+                                      id="use-same-address"
+                                      checked={useSameAsShipping}
+                                      onCheckedChange={(checked) => {
+                                        setUseSameAsShipping(checked as boolean);
+                                        if (checked) {
+                                          const shippingId = form.getValues('shipping_address_id');
+                                          if (shippingId) {
+                                            field.onChange(shippingId);
+                                          }
+                                        }
+                                      }}
+                                    />
+                                    <label
+                                      htmlFor="use-same-address"
+                                      className="text-xs sm:text-sm font-normal cursor-pointer"
+                                    >
+                                      Same as shipping
+                                    </label>
+                                  </div>
+                                </div>
+                                <div className="space-y-3 sm:space-y-4">
+                                        {addressesLoading ? (
+                                    <div className="text-xs sm:text-sm">Loading addresses...</div>
+                                        ) : addresses.length === 0 ? (
+                                    <div className="text-xs sm:text-sm text-muted-foreground">No addresses found</div>
+                                        ) : (
+                                          <RadioGroup
+                                            onValueChange={field.onChange}
+                                            defaultValue={field.value}
+                                            value={field.value}
+                                            disabled={useSameAsShipping}
+                                      className="flex flex-col space-y-2.5 sm:space-y-3"
+                                          >
+                                            {addresses.map(address => (
+                                        <div className={`flex items-start space-x-2.5 sm:space-x-3 border p-3 sm:p-4 rounded-md min-w-0 ${useSameAsShipping ? 'opacity-50' : ''}`} key={address.id}>
+                                          <RadioGroupItem value={address.id} id={`billing-${address.id}`} className="mt-0.5 flex-shrink-0" />
+                                                <label 
+                                                  htmlFor={`billing-${address.id}`}
+                                            className="flex-1 cursor-pointer text-xs sm:text-sm min-w-0 break-words"
+                                          >
+                                            <div className="font-medium mb-1">{address.address_type} Address</div>
+                                            <div className="break-words">{address.address_line1}</div>
+                                            {address.address_line2 && <div className="break-words">{address.address_line2}</div>}
+                                            <div className="break-words">{address.city}, {address.state}, {address.postal_code}</div>
+                                            <div className="break-words">{address.country}</div>
+                                                </label>
+                                              </div>
+                                            ))}
+                                          </RadioGroup>
+                                        )}
+                                        
+                                        {!useSameAsShipping && (
+                                          <Button 
+                                            type="button" 
+                                            variant="outline"
+                                            onClick={() => setShowAddressForm(true)}
+                                    className="w-full text-xs sm:text-sm h-9 sm:h-10"
+                                          >
+                                    <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
+                                            Add New Address
+                                          </Button>
+                                        )}
                                       </div>
                                 <FormMessage className="text-xs" />
                                     </FormItem>
@@ -1102,6 +1429,10 @@ export default function CreateOrder() {
                                     <SelectItem value="cash" className="text-sm">Cash</SelectItem>
                                     <SelectItem value="card" className="text-sm">Card</SelectItem>
                                     <SelectItem value="cheque" className="text-sm">Cheque</SelectItem>
+                                    <SelectItem value="bank_transfer" className="text-sm">Bank Transfer</SelectItem>
+                                    <SelectItem value="neft" className="text-sm">NEFT</SelectItem>
+                                    <SelectItem value="rtgs" className="text-sm">RTGS</SelectItem>
+                                    <SelectItem value="upi" className="text-sm">UPI</SelectItem>
                                       </SelectContent>
                                     </Select>
                                 <FormDescription className="text-xs sm:text-sm">
@@ -1111,6 +1442,99 @@ export default function CreateOrder() {
                                   </FormItem>
                                 )}
                               />
+                  
+                              {/* Cheque Number and Payment Date - Only show when payment method is cheque */}
+                              {paymentMethod === 'cheque' && (paymentStatus === 'full_payment' || paymentStatus === 'partial_payment') && (
+                                <>
+                                  <FormField
+                                    control={form.control}
+                                    name="cheque_no"
+                                    render={({ field }) => (
+                                      <FormItem className="min-w-0">
+                                        <FormLabel className="text-xs sm:text-sm">Cheque Number *</FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            placeholder="Enter cheque number"
+                                            className="text-sm sm:text-base h-9 sm:h-10"
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription className="text-xs sm:text-sm">
+                                          Enter the cheque number
+                                        </FormDescription>
+                                        <FormMessage className="text-xs" />
+                                      </FormItem>
+                                    )}
+                                  />
+                                  <FormField
+                                    control={form.control}
+                                    name="payment_date"
+                                    render={({ field }) => (
+                                      <FormItem className="min-w-0">
+                                        <FormLabel className="text-xs sm:text-sm">Payment Date *</FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            type="date"
+                                            className="text-sm sm:text-base h-9 sm:h-10"
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription className="text-xs sm:text-sm">
+                                          Date when the cheque was issued
+                                        </FormDescription>
+                                        <FormMessage className="text-xs" />
+                                      </FormItem>
+                                    )}
+                                  />
+                                </>
+                              )}
+                              
+                              {/* Transaction ID and Payment Date - Only show when payment method is bank transfer, NEFT, RTGS, or UPI */}
+                              {(paymentMethod === 'bank_transfer' || paymentMethod === 'neft' || paymentMethod === 'rtgs' || paymentMethod === 'upi') && 
+                               (paymentStatus === 'full_payment' || paymentStatus === 'partial_payment') && (
+                                <>
+                                  <FormField
+                                    control={form.control}
+                                    name="transaction_id"
+                                    render={({ field }) => (
+                                      <FormItem className="min-w-0">
+                                        <FormLabel className="text-xs sm:text-sm">Transaction ID / Reference Number *</FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            placeholder="Enter transaction ID or reference number"
+                                            className="text-sm sm:text-base h-9 sm:h-10"
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription className="text-xs sm:text-sm">
+                                          Enter the transaction reference number
+                                        </FormDescription>
+                                        <FormMessage className="text-xs" />
+                                      </FormItem>
+                                    )}
+                                  />
+                                  <FormField
+                                    control={form.control}
+                                    name="payment_date"
+                                    render={({ field }) => (
+                                      <FormItem className="min-w-0">
+                                        <FormLabel className="text-xs sm:text-sm">Payment Date *</FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            type="date"
+                                            className="text-sm sm:text-base h-9 sm:h-10"
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription className="text-xs sm:text-sm">
+                                          Date when the transaction occurred
+                                        </FormDescription>
+                                        <FormMessage className="text-xs" />
+                                      </FormItem>
+                                    )}
+                                  />
+                                </>
+                              )}
                   
                               {/* Partial Payment Amount (Only for Partial Payment) */}
                               {paymentStatus === 'partial_payment' && (
@@ -1152,12 +1576,12 @@ export default function CreateOrder() {
                                       <Input
                                         type="number"
                                         min="1"
-                                        max={customer?.credit_period_days || 30}
-                                        placeholder={`Max: ${customer?.credit_period_days || 30} days`}
+                                        max={selectedCustomer?.credit_period_days || 30}
+                                        placeholder={`Max: ${selectedCustomer?.credit_period_days || 30} days`}
                                       className="text-sm sm:text-base h-9 sm:h-10"
                                         onChange={(e) => {
                                           const value = parseInt(e.target.value);
-                                          if (value <= (customer?.credit_period_days || 30)) {
+                                          if (value <= (selectedCustomer?.credit_period_days || 30)) {
                                             field.onChange(value);
                                           }
                                         }}
@@ -1165,7 +1589,7 @@ export default function CreateOrder() {
                                       />
                         </FormControl>
                                   <FormDescription className="text-xs sm:text-sm">
-                                        Number of days until payment is due (Maximum: {customer?.credit_period_days || 30} days)
+                                        Number of days until payment is due (Maximum: {selectedCustomer?.credit_period_days || 30} days)
                                       </FormDescription>
                                   <FormMessage className="text-xs" />
                       </FormItem>

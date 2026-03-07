@@ -45,7 +45,7 @@ export default function BrandDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['brands'] });
       toast.success('Brand deleted successfully');
-      navigate('/admin/brands');
+      navigate('/inventory/brands');
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to delete brand');
@@ -66,7 +66,7 @@ export default function BrandDetail() {
       <div className="container mx-auto py-8 px-4">
         <div className="text-center py-12">
           <p className="text-muted-foreground">Brand not found</p>
-          <Button onClick={() => navigate('/admin/brands')} className="mt-4">
+          <Button onClick={() => navigate('/inventory/brands')} className="mt-4">
             Back to Brands
           </Button>
         </div>
@@ -112,7 +112,7 @@ export default function BrandDetail() {
   const renderProductCard = (product: Product) => (
     <Card
       className="cursor-pointer hover:bg-accent"
-      onClick={() => navigate(`/admin/products/${product.id}`)}
+      onClick={() => navigate(`/inventory/products/${product.id}`)}
     >
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-4">
@@ -142,7 +142,7 @@ export default function BrandDetail() {
       <div className="mb-6">
         <Button
           variant="ghost"
-          onClick={() => navigate('/admin/brands')}
+          onClick={() => navigate('/inventory/brands')}
           className="mb-4"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -166,7 +166,7 @@ export default function BrandDetail() {
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
-              onClick={() => navigate(`/admin/brands/${id}/edit`)}
+              onClick={() => navigate(`/inventory/brands/${id}/edit`)}
             >
               <Edit className="h-4 w-4 mr-2" />
               Edit
@@ -233,7 +233,7 @@ export default function BrandDetail() {
                 data={products}
                 renderCard={renderProductCard}
                 emptyMessage="No products found"
-                onRowClick={(product) => navigate(`/admin/products/${product.id}`)}
+                onRowClick={(product) => navigate(`/inventory/products/${product.id}`)}
               />
             )}
           </CardContent>

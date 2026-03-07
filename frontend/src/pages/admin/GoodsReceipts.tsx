@@ -71,7 +71,7 @@ export default function GoodsReceipts() {
     onSuccess: (invoice) => {
       toast.success('Invoice created successfully');
       queryClient.invalidateQueries({ queryKey: ['purchase-invoices'] });
-      navigate(`/admin/purchase-invoices/${invoice.id}`);
+      navigate(`/procurement/purchase-invoices/${invoice.id}`);
     },
     onError: (error: any) => {
       const errorMessage = error.response?.data?.error?.message || error.response?.data?.error || 'Failed to create invoice';
@@ -126,7 +126,7 @@ export default function GoodsReceipts() {
           </p>
         </div>
         {(isAdmin || isWarehouseManager) && (
-          <Button onClick={() => navigate('/admin/goods-receipts/new' + (poId ? `?po=${poId}` : ''))}>
+          <Button onClick={() => navigate('/procurement/goods-receipts/new' + (poId ? `?po=${poId}` : ''))}>
             <Plus className="h-4 w-4 mr-2" />
             Create GRN
           </Button>
@@ -211,12 +211,14 @@ export default function GoodsReceipts() {
                           <span>{grn.purchase_orders?.po_number || 'N/A'}</span>
                           {grn.purchase_order_id && (
                             <Button
+                              type="button"
                               variant="ghost"
                               size="icon"
                               className="h-6 w-6"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigate(`/admin/purchase-orders/${grn.purchase_order_id}`);
+                                e.preventDefault();
+                                navigate(`/procurement/purchase-orders/${grn.purchase_order_id}`);
                               }}
                             >
                               <ExternalLink className="h-3 w-3" />
@@ -244,12 +246,12 @@ export default function GoodsReceipts() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => navigate(`/admin/goods-receipts/${grn.id}`)}>
+                            <DropdownMenuItem onClick={() => navigate(`/procurement/goods-receipts/${grn.id}`)}>
                               <Eye className="h-4 w-4 mr-2" />
                               View Details
                             </DropdownMenuItem>
                             {isAdmin && (grn.status === 'pending' || grn.status === 'inspected') && (
-                              <DropdownMenuItem onClick={() => navigate(`/admin/goods-receipts/${grn.id}/edit`)}>
+                              <DropdownMenuItem onClick={() => navigate(`/procurement/goods-receipts/${grn.id}/edit`)}>
                                 <Pencil className="h-4 w-4 mr-2" />
                                 Edit GRN
                               </DropdownMenuItem>
@@ -276,7 +278,7 @@ export default function GoodsReceipts() {
                               <DropdownMenuItem 
                                 onClick={() => {
                                   const invoice = allInvoices.find((inv: any) => inv.goods_receipt_id === grn.id);
-                                  if (invoice) navigate(`/admin/purchase-invoices/${invoice.id}`);
+                                  if (invoice) navigate(`/procurement/purchase-invoices/${invoice.id}`);
                                 }}
                               >
                                 <FileText className="h-4 w-4 mr-2" />
@@ -284,7 +286,7 @@ export default function GoodsReceipts() {
                               </DropdownMenuItem>
                             )}
                             {grn.purchase_order_id && (
-                              <DropdownMenuItem onClick={() => navigate(`/admin/purchase-orders/${grn.purchase_order_id}`)}>
+                              <DropdownMenuItem onClick={() => navigate(`/procurement/purchase-orders/${grn.purchase_order_id}`)}>
                                 <ExternalLink className="h-4 w-4 mr-2" />
                                 View PO
                               </DropdownMenuItem>

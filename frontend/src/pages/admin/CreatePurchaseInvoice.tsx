@@ -190,7 +190,7 @@ export default function CreatePurchaseInvoice() {
       toast.success('Invoice created successfully from GRN');
       queryClient.invalidateQueries({ queryKey: ['purchase-invoices'] });
       queryClient.invalidateQueries({ queryKey: ['invoice-by-grn', goodsReceiptId] });
-      navigate(`/admin/purchase-invoices/${invoice.id}`);
+      navigate(`/procurement/purchase-invoices/${invoice.id}`);
     },
     onError: (error: any) => {
       handleApiError(error, 'create invoice from GRN', ['accounts', 'admin']);
@@ -377,7 +377,7 @@ export default function CreatePurchaseInvoice() {
             </div>
             <Button
               variant="outline"
-              onClick={() => navigate(`/admin/purchase-invoices/${existingInvoice.id}`)}
+              onClick={() => navigate(`/procurement/purchase-invoices/${existingInvoice.id}`)}
               className="ml-4"
             >
               <ExternalLink className="h-4 w-4 mr-2" />
@@ -634,7 +634,7 @@ export default function CreatePurchaseInvoice() {
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6"
-                          onClick={() => navigate(`/admin/goods-receipts/${selectedGRN.id}`)}
+                          onClick={() => navigate(`/procurement/goods-receipts/${selectedGRN.id}`)}
                         >
                           <ExternalLink className="h-3 w-3" />
                         </Button>

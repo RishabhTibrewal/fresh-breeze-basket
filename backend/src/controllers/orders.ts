@@ -7,6 +7,7 @@ import { scheduleOrderProcessing } from '../utils/orderScheduler';
 import { hasAnyRole } from '../utils/roles';
 import { OrderService } from '../services/core/OrderService';
 import { ProductService } from '../services/core/ProductService';
+import { PaymentService } from '../services/core/PaymentService';
 
 // Get all orders (admin only)
 export const getOrders = async (req: Request, res: Response) => {
@@ -23,6 +24,7 @@ export const getOrders = async (req: Request, res: Response) => {
       order_type,
       order_source,
       fulfillment_type,
+      original_order_id,
     } = req.query as {
       status?: string;
       from_date?: string;
@@ -32,6 +34,7 @@ export const getOrders = async (req: Request, res: Response) => {
       order_type?: string;
       order_source?: string;
       fulfillment_type?: string;
+      original_order_id?: string;
     };
     const userId = req.user.id;
     const userRoles = req.user?.roles || [];
@@ -91,6 +94,9 @@ export const getOrders = async (req: Request, res: Response) => {
     }
     if (fulfillment_type) {
       countQuery = countQuery.eq('fulfillment_type', fulfillment_type);
+    }
+    if (original_order_id) {
+      countQuery = countQuery.eq('original_order_id', original_order_id);
     }
     
     if (customerUserIds) {
@@ -155,6 +161,9 @@ export const getOrders = async (req: Request, res: Response) => {
     }
     if (fulfillment_type) {
       query = query.eq('fulfillment_type', fulfillment_type);
+    }
+    if (original_order_id) {
+      query = query.eq('original_order_id', original_order_id);
     }
     
     // Apply sorting
@@ -760,7 +769,10 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       notes,
       payment_status,
       payment_method,
-      partial_payment_amount
+      partial_payment_amount,
+      transaction_id,
+      cheque_no,
+      payment_date
     } = req.body;
     if (!req.user) {
       throw new ApiError(401, 'Authentication required');
@@ -912,9 +924,13 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     
     // If payment status is changing and a payment method is provided, update credit_periods and customers tables
     if (isPaymentStatusChanging) {
+      // Declare variables outside try-catch so they're accessible for payment record creation
+      let creditPeriod: any = null;
+      let paymentAmountToProcess = 0;
+      
       try {
         // Find associated credit period
-        const { data: creditPeriod, error: creditError } = await (supabaseAdmin || supabase)
+        const { data: foundCreditPeriod, error: creditError } = await (supabaseAdmin || supabase)
           .from('credit_periods')
           .select('*')
           .eq('order_id', id)
@@ -923,13 +939,12 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           
         if (creditError) {
           console.error('Error finding credit period for order:', creditError);
-        } else if (creditPeriod) {
+        } else if (foundCreditPeriod) {
+          creditPeriod = foundCreditPeriod;
           console.log('Found credit period:', creditPeriod);
           
           // Prepare credit period update data
           const creditUpdateData: any = {};
-          
-          let paymentAmountToProcess = 0;
           
           // Helper to append to existing description instead of overwriting
           const appendDescription = (entry: string) => {
@@ -940,13 +955,13 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           // Handle different payment scenarios
           if (dbPaymentStatus === 'paid') {
             // Full payment - set amount to 0
-            paymentAmountToProcess = parseFloat(creditPeriod.amount.toString());
+            paymentAmountToProcess = parseFloat(foundCreditPeriod.amount.toString());
             creditUpdateData.amount = 0;
             creditUpdateData.description = appendDescription(
               `Fully paid off on ${new Date().toISOString().split('T')[0]} via ${payment_method}`
             );
           } else if (dbPaymentStatus === 'partial' && partial_payment_amount) {
-            const currentAmount = parseFloat(creditPeriod.amount.toString());
+            const currentAmount = parseFloat(foundCreditPeriod.amount.toString());
             // Ensure payment amount is a number
             const parsedPaymentAmount = parseFloat(partial_payment_amount.toString());
             
@@ -971,13 +986,13 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           
           // Only proceed with updates if there's a valid payment amount or we're marking as paid
           if (paymentAmountToProcess > 0 || dbPaymentStatus === 'paid') {
-            console.log('[OrderUpdate] Attempting to update credit_periods for ID:', creditPeriod.id, 'with data:', JSON.stringify(creditUpdateData));
+            console.log('[OrderUpdate] Attempting to update credit_periods for ID:', foundCreditPeriod.id, 'with data:', JSON.stringify(creditUpdateData));
             
             // Update credit period
             const { data: updatedCpData, error: updateCreditError } = await (supabaseAdmin || supabase)
               .from('credit_periods')
               .update(creditUpdateData)
-              .eq('id', creditPeriod.id)
+              .eq('id', foundCreditPeriod.id)
               .eq('company_id', req.companyId)
               .select(); // Added .select() to get the result of the update
 
@@ -996,8 +1011,10 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
                 
               if (customerError) {
                 console.error('Error finding customer:', customerError);
-              } else if (customer && paymentAmountToProcess > 0) {
-                // Update customer's current_credit
+              } else if (customer) {
+                // Update customer's current_credit when payment is processed
+                // For 'paid' status, we always update even if amount is 0 (to ensure consistency)
+                if (paymentAmountToProcess > 0 || dbPaymentStatus === 'paid') {
                 const currentCredit = parseFloat(customer.current_credit.toString());
                 const newCreditAmount = Math.max(0, currentCredit - paymentAmountToProcess);
                 
@@ -1010,7 +1027,12 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
                 if (customerUpdateError) {
                   console.error('Error updating customer credit:', customerUpdateError);
                 } else {
-                  console.log('Customer current credit updated successfully to:', newCreditAmount);
+                    console.log('Customer current credit updated successfully:', {
+                      previous: currentCredit,
+                      paymentProcessed: paymentAmountToProcess,
+                      new: newCreditAmount
+                    });
+                  }
                 }
               }
             }
@@ -1019,6 +1041,129 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       } catch (e) {
         console.error('Error handling credit period and customer updates:', e);
         // Don't throw an error as the order update was successful
+      }
+      
+      // Create payment record in payments table
+      // Create record if:
+      // 1. Payment status is changing
+      // 2. Payment status is not 'credit'
+      // 3. Either we have a payment amount to process (from credit period) OR it's a full payment without credit period
+      if (isPaymentStatusChanging && dbPaymentStatus !== 'credit') {
+        // Determine payment amount: use paymentAmountToProcess if available, otherwise use order total for full payments
+        let finalPaymentAmount = paymentAmountToProcess;
+        if (finalPaymentAmount === 0 && dbPaymentStatus === 'paid') {
+          // For full payment without credit period, use order total amount
+          finalPaymentAmount = parseFloat(currentOrder.total_amount.toString());
+        } else if (finalPaymentAmount === 0 && dbPaymentStatus === 'partial' && partial_payment_amount) {
+          // For partial payment without credit period, use the partial payment amount
+          finalPaymentAmount = parseFloat(partial_payment_amount.toString());
+        }
+        
+        // Only create payment record if we have a valid amount
+        if (finalPaymentAmount > 0) {
+          try {
+            const paymentService = new PaymentService(req.companyId!);
+            
+            const paymentId = await paymentService.processPayment({
+              orderId: id,
+              amount: finalPaymentAmount,
+              paymentMethod: payment_method || 'cash', // Default to cash for sales orders
+              status: 'completed',
+              transactionId: transaction_id,
+              chequeNo: cheque_no,
+              paymentDate: payment_date,
+              paymentGatewayResponse: {
+                source: 'sales_order_update',
+                created_by: userId,
+                created_at: new Date().toISOString(),
+                payment_type: dbPaymentStatus === 'paid' ? 'full_payment' : 'partial_payment',
+                credit_period_id: creditPeriod?.id || null
+              },
+              transactionReferences: {
+                order_payment_status: dbPaymentStatus,
+                credit_period_id: creditPeriod?.id || null,
+                sales_order: true
+              }
+            });
+            
+            if (paymentId) {
+              console.log('Payment record created successfully for sales order:', paymentId);
+            } else {
+              console.error('Failed to create payment record for sales order');
+            }
+          } catch (paymentError) {
+            console.error('Error creating payment record:', paymentError);
+            // Don't fail the order update if payment record creation fails
+          }
+        }
+        
+        // Recalculate order payment_status based on total paid amount (after payment record creation)
+        try {
+          // Calculate total paid amount for this order (sum of all completed payments)
+          const { data: allPayments, error: paymentsError } = await (supabaseAdmin || supabase)
+            .from('payments')
+            .select('amount, status')
+            .eq('order_id', id)
+            .eq('company_id', req.companyId);
+
+          if (!paymentsError && allPayments) {
+            // Sum only completed payments
+            const totalPaid = allPayments
+              .filter(p => p.status === 'completed')
+              .reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+
+            const orderTotal = parseFloat(currentOrder.total_amount.toString());
+            
+            // Determine new payment status based on total paid amount
+            // Use the current payment_status from the database (data) as the baseline
+            const currentDbPaymentStatus = data.payment_status;
+            let newPaymentStatus = currentDbPaymentStatus;
+            
+            if (totalPaid >= orderTotal) {
+              // Fully paid - always set to 'paid' regardless of previous status
+              newPaymentStatus = 'paid';
+            } else if (totalPaid > 0) {
+              // Partially paid - set to 'partial'
+              // This applies even if order was previously 'credit' (now it's partially paid, partially on credit)
+              newPaymentStatus = 'partial';
+            } else {
+              // No payments yet - only update if not 'credit'
+              if (currentDbPaymentStatus !== 'credit') {
+                newPaymentStatus = 'pending';
+              }
+            }
+
+            // Update order payment_status if it changed from what's currently in the database
+            if (newPaymentStatus !== currentDbPaymentStatus) {
+              const { error: orderStatusUpdateError } = await (supabaseAdmin || supabase)
+                .from('orders')
+                .update({
+                  payment_status: newPaymentStatus,
+                  updated_at: new Date()
+                })
+                .eq('id', id)
+                .eq('company_id', req.companyId);
+
+              if (orderStatusUpdateError) {
+                console.error('[OrderUpdate] Error updating order payment_status:', orderStatusUpdateError);
+              } else {
+                console.log('[OrderUpdate] Order payment_status recalculated and updated:', {
+                  order_id: id,
+                  previous: data.payment_status || currentOrder.payment_status,
+                  new: newPaymentStatus,
+                  totalPaid,
+                  orderTotal
+                });
+                
+                // Update the data object that will be returned
+                data.payment_status = newPaymentStatus;
+              }
+            }
+          }
+        } catch (orderStatusUpdateError) {
+          console.error('[OrderUpdate] Error recalculating order payment_status:', orderStatusUpdateError);
+          // Don't throw error as order update was successful
+        }
       }
     }
     

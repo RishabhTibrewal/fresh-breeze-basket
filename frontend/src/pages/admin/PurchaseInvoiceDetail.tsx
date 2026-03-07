@@ -113,7 +113,7 @@ export default function PurchaseInvoiceDetail() {
           {isAdmin && invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
             <Button
               variant="outline"
-              onClick={() => navigate(`/admin/purchase-invoices/${invoice.id}/edit`)}
+              onClick={() => navigate(`/procurement/purchase-invoices/${invoice.id}/edit`)}
             >
               <Pencil className="h-4 w-4 mr-2" />
               Edit
@@ -169,7 +169,7 @@ export default function PurchaseInvoiceDetail() {
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
-                        onClick={() => navigate(`/admin/purchase-orders/${invoice.purchase_order_id}`)}
+                        onClick={() => navigate(`/procurement/purchase-orders/${invoice.purchase_order_id}`)}
                       >
                         <ExternalLink className="h-3 w-3" />
                       </Button>
@@ -187,7 +187,7 @@ export default function PurchaseInvoiceDetail() {
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
-                        onClick={() => navigate(`/admin/goods-receipts/${invoice.goods_receipt_id}`)}
+                        onClick={() => navigate(`/procurement/goods-receipts/${invoice.goods_receipt_id}`)}
                       >
                         <ExternalLink className="h-3 w-3" />
                       </Button>
@@ -345,7 +345,7 @@ export default function PurchaseInvoiceDetail() {
                       <TableRow 
                         key={payment.id}
                         className="cursor-pointer hover:bg-muted"
-                        onClick={() => navigate(`/admin/supplier-payments/${payment.id}`)}
+                        onClick={() => navigate(`/procurement/supplier-payments/${payment.id}`)}
                       >
                         <TableCell className="font-medium">{payment.payment_number}</TableCell>
                         <TableCell>
@@ -427,7 +427,7 @@ export default function PurchaseInvoiceDetail() {
               {(isAdmin || isAccounts) && (
                 <Button
                   className="w-full"
-                  onClick={() => navigate(`/admin/supplier-payments/new?invoice=${id}`)}
+                  onClick={() => navigate(`/procurement/supplier-payments/new?invoice=${id}`)}
                   disabled={balance === 0}
                 >
                   <DollarSign className="h-4 w-4 mr-2" />

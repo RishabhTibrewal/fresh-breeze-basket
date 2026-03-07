@@ -22,6 +22,10 @@ export class PaymentService {
     stripePaymentIntentId?: string;
     paymentGatewayResponse?: any;
     transactionReferences?: any;
+    transactionId?: string;
+    chequeNo?: string;
+    paymentDate?: string;
+    preserveOrderPaymentStatus?: boolean; // If true, don't update order payment_status
   }): Promise<string | null> {
     try {
       const {
@@ -32,6 +36,10 @@ export class PaymentService {
         stripePaymentIntentId,
         paymentGatewayResponse,
         transactionReferences,
+        transactionId,
+        chequeNo,
+        paymentDate,
+        preserveOrderPaymentStatus = false,
       } = params;
 
       // Create payment record
@@ -45,6 +53,9 @@ export class PaymentService {
           stripe_payment_intent_id: stripePaymentIntentId || null,
           payment_gateway_response: paymentGatewayResponse || null,
           transaction_references: transactionReferences || null,
+          transaction_id: transactionId || null,
+          cheque_no: chequeNo || null,
+          payment_date: paymentDate || null,
           company_id: this.companyId,
         })
         .select('id')
@@ -55,8 +66,11 @@ export class PaymentService {
         return null;
       }
 
-      // Update order payment status
-      await this.updateOrderPaymentStatus(orderId, status === 'completed' ? 'paid' : 'pending');
+      // Update order payment status only if not preserving existing status
+      // This prevents overwriting 'partial' with 'paid' when creating payment records during order creation
+      if (!preserveOrderPaymentStatus) {
+        await this.updateOrderPaymentStatus(orderId, status === 'completed' ? 'paid' : 'pending');
+      }
 
       return payment.id;
     } catch (error) {

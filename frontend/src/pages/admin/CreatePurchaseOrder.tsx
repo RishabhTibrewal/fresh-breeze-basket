@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Plus, Trash2, Minus } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Minus, Check, ChevronsUpDown, Package } from "lucide-react";
 import { toast } from "sonner";
 import { purchaseOrdersService } from '@/api/purchaseOrders';
 import { suppliersService } from '@/api/suppliers';
@@ -33,8 +33,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 interface OrderItem {
   id: string; // Unique ID for each row
@@ -89,6 +103,10 @@ export default function CreatePurchaseOrder() {
 
   // State to store variants for each product
   const [productVariants, setProductVariants] = useState<Record<string, any[]>>({});
+  
+  // State for product search combobox
+  const [productSearchOpen, setProductSearchOpen] = useState<Record<string, boolean>>({});
+  const [productSearchQuery, setProductSearchQuery] = useState<Record<string, string>>({});
 
 
   // Fetch existing purchase order if in edit mode
@@ -140,7 +158,7 @@ export default function CreatePurchaseOrder() {
       toast.success(isEditMode ? 'Purchase order updated successfully' : 'Purchase order created successfully');
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['purchase-order', id] });
-      navigate('/admin/purchase-orders');
+      navigate('/procurement/purchase-orders');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.error || `Failed to ${isEditMode ? 'update' : 'create'} purchase order`);
@@ -384,7 +402,7 @@ export default function CreatePurchaseOrder() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate('/admin/purchase-orders')}
+          onClick={() => navigate('/procurement/purchase-orders')}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -512,62 +530,115 @@ export default function CreatePurchaseOrder() {
                             {item.product_code || '-'}
                           </TableCell>
                           <TableCell>
-                            <Select
-                              value={item.product_id || ''}
-                              onValueChange={async (productId) => {
-                                await updateProductForRow(item.id, productId);
+                            <Popover 
+                              open={productSearchOpen[item.id] || false} 
+                              onOpenChange={(open) => {
+                                setProductSearchOpen(prev => ({ ...prev, [item.id]: open }));
+                                if (!open) {
+                                  setProductSearchQuery(prev => ({ ...prev, [item.id]: '' }));
+                                }
                               }}
                             >
-                              <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Select product" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {products.map((product: any) => {
-                                  // Check if product is already used in another row
-                                  const isUsedInOtherRow = items.some(
-                                    (i) => i.product_id === product.id && i.id !== item.id
-                                  );
-                                  
-                                  // Get variant information
-                                  const variants = product.variants || [];
-                                  const defaultVariant = variants.find((v: any) => v.is_default) || variants[0];
-                                  const variantCount = variants.length;
-                                  
-                                  // Build variant display text
-                                  let variantInfo = '';
-                                  if (variantCount > 0) {
-                                    if (variantCount === 1) {
-                                      variantInfo = ` - ${defaultVariant.name} (₹${defaultVariant.price?.sale_price || 0})`;
-                                    } else {
-                                      const prices = variants
-                                        .map((v: any) => v.price?.sale_price || 0)
-                                        .filter((p: number) => p > 0);
-                                      const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
-                                      const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
-                                      if (minPrice === maxPrice) {
-                                        variantInfo = ` - ${variantCount} variants (₹${minPrice})`;
-                                      } else {
-                                        variantInfo = ` - ${variantCount} variants (₹${minPrice}-₹${maxPrice})`;
-                                      }
-                                    }
-                                  } else {
-                                    // Fallback to product-level price if no variants
-                                    variantInfo = ` - ₹${product.sale_price || product.price || 0}`;
-                                  }
-                                  
-                                  return (
-                                    <SelectItem 
-                                      key={product.id} 
-                                      value={product.id}
-                                      disabled={isUsedInOtherRow}
-                                    >
-                                      {product.name}{variantInfo}
-                                      {isUsedInOtherRow && ' (Already added)'}
-                                    </SelectItem>
-                                  );
-                                })}
-                              </SelectContent>
-                            </Select>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  role="combobox"
+                                  aria-expanded={productSearchOpen[item.id] || false}
+                                  className="w-full justify-between"
+                                >
+                                  {item.product_name ? (
+                                    <span className="truncate">{item.product_name}</span>
+                                  ) : (
+                                    <span className="text-muted-foreground">Select product...</span>
+                                  )}
+                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-[400px] p-0" align="start">
+                                <Command>
+                                  <CommandInput 
+                                    placeholder="Search products by name or code..." 
+                                    value={productSearchQuery[item.id] || ''}
+                                    onValueChange={(value) => {
+                                      setProductSearchQuery(prev => ({ ...prev, [item.id]: value }));
+                                    }}
+                                  />
+                                  <CommandList>
+                                    <CommandEmpty>No product found.</CommandEmpty>
+                                    <CommandGroup>
+                                      {products
+                                        .filter((product: any) => {
+                                          const query = (productSearchQuery[item.id] || '').toLowerCase();
+                                          if (!query) return true;
+                                          
+                                          const nameMatch = product.name?.toLowerCase().includes(query);
+                                          const codeMatch = product.product_code?.toLowerCase().includes(query);
+                                          return nameMatch || codeMatch;
+                                        })
+                                        .map((product: any) => {
+                                          // Check if product is already used in another row
+                                          const isUsedInOtherRow = items.some(
+                                            (i) => i.product_id === product.id && i.id !== item.id
+                                          );
+                                          
+                                          // Get variant information
+                                          const variants = product.variants || [];
+                                          const defaultVariant = variants.find((v: any) => v.is_default) || variants[0];
+                                          const variantCount = variants.length;
+                                          
+                                          // Build variant display text
+                                          let variantInfo = '';
+                                          if (variantCount > 0) {
+                                            if (variantCount === 1) {
+                                              variantInfo = ` - ${defaultVariant.name} (₹${defaultVariant.price?.sale_price || 0})`;
+                                            } else {
+                                              const prices = variants
+                                                .map((v: any) => v.price?.sale_price || 0)
+                                                .filter((p: number) => p > 0);
+                                              const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+                                              const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
+                                              if (minPrice === maxPrice) {
+                                                variantInfo = ` - ${variantCount} variants (₹${minPrice})`;
+                                              } else {
+                                                variantInfo = ` - ${variantCount} variants (₹${minPrice}-₹${maxPrice})`;
+                                              }
+                                            }
+                                          } else {
+                                            // Fallback to product-level price if no variants
+                                            variantInfo = ` - ₹${product.sale_price || product.price || 0}`;
+                                          }
+                                          
+                                          const displayText = `${product.name}${variantInfo}${isUsedInOtherRow ? ' (Already added)' : ''}`;
+                                          
+                                          return (
+                                            <CommandItem
+                                              key={product.id}
+                                              value={displayText}
+                                              disabled={isUsedInOtherRow}
+                                              onSelect={async () => {
+                                                await updateProductForRow(item.id, product.id);
+                                                setProductSearchOpen(prev => ({ ...prev, [item.id]: false }));
+                                                setProductSearchQuery(prev => ({ ...prev, [item.id]: '' }));
+                                              }}
+                                            >
+                                              <Check
+                                                className={cn(
+                                                  "mr-2 h-4 w-4",
+                                                  item.product_id === product.id ? "opacity-100" : "opacity-0"
+                                                )}
+                                              />
+                                              <div className="flex items-center gap-2">
+                                                <Package className="h-4 w-4 text-muted-foreground" />
+                                                <span className="flex-1">{displayText}</span>
+                                              </div>
+                                            </CommandItem>
+                                          );
+                                        })}
+                                    </CommandGroup>
+                                  </CommandList>
+                                </Command>
+                              </PopoverContent>
+                            </Popover>
                           </TableCell>
                           <TableCell>
                             {item.product_id ? (
@@ -702,7 +773,7 @@ export default function CreatePurchaseOrder() {
           <Button
             variant="outline"
             className="w-full"
-            onClick={() => navigate('/admin/purchase-orders')}
+            onClick={() => navigate('/procurement/purchase-orders')}
           >
             Cancel
           </Button>

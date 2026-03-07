@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { ApiError } from '../middleware/error';
 import { stripe } from '../config/stripe';
 import { PaymentService } from '../services/core/PaymentService';
+import { hasAnyRole } from '../utils/roles';
 
 // Create a payment intent
 export const createPaymentIntent = async (req: Request, res: Response) => {
@@ -611,7 +612,10 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       amount, 
       payment_method, 
       stripe_payment_intent_id,
-      status = 'completed'
+      status = 'completed',
+      transaction_id,
+      cheque_no,
+      payment_date
     } = req.body;
     const userId = req.user?.id;
 
@@ -623,100 +627,176 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Order ID, amount, and payment method are required');
     }
 
-    // Verify the order belongs to the user
+    if (!userId) {
+      throw new ApiError(401, 'Authentication required');
+    }
+
+    // Check roles - admin and sales can create payments
+    const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
+    const isSales = await hasAnyRole(userId, req.companyId, ['sales']);
+
+    if (!isAdmin && !isSales) {
+      throw new ApiError(403, 'Admin or Sales access required');
+    }
+
+    // Fetch the order
     const { data: order, error: orderError } = await (supabaseAdmin || supabase)
       .from('orders')
-      .select('id, user_id, total_amount')
+      .select('id, user_id, total_amount, payment_status')
       .eq('id', order_id)
-      .eq('user_id', userId)
       .eq('company_id', req.companyId)
       .single();
 
     if (orderError || !order) {
-      throw new ApiError(404, 'Order not found or not authorized');
+      throw new ApiError(404, 'Order not found');
     }
 
-    // Validate amount matches order total (with some tolerance for rounding)
+    // Verify authorization: For sales executives, check if order belongs to their customers
+    if (!isAdmin && isSales) {
+      const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
+        .from('customers')
+        .select('sales_executive_id')
+        .eq('user_id', order.user_id)
+        .eq('company_id', req.companyId)
+        .single();
+
+      if (customerError) {
+        console.error('Error fetching customer for authorization:', customerError);
+        throw new ApiError(404, 'Customer not found for this order');
+      }
+
+      if (!customer || customer.sales_executive_id !== userId) {
+        throw new ApiError(403, 'Not authorized to create payment for this order');
+      }
+    }
+
+    // Validate amount doesn't exceed order total (allow partial payments)
     const orderAmount = parseFloat(order.total_amount.toString());
     const paymentAmount = parseFloat(amount.toString());
-    if (Math.abs(orderAmount - paymentAmount) > 0.01) {
-      throw new ApiError(400, 'Payment amount does not match order total');
+    
+    if (paymentAmount <= 0) {
+      throw new ApiError(400, 'Payment amount must be greater than 0');
+    }
+    
+    if (paymentAmount > orderAmount) {
+      throw new ApiError(400, `Payment amount (${paymentAmount}) cannot exceed order total (${orderAmount})`);
     }
 
-    // Check if a payment record already exists for this order
-    const { data: existingPayment, error: checkError } = await (supabaseAdmin || supabase)
-      .from('payments')
-      .select('id, stripe_payment_intent_id')
-      .eq('order_id', order_id)
-      .eq('company_id', req.companyId)
-      .single();
+    // Only check for existing payment if we're linking a Stripe payment intent (e-commerce scenario)
+    // For manual payments (sales orders), always create a new payment record to allow multiple payments
+    if (stripe_payment_intent_id) {
+      const { data: existingPayment, error: checkError } = await (supabaseAdmin || supabase)
+        .from('payments')
+        .select('id, stripe_payment_intent_id')
+        .eq('order_id', order_id)
+        .eq('company_id', req.companyId)
+        .eq('stripe_payment_intent_id', stripe_payment_intent_id)
+        .maybeSingle();
 
-    if (existingPayment) {
-      console.log('Payment record already exists for order:', order_id);
-      
-      // If we have a stripe_payment_intent_id and the existing payment doesn't have one, update it
-      if (stripe_payment_intent_id && !existingPayment.stripe_payment_intent_id) {
-        console.log('Updating existing payment record with stripe_payment_intent_id:', stripe_payment_intent_id);
+      // If payment with this Stripe intent already exists, update it
+      if (existingPayment) {
+        console.log('Payment record already exists for Stripe payment intent:', stripe_payment_intent_id);
         
-        const { error: updateError } = await (supabaseAdmin || supabase)
-          .from('payments')
-          .update({
-            stripe_payment_intent_id: stripe_payment_intent_id,
-            updated_at: new Date()
-          })
-          .eq('id', existingPayment.id)
-          .eq('company_id', req.companyId);
+        // Recalculate order payment status based on total paid amounts (same logic as below)
+        try {
+          const { data: allPayments, error: paymentsError } = await (supabaseAdmin || supabase)
+            .from('payments')
+            .select('amount, status')
+            .eq('order_id', order_id)
+            .eq('company_id', req.companyId);
 
-        if (updateError) {
-          console.error('Error updating payment record with stripe_payment_intent_id:', updateError);
-          throw new ApiError(500, 'Error updating payment record');
-        } else {
-          console.log('Successfully updated payment record with stripe_payment_intent_id');
+          if (!paymentsError && allPayments) {
+            // Sum only completed payments
+            const totalPaid = allPayments
+              .filter(p => p.status === 'completed')
+              .reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+
+            const orderTotal = parseFloat(order.total_amount.toString());
+            
+            // Determine new payment status based on total paid amount
+            let newPaymentStatus = order.payment_status; // Keep existing status by default
+            
+            if (totalPaid >= orderTotal) {
+              // Fully paid
+              newPaymentStatus = 'paid';
+            } else if (totalPaid > 0) {
+              // Partially paid
+              newPaymentStatus = 'partial';
+            } else {
+              // No payments yet - only update if not 'credit'
+              if (order.payment_status !== 'credit') {
+                newPaymentStatus = 'pending';
+              }
+            }
+
+            // Update order payment_status if it changed
+            if (newPaymentStatus !== order.payment_status) {
+              const { error: orderUpdateError } = await (supabaseAdmin || supabase)
+                .from('orders')
+                .update({
+                  payment_status: newPaymentStatus,
+                  payment_intent_id: stripe_payment_intent_id,
+                  updated_at: new Date()
+                })
+                .eq('id', order_id)
+                .eq('company_id', req.companyId);
+
+              if (orderUpdateError) {
+                console.error('Error updating order payment status:', orderUpdateError);
+                // Don't fail the request if order update fails, but log it
+              }
+            } else {
+              // Still update payment_intent_id even if status didn't change
+              const { error: orderUpdateError } = await (supabaseAdmin || supabase)
+                .from('orders')
+                .update({
+                  payment_intent_id: stripe_payment_intent_id,
+                  updated_at: new Date()
+                })
+                .eq('id', order_id)
+                .eq('company_id', req.companyId);
+
+              if (orderUpdateError) {
+                console.error('Error updating order payment intent:', orderUpdateError);
+              }
+            }
+          }
+        } catch (statusCalcError) {
+          console.error('Error recalculating payment status for existing payment:', statusCalcError);
+          // Don't fail the request, but log the error
         }
+
+        console.log('Payment record already exists:', existingPayment.id);
+
+        return res.status(200).json({
+          success: true,
+          data: existingPayment,
+          message: 'Payment record already exists'
+        });
       }
-      
-      // Update order payment status
-      const { error: orderUpdateError } = await (supabaseAdmin || supabase)
-        .from('orders')
-        .update({
-          payment_status: 'paid',
-          payment_intent_id: stripe_payment_intent_id || existingPayment.stripe_payment_intent_id,
-          updated_at: new Date()
-        })
-        .eq('id', order_id)
-        .eq('company_id', req.companyId);
-
-      if (orderUpdateError) {
-        console.error('Error updating order payment status:', orderUpdateError);
-        // Don't fail the request if order update fails, but log it
-      }
-
-      console.log('Payment record updated successfully:', existingPayment.id);
-
-      return res.status(200).json({
-        success: true,
-        data: existingPayment,
-        message: 'Payment record updated'
-      });
     }
 
     // Create new payment record using PaymentService
     const paymentService = new PaymentService(req.companyId);
     const paymentId = await paymentService.processPayment({
       orderId: order_id,
-        amount: paymentAmount,
+      amount: paymentAmount,
       paymentMethod: payment_method,
       status: status as 'pending' | 'completed' | 'failed',
       stripePaymentIntentId: stripe_payment_intent_id || undefined,
+      transactionId: transaction_id || undefined,
+      chequeNo: cheque_no || undefined,
+      paymentDate: payment_date || undefined,
+      preserveOrderPaymentStatus: true, // Don't overwrite order payment_status when creating manually
       paymentGatewayResponse: {
-          source: 'manual_creation',
-          created_by: userId,
-          created_at: new Date().toISOString()
-        },
+        source: 'manual_creation',
+        created_by: userId,
+        created_at: new Date().toISOString()
+      },
       transactionReferences: {
-          stripe_payment_intent_id: stripe_payment_intent_id || null,
-          manual_creation: true
-        }
+        stripe_payment_intent_id: stripe_payment_intent_id || null,
+        manual_creation: true
+      }
     });
 
     if (!paymentId) {
@@ -733,6 +813,166 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
 
     console.log('Payment record created successfully:', payment.id);
 
+    // Update credit_periods table if order has a credit period
+    try {
+      // Find associated credit period
+      const { data: foundCreditPeriod, error: creditError } = await (supabaseAdmin || supabase)
+        .from('credit_periods')
+        .select('*')
+        .eq('order_id', order_id)
+        .eq('company_id', req.companyId)
+        .maybeSingle();
+        
+      if (creditError) {
+        console.error('[CreatePayment] Error finding credit period for order:', creditError);
+      } else if (foundCreditPeriod) {
+        console.log('[CreatePayment] Found credit period:', foundCreditPeriod.id);
+        
+        const currentCreditAmount = parseFloat(foundCreditPeriod.amount.toString());
+        const paymentAmountToApply = Math.min(paymentAmount, currentCreditAmount);
+        
+        if (paymentAmountToApply > 0) {
+          // Prepare credit period update data
+          const creditUpdateData: any = {};
+          
+          // Helper to append to existing description instead of overwriting
+          const appendDescription = (entry: string) => {
+            const existing = foundCreditPeriod.description || '';
+            return existing ? `${existing}\n${entry}` : entry;
+          };
+          
+          // Calculate remaining amount
+          const remainingAmount = currentCreditAmount - paymentAmountToApply;
+          
+          if (remainingAmount <= 0) {
+            // Full payment - set amount to 0
+            creditUpdateData.amount = 0;
+            creditUpdateData.description = appendDescription(
+              `Fully paid off on ${new Date().toISOString().split('T')[0]} via ${payment_method}`
+            );
+          } else {
+            // Partial payment - reduce the amount
+            creditUpdateData.amount = remainingAmount;
+            creditUpdateData.description = appendDescription(
+              `Partial payment of $${paymentAmountToApply.toFixed(2)} received on ${new Date().toISOString().split('T')[0]} via ${payment_method}. Remaining: $${remainingAmount.toFixed(2)}`
+            );
+          }
+          
+          // Update credit period
+          const { data: updatedCreditPeriod, error: updateCreditError } = await (supabaseAdmin || supabase)
+            .from('credit_periods')
+            .update(creditUpdateData)
+            .eq('id', foundCreditPeriod.id)
+            .eq('company_id', req.companyId)
+            .select();
+            
+          if (updateCreditError) {
+            console.error('[CreatePayment] Error updating credit period:', updateCreditError);
+          } else {
+            console.log('[CreatePayment] Credit period updated successfully:', updatedCreditPeriod);
+            
+            // Update customer's current_credit
+            const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
+              .from('customers')
+              .select('id, current_credit')
+              .eq('user_id', order.user_id)
+              .eq('company_id', req.companyId)
+              .single();
+              
+            if (customerError) {
+              console.error('[CreatePayment] Error finding customer:', customerError);
+            } else if (customer) {
+              const currentCredit = parseFloat(customer.current_credit.toString());
+              const newCreditAmount = Math.max(0, currentCredit - paymentAmountToApply);
+              
+              const { error: customerUpdateError } = await (supabaseAdmin || supabase)
+                .from('customers')
+                .update({ current_credit: newCreditAmount })
+                .eq('id', customer.id)
+                .eq('company_id', req.companyId);
+                
+              if (customerUpdateError) {
+                console.error('[CreatePayment] Error updating customer credit:', customerUpdateError);
+              } else {
+                console.log('[CreatePayment] Customer current credit updated successfully:', {
+                  previous: currentCredit,
+                  paymentProcessed: paymentAmountToApply,
+                  new: newCreditAmount
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch (creditUpdateError) {
+      console.error('[CreatePayment] Error handling credit period update:', creditUpdateError);
+      // Don't throw error as payment was created successfully
+    }
+
+    // Update order payment_status based on total paid amount
+    try {
+      // Calculate total paid amount for this order (sum of all completed payments)
+      const { data: allPayments, error: paymentsError } = await (supabaseAdmin || supabase)
+        .from('payments')
+        .select('amount, status')
+        .eq('order_id', order_id)
+        .eq('company_id', req.companyId);
+
+      if (!paymentsError && allPayments) {
+        // Sum only completed payments
+        const totalPaid = allPayments
+          .filter(p => p.status === 'completed')
+          .reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+
+        const orderTotal = parseFloat(order.total_amount.toString());
+        
+        // Determine new payment status based on total paid amount
+        let newPaymentStatus = order.payment_status; // Keep existing status by default
+        
+        if (totalPaid >= orderTotal) {
+          // Fully paid - always set to 'paid' regardless of previous status
+          newPaymentStatus = 'paid';
+        } else if (totalPaid > 0) {
+          // Partially paid - set to 'partial'
+          // This applies even if order was previously 'full_credit' (now it's partially paid, partially on credit)
+          newPaymentStatus = 'partial';
+        } else {
+          // No payments yet - only update if not 'credit'
+          // If order is 'credit', keep it as is (no payments made yet)
+          if (order.payment_status !== 'credit') {
+            newPaymentStatus = 'pending';
+          }
+        }
+
+        // Update order payment_status if it changed
+        if (newPaymentStatus !== order.payment_status) {
+          const { error: orderUpdateError } = await (supabaseAdmin || supabase)
+            .from('orders')
+            .update({
+              payment_status: newPaymentStatus,
+              updated_at: new Date()
+            })
+            .eq('id', order_id)
+            .eq('company_id', req.companyId);
+
+          if (orderUpdateError) {
+            console.error('[CreatePayment] Error updating order payment_status:', orderUpdateError);
+          } else {
+            console.log('[CreatePayment] Order payment_status updated:', {
+              order_id,
+              previous: order.payment_status,
+              new: newPaymentStatus,
+              totalPaid,
+              orderTotal
+            });
+          }
+        }
+      }
+    } catch (orderStatusUpdateError) {
+      console.error('[CreatePayment] Error updating order payment_status:', orderStatusUpdateError);
+      // Don't throw error as payment was created successfully
+    }
+
     res.status(201).json({
       success: true,
       data: payment
@@ -742,6 +982,180 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       throw error;
     }
     throw new ApiError(500, 'Error creating payment record');
+  }
+};
+
+// Get all payments with optional filters (for sales module)
+export const getAllPayments = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
+    const userId = req.user.id;
+    const { order_id, status, payment_method, date_from, date_to } = req.query;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    // Check roles - only admin and sales can view all payments
+    const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
+    const isSales = await hasAnyRole(userId, req.companyId, ['sales']);
+
+    if (!isAdmin && !isSales) {
+      throw new ApiError(403, 'Admin or Sales access required');
+    }
+
+    // Get customer user IDs if user is sales (not admin)
+    let customerUserIds: string[] | null = null;
+    if (isSales && !isAdmin) {
+      const { data: customers } = await (supabaseAdmin || supabase)
+        .from('customers')
+        .select('user_id')
+        .eq('sales_executive_id', userId)
+        .eq('company_id', req.companyId);
+
+      customerUserIds = customers?.map(c => c.user_id).filter(Boolean) || [];
+
+      if (customerUserIds.length === 0) {
+        // No customers, return empty result
+        return res.json({
+          success: true,
+          data: []
+        });
+      }
+    }
+
+    // Build query for payments
+    let query = (supabaseAdmin || supabase)
+      .from('payments')
+      .select('*')
+      .eq('company_id', req.companyId)
+      .order('created_at', { ascending: false });
+
+    // If sales executive, filter by their customers' orders
+    if (customerUserIds) {
+      // Get order IDs for their customers
+      const { data: orders } = await (supabaseAdmin || supabase)
+        .from('orders')
+        .select('id')
+        .in('user_id', customerUserIds)
+        .eq('company_id', req.companyId);
+
+      const orderIds = orders?.map(o => o.id).filter(Boolean) || [];
+
+      if (orderIds.length === 0) {
+        return res.json({
+          success: true,
+          data: []
+        });
+      }
+
+      query = query.in('order_id', orderIds);
+    }
+
+    // Apply filters
+    if (order_id) {
+      query = query.eq('order_id', order_id);
+    }
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    if (payment_method) {
+      query = query.eq('payment_method', payment_method);
+    }
+
+    if (date_from) {
+      query = query.gte('payment_date', date_from);
+    }
+
+    if (date_to) {
+      query = query.lte('payment_date', date_to);
+    }
+
+    const { data: payments, error } = await query;
+
+    if (error) {
+      console.error('Error fetching payments:', error);
+      throw new ApiError(500, 'Failed to fetch payments');
+    }
+
+    // Fetch related orders
+    const paymentOrderIds = [...new Set((payments || []).map((p: any) => p.order_id).filter(Boolean))];
+    const ordersMap = new Map();
+    const orderUserIds: string[] = [];
+
+    if (paymentOrderIds.length > 0) {
+      // Fetch orders
+      const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
+        .from('orders')
+        .select('id, total_amount, payment_status, user_id, created_at')
+        .in('id', paymentOrderIds)
+        .eq('company_id', req.companyId);
+
+      if (ordersError) {
+        console.error('Error fetching orders:', ordersError);
+        // Continue without orders if there's an error
+      } else {
+        orders?.forEach((order: any) => {
+          ordersMap.set(order.id, order);
+          if (order.user_id) {
+            orderUserIds.push(order.user_id);
+          }
+        });
+      }
+    }
+
+    // Fetch customers for the user_ids
+    const customersMap = new Map();
+    if (orderUserIds.length > 0) {
+      const { data: customers, error: customersError } = await (supabaseAdmin || supabase)
+        .from('customers')
+        .select('id, user_id, name, email, phone')
+        .in('user_id', [...new Set(orderUserIds)])
+        .eq('company_id', req.companyId);
+
+      if (customersError) {
+        console.error('Error fetching customers:', customersError);
+        // Continue without customers if there's an error
+      } else {
+        customers?.forEach((customer: any) => {
+          customersMap.set(customer.user_id, customer);
+        });
+      }
+    }
+
+    // Enrich payments with related data
+    const enrichedPayments = (payments || []).map((payment: any) => {
+      const order = payment.order_id ? ordersMap.get(payment.order_id) : null;
+      const customer = order?.user_id ? customersMap.get(order.user_id) : null;
+
+      // Generate order_number similar to orders controller
+      const orderNumber = order ? `ORD-${order.id.substring(0, 8).toUpperCase()}` : null;
+
+      return {
+        ...payment,
+        order: order ? {
+          id: order.id,
+          order_number: orderNumber,
+          total_amount: order.total_amount,
+          payment_status: order.payment_status
+        } : null,
+        customer: customer || null
+      };
+    });
+
+    res.json({
+      success: true,
+      data: enrichedPayments
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, 'Error retrieving payments');
   }
 };
 

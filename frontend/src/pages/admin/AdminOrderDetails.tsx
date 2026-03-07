@@ -413,7 +413,7 @@ export default function AdminOrderDetails() {
       <div className="text-center py-12">
         <h2 className="text-2xl font-bold text-red-600 mb-2">Error</h2>
         <p className="mb-4">{(error as any)?.message || 'Failed to load order details'}</p>
-        <Button onClick={() => navigate('/admin/orders')}>Back to Orders</Button>
+        <Button onClick={() => navigate('/sales/orders')}>Back to Orders</Button>
       </div>
     );
   }
@@ -429,7 +429,7 @@ export default function AdminOrderDetails() {
             {formatDate(order.created_at)}
           </p>
         </div>
-        <Button variant="outline" onClick={() => navigate('/admin/orders')}>
+        <Button variant="outline" onClick={() => navigate('/sales/orders')}>
           Back to Orders
         </Button>
       </div>
@@ -891,7 +891,7 @@ export default function AdminOrderDetails() {
                   Download Bill
                 </Button>
               </div>
-              <Button variant="outline" onClick={() => navigate('/admin/orders')}>
+              <Button variant="outline" onClick={() => navigate('/sales/orders')}>
                 Cancel
               </Button>
               

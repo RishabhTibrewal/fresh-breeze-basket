@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from '@/components/ui/badge';
 import {
@@ -41,7 +42,7 @@ import {
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { invoicesService } from '@/api/invoices';
-import { Printer, Download } from 'lucide-react';
+import { Printer, Download, RefreshCw, RotateCcw } from 'lucide-react';
 import { ArrowLeft, Truck, AlertTriangle, Clipboard, Package, Package2, CreditCard, ChevronRight, Edit } from "lucide-react";
 import { customerService } from '@/api/customer';
 import { creditPeriodService } from '@/api/creditPeriod';
@@ -50,7 +51,8 @@ import apiClient from '@/lib/apiClient';
 
 // Order detail component
 export default function OrderDetail() {
-  const { orderId } = useParams<{ orderId: string }>();
+  const params = useParams<{ orderId?: string; id?: string }>();
+  const orderId = params.orderId || params.id; // Support both parameter names
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   
@@ -58,10 +60,13 @@ export default function OrderDetail() {
   const [updateStatusOpen, setUpdateStatusOpen] = useState(false);
   const [cancelOrderOpen, setCancelOrderOpen] = useState(false);
   const [viewCreditOpen, setViewCreditOpen] = useState(false);
+  const [returnOrderOpen, setReturnOrderOpen] = useState(false);
+  const [updatePaymentOpen, setUpdatePaymentOpen] = useState(false);
   
   // Form state
   const [newStatus, setNewStatus] = useState<string>('');
   const [cancelReason, setCancelReason] = useState('');
+  const [returnReason, setReturnReason] = useState('');
   
   // Get warehouses for displaying warehouse info
   const { data: warehouses = [] } = useQuery({
@@ -231,6 +236,44 @@ export default function OrderDetail() {
     },
   });
 
+  // Create return order mutation
+  const createReturnOrderMutation = useMutation({
+    mutationFn: async () => {
+      if (!order?.order_items || order.order_items.length === 0) {
+        throw new Error('No items to return');
+      }
+      
+      // Create return items from all order items
+      const returnItems = order.order_items.map((item: any) => ({
+        order_item_id: item.id,
+        quantity: item.quantity,
+        reason: returnReason || 'Return requested'
+      }));
+
+      const response = await apiClient.post('/orders/returns', {
+        original_order_id: orderId,
+        items: returnItems,
+        reason: returnReason || 'Return requested'
+      });
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success('Return order created successfully');
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['salesOrders'] });
+      setReturnOrderOpen(false);
+      setReturnReason('');
+      // Navigate to the return order if available
+      if (data?.data?.id) {
+        navigate(`/sales/orders/${data.data.id}`);
+      }
+    },
+    onError: (error: any) => {
+      console.error('Failed to create return order:', error);
+      toast.error(`Failed to create return order: ${error.response?.data?.error || error.message}`);
+    },
+  });
+
   // Helper for status badge
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -378,13 +421,13 @@ export default function OrderDetail() {
               <div className="min-w-0 w-full">
                 <h3 className="text-base sm:text-lg font-medium mb-2 sm:mb-3">Order Items</h3>
                 <div className="rounded-md border w-full min-w-0 max-w-full overflow-x-auto">
-                  <Table className="w-full min-w-[300px] sm:min-w-[400px]">
+                  <Table className="w-full min-w-[400px] sm:min-w-[600px]">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="px-2 py-2 min-w-[120px] sm:min-w-[150px]">Product</TableHead>
+                        <TableHead className="px-2 py-2 min-w-[150px] sm:min-w-[200px]">Product</TableHead>
                         <TableHead className="text-right px-2 py-2 w-16 sm:w-20">Qty</TableHead>
                         <TableHead className="px-2 py-2 w-24 sm:w-32 hidden sm:table-cell">Warehouse</TableHead>
-                        <TableHead className="text-right px-2 py-2 w-20 sm:w-24">Price</TableHead>
+                        <TableHead className="text-right px-2 py-2 w-20 sm:w-24">Unit Price</TableHead>
                         <TableHead className="text-right px-2 py-2 w-24 sm:w-28">Subtotal</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -397,6 +440,16 @@ export default function OrderDetail() {
                               <div className="truncate" title={item.product?.name || `Product ID: ${item.product_id}`}>
                               {item.product?.name || `Product ID: ${item.product_id}`}
                               </div>
+                              {item.variant_name && (
+                                <div className="text-xs text-muted-foreground mt-0.5">
+                                  Variant: {item.variant_name}
+                                </div>
+                              )}
+                              {item.product_code && (
+                                <div className="text-xs text-muted-foreground mt-0.5">
+                                  Code: {item.product_code}
+                                </div>
+                              )}
                               {item.warehouse_id && (
                                 <div className="text-xs text-muted-foreground mt-1 sm:hidden">
                                   {warehouse ? `${warehouse.code} - ${warehouse.name}` : 'Warehouse N/A'}
@@ -414,12 +467,12 @@ export default function OrderDetail() {
                                 <span className="text-muted-foreground">-</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm">${parseFloat(item.unit_price).toFixed(2)}</TableCell>
-                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm font-medium">${(item.quantity * parseFloat(item.unit_price)).toFixed(2)}</TableCell>
+                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm">${parseFloat(item.unit_price || 0).toFixed(2)}</TableCell>
+                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm font-medium">${(item.quantity * parseFloat(item.unit_price || 0)).toFixed(2)}</TableCell>
                           </TableRow>
                         );
                       })}
-                      <TableRow>
+                      <TableRow className="font-bold">
                         <TableCell colSpan={4} className="text-right font-medium px-2 py-2 text-xs sm:text-sm">Total</TableCell>
                         <TableCell className="text-right font-bold px-2 py-2 text-xs sm:text-sm md:text-base">
                           ${parseFloat(order.total_amount).toFixed(2)}
@@ -439,10 +492,79 @@ export default function OrderDetail() {
                     variant="outline" 
                     className="gap-2 text-xs sm:text-sm h-9 sm:h-10"
                     onClick={() => navigate(`/sales/orders/${orderId}/edit`)}
+                    disabled={order.status === 'cancelled'}
                   >
                     <Edit className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                     Update Order
                   </Button>
+                  
+                  {/* Update Payment Button */}
+                  <Button
+                    variant="outline"
+                    className="gap-2 text-xs sm:text-sm h-9 sm:h-10"
+                    onClick={() => navigate(`/sales/orders/${orderId}/edit`)}
+                    disabled={order.status === 'cancelled'}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    Update Payment
+                  </Button>
+                  
+                  {/* Return Order Button */}
+                  {order.status !== 'cancelled' && order.order_type === 'sales' && (
+                    <Dialog open={returnOrderOpen} onOpenChange={setReturnOrderOpen}>
+                      <DialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="gap-2 text-xs sm:text-sm h-9 sm:h-10"
+                          disabled={order.status === 'cancelled'}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                          Return Order
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="w-[95%] sm:w-full max-w-md max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                          <DialogTitle className="text-base sm:text-lg">Create Return Order</DialogTitle>
+                          <DialogDescription className="text-xs sm:text-sm">
+                            Create a return order for this order. All items will be returned.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="py-3 sm:py-4 space-y-4">
+                          <div>
+                            <label className="text-xs sm:text-sm font-medium mb-2 block">Return Reason</label>
+                            <Textarea
+                              placeholder="Enter reason for return..."
+                              value={returnReason}
+                              onChange={(e) => setReturnReason(e.target.value)}
+                              className="text-sm sm:text-base min-h-[100px]"
+                            />
+                          </div>
+                          <div className="text-xs sm:text-sm text-muted-foreground">
+                            <p className="font-medium mb-1">Items to be returned:</p>
+                            <ul className="list-disc list-inside space-y-1">
+                              {order.order_items?.map((item: any) => (
+                                <li key={item.id}>
+                                  {item.product?.name || `Product ${item.product_id}`} - Qty: {item.quantity}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                        <DialogFooter className="flex-col sm:flex-row gap-2">
+                          <DialogClose asChild>
+                            <Button variant="outline" className="w-full sm:w-auto text-sm">Cancel</Button>
+                          </DialogClose>
+                          <Button
+                            onClick={() => createReturnOrderMutation.mutate()}
+                            disabled={createReturnOrderMutation.isPending || !returnReason.trim()}
+                            className="w-full sm:w-auto text-sm"
+                          >
+                            {createReturnOrderMutation.isPending ? 'Creating...' : 'Create Return Order'}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  )}
                   
                   {/* Print Invoice Button */}
                   <Button
@@ -461,7 +583,7 @@ export default function OrderDetail() {
                     Print Invoice
                   </Button>
                   
-                  {/* Download Bill Button */}
+                  {/* Download Invoice Button */}
                   <Button
                     variant="outline"
                     className="gap-2 text-xs sm:text-sm h-9 sm:h-10"
@@ -469,12 +591,12 @@ export default function OrderDetail() {
                       try {
                         await invoicesService.downloadCustomerBill(orderId!);
                       } catch (error) {
-                        toast.error('Failed to download bill');
+                        toast.error('Failed to download invoice');
                       }
                     }}
                   >
                     <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                    Download Bill
+                    Download Invoice
                   </Button>
                   
                   {/* Update Status Dialog
@@ -657,19 +779,52 @@ export default function OrderDetail() {
           
           <Card className="w-full min-w-0 max-w-full overflow-x-hidden">
             <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
-              <CardTitle className="text-base sm:text-lg">Shipping Information</CardTitle>
+              <CardTitle className="text-base sm:text-lg">Addresses</CardTitle>
             </CardHeader>
-            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6 space-y-4">
+              {/* Shipping Address */}
+              <div>
+                <h4 className="text-sm sm:text-base font-medium mb-2">Shipping Address</h4>
               {order.shipping_address ? (
-                <div className="space-y-1.5 sm:space-y-2 text-sm sm:text-base break-words">
+                  <div className="space-y-1.5 sm:space-y-2 text-sm sm:text-base break-words p-3 bg-muted/50 rounded-md">
+                    {order.shipping_address.address_type && (
+                      <p className="font-medium text-xs sm:text-sm text-muted-foreground uppercase">
+                        {order.shipping_address.address_type}
+                      </p>
+                    )}
                   <p>{order.shipping_address.address_line1}</p>
                   {order.shipping_address.address_line2 && <p>{order.shipping_address.address_line2}</p>}
                   <p>{order.shipping_address.city}, {order.shipping_address.state} {order.shipping_address.postal_code}</p>
                   <p>{order.shipping_address.country}</p>
                 </div>
               ) : (
-                <p className="text-xs sm:text-sm text-muted-foreground">No shipping information available.</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">No shipping address available.</p>
+                )}
+              </div>
+              
+              {/* Billing Address */}
+              <div>
+                <h4 className="text-sm sm:text-base font-medium mb-2">Billing Address</h4>
+                {order.billing_address ? (
+                  <div className="space-y-1.5 sm:space-y-2 text-sm sm:text-base break-words p-3 bg-muted/50 rounded-md">
+                    {order.billing_address.address_type && (
+                      <p className="font-medium text-xs sm:text-sm text-muted-foreground uppercase">
+                        {order.billing_address.address_type}
+                      </p>
+                    )}
+                    <p>{order.billing_address.address_line1}</p>
+                    {order.billing_address.address_line2 && <p>{order.billing_address.address_line2}</p>}
+                    <p>{order.billing_address.city}, {order.billing_address.state} {order.billing_address.postal_code}</p>
+                    <p>{order.billing_address.country}</p>
+                  </div>
+                ) : order.shipping_address ? (
+                  <div className="text-xs sm:text-sm text-muted-foreground italic">
+                    Same as shipping address
+                  </div>
+                ) : (
+                  <p className="text-xs sm:text-sm text-muted-foreground">No billing address available.</p>
               )}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -752,6 +907,75 @@ export default function OrderDetail() {
                   <p className="text-xs sm:text-sm text-muted-foreground">Total Amount</p>
                   <p className="font-medium text-base sm:text-lg">${parseFloat(order.total_amount).toFixed(2)}</p>
                 </div>
+
+                {/* Credit Period Table */}
+                {creditPeriodData && (
+                  <div className="min-w-0 mt-4 pt-4 border-t">
+                    <h4 className="text-sm sm:text-base font-medium mb-3">Credit Period Details</h4>
+                    <div className="rounded-md border overflow-x-auto">
+                      <Table>
+                        <TableBody>
+                          <TableRow>
+                            <TableCell className="font-medium text-xs sm:text-sm w-1/3">Credit Period ID</TableCell>
+                            <TableCell className="text-xs sm:text-sm">{creditPeriodData.id.substring(0, 8)}...</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="font-medium text-xs sm:text-sm">Amount</TableCell>
+                            <TableCell className="text-xs sm:text-sm">${parseFloat(creditPeriodData.amount?.toString() || '0').toFixed(2)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="font-medium text-xs sm:text-sm">Period</TableCell>
+                            <TableCell className="text-xs sm:text-sm">{creditPeriodData.period || 'N/A'} days</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="font-medium text-xs sm:text-sm">Start Date</TableCell>
+                            <TableCell className="text-xs sm:text-sm">{format(new Date(creditPeriodData.start_date), 'MMM d, yyyy')}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="font-medium text-xs sm:text-sm">End Date</TableCell>
+                            <TableCell className="text-xs sm:text-sm">{format(new Date(creditPeriodData.end_date || creditPeriodData.due_date), 'MMM d, yyyy')}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="font-medium text-xs sm:text-sm">Status</TableCell>
+                            <TableCell className="text-xs sm:text-sm">
+                              {creditPeriodData.description === 'Order Cancelled' ? (
+                                <Badge variant="outline" className="bg-gray-400 text-white text-xs">Cancelled</Badge>
+                              ) : new Date() > new Date(creditPeriodData.end_date || creditPeriodData.due_date) ? (
+                                <Badge variant="destructive" className="text-xs">Overdue</Badge>
+                              ) : (
+                                <Badge className="bg-green-600 text-xs">Active</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                          {creditPeriodData.status && (
+                            <TableRow>
+                              <TableCell className="font-medium text-xs sm:text-sm">Payment Status</TableCell>
+                              <TableCell className="text-xs sm:text-sm">
+                                {creditPeriodData.status === 'paid' ? (
+                                  <Badge className="bg-green-600 text-xs">Paid</Badge>
+                                ) : creditPeriodData.status === 'partial' ? (
+                                  <Badge className="bg-yellow-500 text-xs">Partially Paid</Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-xs">Unpaid</Badge>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {creditPeriodData.description && (
+                            <TableRow>
+                              <TableCell className="font-medium text-xs sm:text-sm">Description</TableCell>
+                              <TableCell className="text-xs sm:text-sm break-words">{creditPeriodData.description}</TableCell>
+                            </TableRow>
+                          )}
+                          <TableRow>
+                            <TableCell className="font-medium text-xs sm:text-sm">Created At</TableCell>
+                            <TableCell className="text-xs sm:text-sm">{format(new Date(creditPeriodData.created_at), 'MMM d, yyyy, h:mm a')}</TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

@@ -41,7 +41,7 @@ export const MobileBottomNav: React.FC = () => {
       roles: ['admin', 'sales', 'user'],
     },
     {
-      path: '/admin/warehouses',
+      path: '/inventory/warehouses',
       icon: <Warehouse className="h-5 w-5" />,
       label: 'Inventory',
       roles: ['admin'],

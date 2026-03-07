@@ -87,7 +87,7 @@ export default function PurchaseInvoices() {
           </p>
         </div>
         {(isAdmin || isAccounts) && (
-          <Button onClick={() => navigate('/admin/purchase-invoices/new')}>
+          <Button onClick={() => navigate('/procurement/purchase-invoices/new')}>
             <Plus className="h-4 w-4 mr-2" />
             Create Invoice
           </Button>
@@ -253,19 +253,19 @@ export default function PurchaseInvoices() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => navigate(`/admin/purchase-invoices/${invoice.id}`)}>
+                                <DropdownMenuItem onClick={() => navigate(`/procurement/purchase-invoices/${invoice.id}`)}>
                                   <Eye className="h-4 w-4 mr-2" />
                                   View Details
                                 </DropdownMenuItem>
                                 {isAdmin && invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
-                                  <DropdownMenuItem onClick={() => navigate(`/admin/purchase-invoices/${invoice.id}/edit`)}>
+                                  <DropdownMenuItem onClick={() => navigate(`/procurement/purchase-invoices/${invoice.id}/edit`)}>
                                     <Pencil className="h-4 w-4 mr-2" />
                                     Edit Invoice
                                   </DropdownMenuItem>
                                 )}
                                 {balance > 0 && (isAdmin || isAccounts) && (
                                   <DropdownMenuItem 
-                                    onClick={() => navigate(`/admin/supplier-payments/new?invoice=${invoice.id}`)}
+                                    onClick={() => navigate(`/procurement/supplier-payments/new?invoice=${invoice.id}`)}
                                   >
                                     <DollarSign className="h-4 w-4 mr-2" />
                                     Record Payment

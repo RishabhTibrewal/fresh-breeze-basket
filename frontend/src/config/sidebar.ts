@@ -73,35 +73,35 @@ const stockGroup: SidebarGroup = {
       id: 'products',
       label: 'Products',
       icon: Package,
-      path: '/admin/products',
+      path: '/inventory/products',
       roles: ['admin', 'warehouse_manager']
     },
     {
       id: 'categories',
       label: 'Categories',
       icon: Grid,
-      path: '/admin/categories',
+      path: '/inventory/categories',
       roles: ['admin', 'warehouse_manager']
     },
     {
       id: 'warehouses',
       label: 'Warehouses',
       icon: Warehouse,
-      path: '/admin/warehouses',
+      path: '/inventory/warehouses',
       roles: ['admin', 'warehouse_manager']
     },
     {
       id: 'stock-adjustment',
       label: 'Stock Adjustment',
       icon: ClipboardCheck,
-      path: '/admin/inventory/adjust',
+      path: '/inventory/adjust',
       roles: ['admin', 'warehouse_manager']
     },
     {
       id: 'stock-transfer',
       label: 'Stock Transfer',
       icon: ArrowLeftRight,
-      path: '/admin/inventory/transfer',
+      path: '/inventory/transfer',
       roles: ['admin', 'warehouse_manager']
     },
     {
@@ -114,21 +114,21 @@ const stockGroup: SidebarGroup = {
           id: 'stock-ledger',
           label: 'Stock Ledger',
           icon: FileText,
-          path: '/admin/inventory/movements',
+          path: '/inventory/movements',
           roles: ['admin', 'warehouse_manager']
         },
         {
           id: 'stock-balance',
           label: 'Stock Balance',
           icon: BarChart3,
-          path: '/admin/inventory/balance',
+          path: '/inventory/balance',
           roles: ['admin', 'warehouse_manager']
         },
         {
           id: 'warehouse-stock-balance',
           label: 'Warehouse-wise Stock Balance',
           icon: Warehouse,
-          path: '/admin/inventory/warehouse-balance',
+          path: '/inventory/warehouse-balance',
           roles: ['admin', 'warehouse_manager']
         }
       ]
@@ -177,7 +177,7 @@ const salesGroup: SidebarGroup = {
       id: 'orders',
       label: 'Orders',
       icon: ShoppingCart,
-      path: '/admin/orders',
+      path: '/sales/orders',
       roles: ['admin', 'sales']
     },
     {
@@ -200,14 +200,14 @@ const salesGroup: SidebarGroup = {
       id: 'payments',
       label: 'Payments',
       icon: CreditCard,
-      path: '/admin/payments',
+      path: '/sales/payments',
       roles: ['admin', 'sales'],
       children: [
         {
           id: 'payments-list',
           label: 'All Payments',
           icon: CreditCard,
-          path: '/admin/payments',
+          path: '/sales/payments',
           roles: ['admin', 'sales']
         }
       ]
@@ -216,7 +216,7 @@ const salesGroup: SidebarGroup = {
       id: 'credit-management',
       label: 'Credit Management',
       icon: TrendingUp,
-      path: '/admin/credit-management',
+      path: '/sales/credit-management',
       roles: ['admin', 'sales']
     },
     {
@@ -444,7 +444,7 @@ const settingsGroup: SidebarGroup = {
       id: 'warehouses',
       label: 'Warehouses',
       icon: Warehouse,
-      path: '/admin/warehouses',
+      path: '/inventory/warehouses',
       roles: ['admin']
     },
     {

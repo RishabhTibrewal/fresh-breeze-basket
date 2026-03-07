@@ -161,7 +161,7 @@ export default function WarehouseInventory() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate(`/admin/inventory/adjust?warehouse_id=${warehouseId}&product_id=${item.product_id}&variant_id=${item.variant_id}`)}
+            onClick={() => navigate(`/inventory/adjust?warehouse_id=${warehouseId}&product_id=${item.product_id}&variant_id=${item.variant_id}`)}
           >
             <Scale className="h-4 w-4 mr-1" />
             Adjust
@@ -246,7 +246,7 @@ export default function WarehouseInventory() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => navigate(`/admin/inventory/adjust?warehouse_id=${warehouseId}&product_id=${item.product_id}&variant_id=${item.variant_id}`)}
+                onClick={() => navigate(`/inventory/adjust?warehouse_id=${warehouseId}&product_id=${item.product_id}&variant_id=${item.variant_id}`)}
                 className="flex-1"
               >
                 <Scale className="h-4 w-4 mr-1" />
@@ -265,7 +265,7 @@ export default function WarehouseInventory() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => navigate('/admin/warehouses')}
+          onClick={() => navigate('/inventory/warehouses')}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -289,14 +289,14 @@ export default function WarehouseInventory() {
           />
         </div>
         <Button
-          onClick={() => navigate(`/admin/inventory/transfer?source_warehouse_id=${warehouseId}`)}
+          onClick={() => navigate(`/inventory/transfer?source_warehouse_id=${warehouseId}`)}
           variant="outline"
         >
           <ArrowRightLeft className="h-4 w-4 mr-2" />
           Transfer Stock
         </Button>
         <Button
-          onClick={() => navigate(`/admin/inventory/adjust?warehouse_id=${warehouseId}`)}
+          onClick={() => navigate(`/inventory/adjust?warehouse_id=${warehouseId}`)}
         >
           <Scale className="h-4 w-4 mr-2" />
           Adjust Stock
@@ -312,7 +312,7 @@ export default function WarehouseInventory() {
             <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <p className="text-muted-foreground mb-4">No inventory found</p>
             <Button
-              onClick={() => navigate(`/admin/inventory/adjust?warehouse_id=${warehouseId}`)}
+              onClick={() => navigate(`/inventory/adjust?warehouse_id=${warehouseId}`)}
               variant="outline"
             >
               <Scale className="h-4 w-4 mr-2" />
