@@ -308,21 +308,21 @@ export const orderController = {
       // Create order items with variant prices, variant_id and tax_amount
       const orderItems = await Promise.all(
         (items as OrderItemInput[]).map(async (item) => {
-          // Use the price sent from frontend if available, otherwise fallback to variant prices
-          const unitPrice = item.price || item.unit_price || productPrices[item.product_id];
-
-          if (!unitPrice || isNaN(Number(unitPrice))) {
-            console.error(`Missing or invalid price for product ${item.product_id}`, {
-              item_price: item.price,
-              item_unit_price: item.unit_price,
-              variant_price: productPrices[item.product_id],
+        // Use the price sent from frontend if available, otherwise fallback to variant prices
+        const unitPrice = item.price || item.unit_price || productPrices[item.product_id];
+        
+        if (!unitPrice || isNaN(Number(unitPrice))) {
+          console.error(`Missing or invalid price for product ${item.product_id}`, { 
+            item_price: item.price,
+            item_unit_price: item.unit_price,
+            variant_price: productPrices[item.product_id],
               item: item,
-            });
-            throw new Error(`Missing price for product ${item.product_id}`);
-          }
-
-          // Get variant_id (from request or from variantIds map)
-          const variantId = (item as any).variant_id || variantIds[item.product_id];
+          });
+          throw new Error(`Missing price for product ${item.product_id}`);
+        }
+        
+        // Get variant_id (from request or from variantIds map)
+        const variantId = (item as any).variant_id || variantIds[item.product_id];
 
           // Calculate tax amount for this line using PricingService
           let taxAmount = 0;
@@ -341,17 +341,17 @@ export const orderController = {
             );
             taxAmount = 0;
           }
-
-          return {
-            order_id: order.id,
-            company_id: req.companyId!,
-            product_id: item.product_id,
-            variant_id: variantId || null, // Include variant_id in order items
-            quantity: item.quantity,
-            unit_price: unitPrice,
+        
+        return {
+          order_id: order.id,
+          company_id: req.companyId!,
+          product_id: item.product_id,
+          variant_id: variantId || null, // Include variant_id in order items
+          quantity: item.quantity,
+          unit_price: unitPrice,
             tax_amount: Math.round(taxAmount * 100) / 100,
             warehouse_id: item.warehouse_id || defaultWarehouseId || null,
-          };
+        };
         })
       );
 
@@ -413,10 +413,10 @@ export const orderController = {
           // Get variant_id (from order item or default variant)
           let variantId: string | undefined = (item as any).variant_id || variantIds[item.product_id];
           if (!variantId) {
-            try {
+          try {
               const defaultVariant = await productServiceForReservation.getDefaultVariant(item.product_id);
-              variantId = defaultVariant.id;
-            } catch (variantError) {
+            variantId = defaultVariant.id;
+          } catch (variantError) {
               reservationWarnings.push(`Failed to get default variant for product ${item.product_id} - stock reservation skipped`);
               continue;
             }

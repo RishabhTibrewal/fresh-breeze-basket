@@ -83,6 +83,7 @@ export const getCustomers = async (req: Request, res: Response) => {
 
       return {
         id: customer.id,
+        user_id: customer.user_id, // Include user_id for navigation to customer details
         name: customer.name,
         email: customer.email,
         phone: customer.phone,

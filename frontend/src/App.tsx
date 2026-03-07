@@ -287,6 +287,7 @@ const App: React.FC = () => {
                       <Route path="payments" element={<Payments />} />
                       <Route path="payments/new" element={<CreatePayment />} />
                       <Route path="customers" element={<Customers />} />
+                      <Route path="customers/:id" element={<AdminCustomerDetails />} />
                       <Route path="customers/:customerId/orders" element={<CustomerOrders />} />
                       <Route path="leads" element={<AdminLeads />} />
                       <Route path="credit-management" element={<AdminCreditManagement />} />

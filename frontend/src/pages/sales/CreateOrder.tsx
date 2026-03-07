@@ -412,7 +412,7 @@ export default function CreateOrder() {
       return [];
     }
   };
-
+    
   // Update product for a specific row
   const updateProductForRow = async (rowId: string, productId: string) => {
     const product = products.find((p: any) => p.id === productId);
@@ -526,7 +526,7 @@ export default function CreateOrder() {
       return item;
     }));
   };
-
+  
   // Update quantity by direct input
   const updateQuantityDirect = (rowId: string, quantity: number) => {
     setItems(items.map(item => {
@@ -555,8 +555,8 @@ export default function CreateOrder() {
         if (item.original_price > 0 && price < item.original_price) {
           const discountAmount = item.original_price - price;
           discount = (discountAmount / item.original_price) * 100;
-        }
-        
+    }
+    
         return {
           ...item,
           unit_price: price,
@@ -577,7 +577,7 @@ export default function CreateOrder() {
       return item;
     }));
   };
-
+  
   // Remove item
   const removeItem = (rowId: string) => {
     setItems(items.filter(item => item.id !== rowId));
@@ -722,7 +722,7 @@ export default function CreateOrder() {
             navigate(`/sales/customers/${currentCustomerId}/orders`);
           } else {
             navigate('/sales/customers');
-          }
+        }
         }}
       >
         <ArrowLeft className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
@@ -762,7 +762,7 @@ export default function CreateOrder() {
                                 <SelectItem value={selectedCustomer.id} className="text-sm">
                                   {selectedCustomer.name} {selectedCustomer.email ? `(${selectedCustomer.email})` : ''}
                                 </SelectItem>
-                              )}
+                            )}
                           </SelectContent>
                         </Select>
                         ) : (
@@ -943,7 +943,7 @@ export default function CreateOrder() {
                                                 role="combobox"
                                                 aria-expanded={productSearchOpen[item.id] || false}
                                                 className="w-full justify-between"
-                                              >
+                                  >
                                                 {item.product_name ? (
                                                   <span className="truncate">{item.product_name}</span>
                                                 ) : (
@@ -1183,11 +1183,11 @@ export default function CreateOrder() {
                             <Card className="mb-4 sm:mb-6 p-3 sm:p-4 w-full min-w-0 overflow-hidden">
                               <CardContent className="p-0">
                                 {selectedCustomerId ? (
-                                  <CustomerAddressForm
+                                <CustomerAddressForm
                                     customerId={selectedCustomerId}
-                                    onClose={() => setShowAddressForm(false)}
-                                    onAddressAdded={handleAddressAdded}
-                                  />
+                                  onClose={() => setShowAddressForm(false)}
+                                  onAddressAdded={handleAddressAdded}
+                                />
                                 ) : (
                                   <div className="p-4 text-center text-muted-foreground">
                                     <p className="text-sm">Please select a customer first before adding an address.</p>

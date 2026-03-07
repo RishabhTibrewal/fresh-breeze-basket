@@ -172,6 +172,7 @@ export async function getAllRoles(): Promise<Role[]> {
 /**
  * Assign roles to a user in a company
  * Replaces all existing roles for the user in that company
+ * Uses a SECURITY DEFINER database function to bypass RLS
  */
 export async function assignUserRoles(
   userId: string,
@@ -179,82 +180,49 @@ export async function assignUserRoles(
   roleNames: string[]
 ): Promise<{ success: boolean; error?: string; details?: string }> {
   try {
-    // Always use admin client to bypass RLS for role management
-    if (!supabaseAdmin) {
-      console.error('[assignUserRoles] Admin client not available - SUPABASE_SERVICE_ROLE_KEY missing');
-      return { success: false, error: 'Admin client not configured' };
-    }
-    const client = supabaseAdmin;
+    // Use any client (function will bypass RLS)
+    const client = supabaseAdmin || supabase;
 
-    // Validate that all role names exist
-    const { data: roles, error: rolesError } = await client
-      .from('roles')
-      .select('id, name')
-      .in('name', roleNames);
+    console.log('[assignUserRoles] Assigning roles via RPC:', {
+      userId,
+      companyId,
+      roleNames
+    });
 
-    if (rolesError) {
-      console.error('Error validating roles:', rolesError);
-      return { success: false, error: 'Failed to validate roles' };
-    }
+    // Use the SECURITY DEFINER function to bypass RLS
+    const { data, error } = await client.rpc('assign_user_roles', {
+      p_user_id: userId,
+      p_company_id: companyId,
+      p_role_names: roleNames
+    });
 
-    const validRoleNames = (roles as { id: string; name: string }[]).map(r => r.name);
-    const invalidRoles = roleNames.filter(name => !validRoleNames.includes(name));
-
-    if (invalidRoles.length > 0) {
-      return {
-        success: false,
-        error: `Invalid roles: ${invalidRoles.join(', ')}`
+    if (error) {
+      console.error('Error calling assign_user_roles RPC:', error);
+      return { 
+        success: false, 
+        error: error.message || 'Failed to assign roles',
+        details: error.details || undefined
       };
     }
 
-    // Delete existing roles for this user-company combination
-    const { error: deleteError } = await client
-      .from('user_roles')
-      .delete()
-      .eq('user_id', userId)
-      .eq('company_id', companyId);
-
-    if (deleteError) {
-      console.error('Error deleting existing roles:', deleteError);
-      return { success: false, error: 'Failed to remove existing roles' };
+    // Parse the result from the function
+    const result = data as { success: boolean; error?: string; deleted_count?: number; inserted_count?: number };
+    
+    if (!result.success) {
+      console.error('[assignUserRoles] Function returned error:', result);
+      return { 
+        success: false, 
+        error: result.error || 'Failed to assign roles'
+      };
     }
 
-    // Insert new roles
-    if (validRoleNames.length > 0) {
-      const roleMap = new Map((roles as { id: string; name: string }[]).map(r => [r.name, r.id]));
-      
-      const userRolesToInsert = validRoleNames.map(roleName => ({
-        user_id: userId,
-        company_id: companyId,
-        role_id: roleMap.get(roleName)!
-      }));
-
-      console.log('[assignUserRoles] Inserting user roles:', {
-        userId,
-        companyId,
-        roleNames: validRoleNames,
-        userRolesToInsert
-      });
-
-      const { error: insertError } = await client
-        .from('user_roles')
-        .insert(userRolesToInsert);
-
-      if (insertError) {
-        console.error('Error inserting new roles:', insertError);
-        console.error('Insert error details:', {
-          code: insertError.code,
-          message: insertError.message,
-          details: insertError.details,
-          hint: insertError.hint
-        });
-        return { 
-          success: false, 
-          error: insertError.message || 'Failed to assign roles',
-          details: insertError.details || undefined
-        };
-      }
-    }
+    console.log('[assignUserRoles] Successfully assigned roles:', {
+      userId,
+      companyId,
+      roleNames,
+      deletedCount: result.deleted_count,
+      insertedCount: result.inserted_count
+    });
 
     // Invalidate cache
     invalidateRoleCache(userId);

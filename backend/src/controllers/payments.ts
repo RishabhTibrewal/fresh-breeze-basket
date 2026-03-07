@@ -685,25 +685,25 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
     // Only check for existing payment if we're linking a Stripe payment intent (e-commerce scenario)
     // For manual payments (sales orders), always create a new payment record to allow multiple payments
     if (stripe_payment_intent_id) {
-      const { data: existingPayment, error: checkError } = await (supabaseAdmin || supabase)
-        .from('payments')
-        .select('id, stripe_payment_intent_id')
-        .eq('order_id', order_id)
-        .eq('company_id', req.companyId)
+    const { data: existingPayment, error: checkError } = await (supabaseAdmin || supabase)
+      .from('payments')
+      .select('id, stripe_payment_intent_id')
+      .eq('order_id', order_id)
+      .eq('company_id', req.companyId)
         .eq('stripe_payment_intent_id', stripe_payment_intent_id)
         .maybeSingle();
 
       // If payment with this Stripe intent already exists, update it
-      if (existingPayment) {
+    if (existingPayment) {
         console.log('Payment record already exists for Stripe payment intent:', stripe_payment_intent_id);
         
         // Recalculate order payment status based on total paid amounts (same logic as below)
         try {
           const { data: allPayments, error: paymentsError } = await (supabaseAdmin || supabase)
-            .from('payments')
+          .from('payments')
             .select('amount, status')
             .eq('order_id', order_id)
-            .eq('company_id', req.companyId);
+          .eq('company_id', req.companyId);
 
           if (!paymentsError && allPayments) {
             // Sum only completed payments
@@ -722,29 +722,29 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
             } else if (totalPaid > 0) {
               // Partially paid
               newPaymentStatus = 'partial';
-            } else {
+        } else {
               // No payments yet - only update if not 'credit'
               if (order.payment_status !== 'credit') {
                 newPaymentStatus = 'pending';
-              }
-            }
-
+        }
+      }
+      
             // Update order payment_status if it changed
             if (newPaymentStatus !== order.payment_status) {
-              const { error: orderUpdateError } = await (supabaseAdmin || supabase)
-                .from('orders')
-                .update({
+      const { error: orderUpdateError } = await (supabaseAdmin || supabase)
+        .from('orders')
+        .update({
                   payment_status: newPaymentStatus,
                   payment_intent_id: stripe_payment_intent_id,
-                  updated_at: new Date()
-                })
-                .eq('id', order_id)
-                .eq('company_id', req.companyId);
+          updated_at: new Date()
+        })
+        .eq('id', order_id)
+        .eq('company_id', req.companyId);
 
-              if (orderUpdateError) {
-                console.error('Error updating order payment status:', orderUpdateError);
-                // Don't fail the request if order update fails, but log it
-              }
+      if (orderUpdateError) {
+        console.error('Error updating order payment status:', orderUpdateError);
+        // Don't fail the request if order update fails, but log it
+      }
             } else {
               // Still update payment_intent_id even if status didn't change
               const { error: orderUpdateError } = await (supabaseAdmin || supabase)
@@ -768,11 +768,11 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
 
         console.log('Payment record already exists:', existingPayment.id);
 
-        return res.status(200).json({
-          success: true,
-          data: existingPayment,
+      return res.status(200).json({
+        success: true,
+        data: existingPayment,
           message: 'Payment record already exists'
-        });
+      });
       }
     }
 
@@ -780,7 +780,7 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
     const paymentService = new PaymentService(req.companyId);
     const paymentId = await paymentService.processPayment({
       orderId: order_id,
-      amount: paymentAmount,
+        amount: paymentAmount,
       paymentMethod: payment_method,
       status: status as 'pending' | 'completed' | 'failed',
       stripePaymentIntentId: stripe_payment_intent_id || undefined,
@@ -789,14 +789,14 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       paymentDate: payment_date || undefined,
       preserveOrderPaymentStatus: true, // Don't overwrite order payment_status when creating manually
       paymentGatewayResponse: {
-        source: 'manual_creation',
-        created_by: userId,
-        created_at: new Date().toISOString()
-      },
+          source: 'manual_creation',
+          created_by: userId,
+          created_at: new Date().toISOString()
+        },
       transactionReferences: {
-        stripe_payment_intent_id: stripe_payment_intent_id || null,
-        manual_creation: true
-      }
+          stripe_payment_intent_id: stripe_payment_intent_id || null,
+          manual_creation: true
+        }
     });
 
     if (!paymentId) {

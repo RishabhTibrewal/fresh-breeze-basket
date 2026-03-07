@@ -1,5 +1,5 @@
 import React from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { 
@@ -42,23 +42,44 @@ import { customerService } from '@/api/customer';
 import { ErrorMessage } from '@/components/ui/error-message';
 
 export default function AdminCustomerDetails() {
-  const { id: userId } = useParams<{ id: string }>();
+  const { id: customerOrUserId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   
-  // Fetch customer details
+  // Determine the back route based on current path
+  const getBackRoute = () => {
+    if (location.pathname.startsWith('/sales/customers')) {
+      return '/sales/customers';
+    }
+    return '/admin/customers';
+  };
+  
+  // Fetch customer details - try by user ID first, then by customer ID
   const { 
     data: customer, 
     isLoading, 
     isError, 
     error 
   } = useQuery({
-    queryKey: ['admin-customer', userId],
+    queryKey: ['admin-customer', customerOrUserId],
     queryFn: async () => {
-      const customerData = await customerService.getCustomerByUserId(userId!);
-      console.log('Customer details loaded:', customerData);
-      return customerData;
+      try {
+        // First try to get by user ID (for profiles)
+        const customerData = await customerService.getCustomerByUserId(customerOrUserId!);
+        console.log('Customer details loaded by user ID:', customerData);
+        return customerData;
+      } catch (userError: any) {
+        // If that fails, try to get by customer ID
+        if (userError?.response?.status === 404 || userError?.message?.includes('not found')) {
+          console.log('Customer not found by user ID, trying customer ID...');
+          const customerData = await customerService.getCustomerById(customerOrUserId!);
+          console.log('Customer details loaded by customer ID:', customerData);
+          return customerData;
+        }
+        throw userError;
+      }
     },
-    enabled: !!userId
+    enabled: !!customerOrUserId
   });
 
   if (isLoading) {
@@ -78,7 +99,7 @@ export default function AdminCustomerDetails() {
           title="Error loading customer" 
           message={error instanceof Error ? error.message : 'User profile not found'}
         />
-        <Button variant="outline" onClick={() => navigate('/admin/customers')} className="mt-4 w-full sm:w-auto text-sm sm:text-base">
+        <Button variant="outline" onClick={() => navigate(getBackRoute())} className="mt-4 w-full sm:w-auto text-sm sm:text-base">
           <ArrowLeft className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
           Back to Customers
         </Button>
@@ -120,7 +141,7 @@ export default function AdminCustomerDetails() {
         </div>
         <Button 
           variant="outline" 
-          onClick={() => navigate('/admin/customers')}
+          onClick={() => navigate(getBackRoute())}
           className="w-full sm:w-auto text-sm sm:text-base flex-shrink-0"
         >
           <ArrowLeft className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />

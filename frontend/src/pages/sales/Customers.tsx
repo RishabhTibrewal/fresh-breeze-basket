@@ -422,72 +422,19 @@ export default function Customers() {
                     </div>
                     
                     <div className="flex flex-wrap gap-1.5 pt-2 border-t">
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => setSelectedCustomer(customer)}
-                            className="text-xs h-8 flex-1 min-w-[calc(50%-0.375rem)]"
-                          >
-                            <Eye className="h-3.5 w-3.5 mr-1.5" />
-                            View
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="w-[95%] sm:w-full max-w-md max-h-[90vh] overflow-y-auto">
-                          <DialogHeader>
-                            <DialogTitle className="text-base sm:text-lg">Customer Details</DialogTitle>
-                            <DialogDescription className="text-xs sm:text-sm">
-                              Detailed information about {selectedCustomer?.name}
-                            </DialogDescription>
-                          </DialogHeader>
-                          {selectedCustomer && (
-                            <div className="space-y-3 sm:space-y-4 text-xs sm:text-sm">
-                              <div className="min-w-0">
-                                <h3 className="font-semibold mb-2 text-sm sm:text-base">Contact Information</h3>
-                                <p className="break-words">Email: {selectedCustomer.email}</p>
-                                <p className="break-words">Phone: {selectedCustomer.phone}</p>
-                                <p className="break-words">TRN Number: {selectedCustomer.trn_number || 'N/A'}</p>
-                              </div>
-                              <div className="min-w-0">
-                                <h3 className="font-semibold mb-2 text-sm sm:text-base">Credit Information</h3>
-                                <p>Credit Period: {selectedCustomer.credit_period_days || 0} days</p>
-                                <p>Credit Limit: ₹{(selectedCustomer.credit_limit || 0).toFixed(2)}</p>
-                                <p>Current Credit: ₹{(selectedCustomer.current_credit || 0).toFixed(2)}</p>
-                                {selectedCustomer.active_credit && (
-                                  <div className="mt-2">
-                                    <h4 className="font-medium text-primary text-sm">Active Credit</h4>
-                                    <p>Amount: ₹{selectedCustomer.active_credit.amount.toFixed(2)}</p>
-                                    <p>Period: {selectedCustomer.active_credit.period} days</p>
-                                    <p>Start Date: {new Date(selectedCustomer.active_credit.start_date).toLocaleDateString()}</p>
-                                    <p>Due Date: {new Date(selectedCustomer.active_credit.end_date).toLocaleDateString()}</p>
-                                  </div>
-                                )}
-                                {selectedCustomer.credit_periods && selectedCustomer.credit_periods.length > 0 && (
-                                  <div className="mt-2">
-                                    <h4 className="font-medium text-sm">Recent Credit History</h4>
-                                    <div className="space-y-1">
-                                      {selectedCustomer.credit_periods.slice(0, 3).map((period) => (
-                                        <div key={period.id} className="text-xs">
-                                          <p>Amount: ${period.amount.toFixed(2)} ({period.type})</p>
-                                          <p>Period: {period.period} days</p>
-                                          <p>Date: {new Date(period.created_at).toLocaleDateString()}</p>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="min-w-0">
-                                <h3 className="font-semibold mb-2 text-sm sm:text-base">Order Statistics</h3>
-                                <p>Total Orders: {selectedCustomer.totalOrders || 0}</p>
-                                <p>Total Spent: ₹{(selectedCustomer.totalSpent || 0).toFixed(2)}</p>
-                                <p>Last Order: {selectedCustomer.lastOrder || 'Never'}</p>
-                              </div>
-                            </div>
-                          )}
-                        </DialogContent>
-                      </Dialog>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => {
+                          // Use user_id if available, otherwise use customer id
+                          const idToUse = customer.user_id || customer.id;
+                          navigate(`/sales/customers/${idToUse}`);
+                        }}
+                        className="text-xs h-8 flex-1 min-w-[calc(50%-0.375rem)]"
+                      >
+                        <Eye className="h-3.5 w-3.5 mr-1.5" />
+                        Details
+                      </Button>
                       
                       <Button 
                         variant="default" 
@@ -709,71 +656,19 @@ export default function Customers() {
                       </TableCell>
                       <TableCell className="px-2 py-2">
                         <div className="flex gap-1">
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => setSelectedCustomer(customer)}
-                                className="h-8 w-8 p-0"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="w-[95%] sm:w-full max-w-md max-h-[90vh] overflow-y-auto">
-                              <DialogHeader>
-                                <DialogTitle className="text-base sm:text-lg">Customer Details</DialogTitle>
-                                <DialogDescription className="text-xs sm:text-sm">
-                                  Detailed information about {selectedCustomer?.name}
-                                </DialogDescription>
-                              </DialogHeader>
-                              {selectedCustomer && (
-                                <div className="space-y-3 sm:space-y-4 text-xs sm:text-sm">
-                                  <div className="min-w-0">
-                                    <h3 className="font-semibold mb-2 text-sm sm:text-base">Contact Information</h3>
-                                    <p className="break-words">Email: {selectedCustomer.email}</p>
-                                    <p className="break-words">Phone: {selectedCustomer.phone}</p>
-                                    <p className="break-words">TRN Number: {selectedCustomer.trn_number || 'N/A'}</p>
-                                  </div>
-                                  <div className="min-w-0">
-                                    <h3 className="font-semibold mb-2 text-sm sm:text-base">Credit Information</h3>
-                                    <p>Credit Period: {selectedCustomer.credit_period_days || 0} days</p>
-                                    <p>Credit Limit: ₹{(selectedCustomer.credit_limit || 0).toFixed(2)}</p>
-                                    <p>Current Credit: ₹{(selectedCustomer.current_credit || 0).toFixed(2)}</p>
-                                    {selectedCustomer.active_credit && (
-                                      <div className="mt-2">
-                                        <h4 className="font-medium text-primary text-sm">Active Credit</h4>
-                                        <p>Amount: ₹{selectedCustomer.active_credit.amount.toFixed(2)}</p>
-                                        <p>Period: {selectedCustomer.active_credit.period} days</p>
-                                        <p>Start Date: {new Date(selectedCustomer.active_credit.start_date).toLocaleDateString()}</p>
-                                        <p>Due Date: {new Date(selectedCustomer.active_credit.end_date).toLocaleDateString()}</p>
-                                      </div>
-                                    )}
-                                    {selectedCustomer.credit_periods && selectedCustomer.credit_periods.length > 0 && (
-                                      <div className="mt-2">
-                                        <h4 className="font-medium text-sm">Recent Credit History</h4>
-                                        <div className="space-y-1">
-                                          {selectedCustomer.credit_periods.slice(0, 3).map((period) => (
-                                            <div key={period.id} className="text-xs">
-                                              <p>Amount: ₹{period.amount.toFixed(2)} ({period.type})</p>
-                                              <p>Period: {period.period} days</p>
-                                              <p>Date: {new Date(period.created_at).toLocaleDateString()}</p>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <h3 className="font-semibold mb-2 text-sm sm:text-base">Order Statistics</h3>
-                                    <p>Total Orders: {selectedCustomer.totalOrders || 0}</p>
-                                    <p>Total Spent: ₹{(selectedCustomer.totalSpent || 0).toFixed(2)}</p>
-                                    <p>Last Order: {selectedCustomer.lastOrder || 'Never'}</p>
-                                  </div>
-                                </div>
-                              )}
-                            </DialogContent>
-                          </Dialog>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => {
+                              // Use user_id if available, otherwise use customer id
+                              const idToUse = customer.user_id || customer.id;
+                              navigate(`/sales/customers/${idToUse}`);
+                            }}
+                            className="h-8 w-8 p-0"
+                            title="View Customer Details"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
                           
                           <Button 
                             variant="default" 

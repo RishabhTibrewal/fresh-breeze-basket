@@ -441,7 +441,7 @@ export default function OrderDocumentPage() {
               )}
             <Button
               variant="outline"
-              size="sm"
+                  size="sm"
               onClick={async () => {
                 try {
                   const invoiceUrl = `${
@@ -452,10 +452,10 @@ export default function OrderDocumentPage() {
                   toast.error("Failed to open invoice");
                 }
               }}
-            >
+                >
               <Printer className="h-4 w-4 mr-2" />
               Print Invoice
-            </Button>
+                </Button>
             <Button
               variant="outline"
               size="sm"
@@ -685,8 +685,8 @@ export default function OrderDocumentPage() {
                               ) : (
                                 <span className="text-muted-foreground">-</span>
                               )}
-                            </TableCell>
-                            <TableCell className="text-right text-sm">
+                        </TableCell>
+                        <TableCell className="text-right text-sm">
                               ₹ {unitPrice.toFixed(2)}
                         </TableCell>
                         <TableCell className="text-right text-sm">
@@ -1066,7 +1066,7 @@ export default function OrderDocumentPage() {
                                   onClick={() =>
                         navigate(
                                       `${contextPrefix}/orders/${returnOrder.id}`
-                                    )
+                        )
                                   }
                                 >
                                   View
@@ -1105,8 +1105,8 @@ export default function OrderDocumentPage() {
                       )}
                   </div>
                 )}
-              </CardContent>
-            </Card>
+            </CardContent>
+          </Card>
 
             {/* Stock Movements Section */}
             <Card>

@@ -69,7 +69,7 @@ export class PaymentService {
       // Update order payment status only if not preserving existing status
       // This prevents overwriting 'partial' with 'paid' when creating payment records during order creation
       if (!preserveOrderPaymentStatus) {
-        await this.updateOrderPaymentStatus(orderId, status === 'completed' ? 'paid' : 'pending');
+      await this.updateOrderPaymentStatus(orderId, status === 'completed' ? 'paid' : 'pending');
       }
 
       return payment.id;

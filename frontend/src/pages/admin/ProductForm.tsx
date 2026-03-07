@@ -38,7 +38,7 @@ import { cn } from "@/lib/utils";
 // Catalog-only product form schema
 const formSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100),
-  description: z.string().min(10, 'Description must be at least 10 characters'),
+  description: z.string().optional().nullable(),
   category_id: z.string().min(1, 'Category is required'),
   brand_id: z.string().optional().nullable(),
   origin: z.string().optional().nullable(),
@@ -173,7 +173,7 @@ export default function ProductForm() {
   };
 
   const handleNext = () => {
-    if (currentStep === 1 && form.watch('name') && form.watch('description')) {
+    if (currentStep === 1 && form.watch('name')) {
       setCurrentStep(2);
     } else if (currentStep === 2 && form.watch('category_id')) {
       setCurrentStep(3);
@@ -277,15 +277,20 @@ export default function ProductForm() {
                   name="description"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Description *</FormLabel>
+                      <FormLabel>Description</FormLabel>
                       <FormControl>
                         <Textarea
                           placeholder="Describe the product..."
                           {...field}
+                          value={field.value || ''}
+                          onChange={(e) => field.onChange(e.target.value || null)}
                           className={isMobile ? 'min-h-32 text-base' : ''}
                           rows={isMobile ? 6 : 4}
                         />
                       </FormControl>
+                      <FormDescription>
+                        Product description (optional)
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -337,7 +342,7 @@ export default function ProductForm() {
                   )}
                 />
 
-                {isMobile && form.watch('name') && form.watch('description') && (
+                {isMobile && form.watch('name') && (
                   <Button type="button" onClick={handleNext} className="w-full h-12">
                     Next: Category & Brand
                   </Button>
@@ -451,7 +456,7 @@ export default function ProductForm() {
                         />
                       </FormControl>
                       <FormDescription>
-                        Product origin or source location
+                        Product origin or source location (optional)
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
