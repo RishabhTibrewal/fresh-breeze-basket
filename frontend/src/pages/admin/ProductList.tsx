@@ -85,7 +85,13 @@ export default function ProductList() {
       render: (product) => (
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-md overflow-hidden bg-muted flex items-center justify-center">
-            {product.variants?.[0]?.image_url ? (
+            {product.image_url ? (
+              <img
+                src={product.image_url}
+                alt={product.name}
+                className="w-full h-full object-cover"
+              />
+            ) : product.variants?.[0]?.image_url ? (
               <img
                 src={product.variants[0].image_url}
                 alt={product.name}
@@ -97,6 +103,11 @@ export default function ProductList() {
           </div>
           <div>
             <div className="font-medium">{product.name}</div>
+            {product.product_code && (
+              <div className="text-xs text-muted-foreground">
+                Code: {product.product_code}
+              </div>
+            )}
             {product.description && (
               <div className="text-sm text-muted-foreground line-clamp-1">
                 {product.description}
@@ -196,7 +207,13 @@ export default function ProductList() {
       <CardContent className="p-4">
         <div className="flex items-start gap-4">
           <div className="w-16 h-16 rounded-md overflow-hidden bg-muted flex items-center justify-center flex-shrink-0">
-            {product.variants?.[0]?.image_url ? (
+            {product.image_url ? (
+              <img
+                src={product.image_url}
+                alt={product.name}
+                className="w-full h-full object-cover"
+              />
+            ) : product.variants?.[0]?.image_url ? (
               <img
                 src={product.variants[0].image_url}
                 alt={product.name}
@@ -210,6 +227,11 @@ export default function ProductList() {
             <div className="flex items-start justify-between gap-2 mb-2">
               <div className="flex-1 min-w-0">
                 <h3 className="font-medium truncate">{product.name}</h3>
+                {product.product_code && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Code: {product.product_code}
+                  </p>
+                )}
                 {product.description && (
                   <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
                     {product.description}

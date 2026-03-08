@@ -36,7 +36,8 @@ import {
   CreditCard,
   ArrowLeft,
   Clock,
-  ShoppingCart
+  ShoppingCart,
+  Receipt
 } from 'lucide-react';
 import { customerService } from '@/api/customer';
 import { ErrorMessage } from '@/components/ui/error-message';
@@ -578,6 +579,134 @@ export default function AdminCustomerDetails() {
                             </TableRow>
                           );
                         })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Payments Section (for both retail and wholesale customers) */}
+            {customer.payments && customer.payments.length > 0 && (
+              <Card className="w-full min-w-0 overflow-hidden">
+                <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                    <Receipt className="h-4 w-4 sm:h-5 sm:w-5" />
+                    Payment History
+                  </CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">
+                    All payment transactions for this customer
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+                  {/* Mobile Card View */}
+                  <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
+                    {customer.payments.map((payment: any) => (
+                      <Card key={payment.id} className="p-3 w-full min-w-0 overflow-hidden">
+                        <div className="space-y-2 min-w-0">
+                          <div className="flex items-start justify-between gap-2 min-w-0">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-base font-bold text-green-600 mb-1">
+                                ₹ {payment.amount?.toFixed(2) || '0.00'}
+                              </div>
+                              <div className="text-xs text-muted-foreground mb-2">
+                                Payment ID: {payment.id.substring(0, 8)}...
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-1.5 flex-shrink-0">
+                              <Badge variant={
+                                payment.status === 'completed' ? 'default' :
+                                payment.status === 'pending' ? 'secondary' :
+                                payment.status === 'failed' ? 'destructive' : 'outline'
+                              } className="text-xs">
+                                {payment.status || 'pending'}
+                              </Badge>
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-1 text-xs min-w-0">
+                            <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                              <Calendar className="h-3 w-3 flex-shrink-0" />
+                              <span className="truncate">
+                                {payment.payment_date 
+                                  ? formatDateTime(payment.payment_date)
+                                  : formatDateTime(payment.created_at)
+                                }
+                              </span>
+                            </div>
+                            {payment.payment_method && (
+                              <div className="min-w-0">
+                                <span className="text-muted-foreground">Method: </span>
+                                <span className="font-medium">{payment.payment_method}</span>
+                              </div>
+                            )}
+                            {payment.transaction_id && (
+                              <div className="min-w-0">
+                                <span className="text-muted-foreground">Transaction ID: </span>
+                                <span className="font-medium break-all">{payment.transaction_id}</span>
+                              </div>
+                            )}
+                            {payment.cheque_no && (
+                              <div className="min-w-0">
+                                <span className="text-muted-foreground">Cheque No: </span>
+                                <span className="font-medium">{payment.cheque_no}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+
+                  {/* Desktop Table View */}
+                  <div className="hidden md:block w-full min-w-0 overflow-x-auto">
+                    <Table className="min-w-[600px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="px-2">Payment Date</TableHead>
+                          <TableHead className="px-2">Amount</TableHead>
+                          <TableHead className="px-2">Payment Method</TableHead>
+                          <TableHead className="px-2">Transaction/Cheque</TableHead>
+                          <TableHead className="px-2">Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {customer.payments.map((payment: any) => (
+                          <TableRow key={payment.id}>
+                            <TableCell className="px-2 py-2 text-xs sm:text-sm">
+                              {payment.payment_date 
+                                ? formatDateTime(payment.payment_date)
+                                : formatDateTime(payment.created_at)
+                              }
+                            </TableCell>
+                            <TableCell className="px-2 py-2">
+                              <span className="font-medium text-xs sm:text-sm">
+                                ₹ {payment.amount?.toFixed(2) || '0.00'}
+                              </span>
+                            </TableCell>
+                            <TableCell className="px-2 py-2 text-xs sm:text-sm">
+                              {payment.payment_method || 'N/A'}
+                            </TableCell>
+                            <TableCell className="px-2 py-2 text-xs sm:text-sm text-muted-foreground">
+                              {payment.transaction_id && (
+                                <div>TX: {payment.transaction_id}</div>
+                              )}
+                              {payment.cheque_no && (
+                                <div>Cheque: {payment.cheque_no}</div>
+                              )}
+                              {!payment.transaction_id && !payment.cheque_no && '-'}
+                            </TableCell>
+                            <TableCell className="px-2 py-2">
+                              <Badge variant={
+                                payment.status === 'completed' ? 'default' :
+                                payment.status === 'pending' ? 'secondary' :
+                                payment.status === 'failed' ? 'destructive' : 'outline'
+                              } className="text-xs">
+                                {payment.status || 'pending'}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
                       </TableBody>
                     </Table>
                   </div>

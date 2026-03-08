@@ -814,6 +814,9 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
     console.log('Payment record created successfully:', payment.id);
 
     // Update credit_periods table if order has a credit period
+    // ONLY update credit_periods for 'completed' or 'refunded' status
+    // DO NOT update for 'pending' or 'failed' status
+    if (status === 'completed' || status === 'refunded') {
     try {
       // Find associated credit period
       const { data: foundCreditPeriod, error: creditError } = await (supabaseAdmin || supabase)
@@ -826,7 +829,7 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       if (creditError) {
         console.error('[CreatePayment] Error finding credit period for order:', creditError);
       } else if (foundCreditPeriod) {
-        console.log('[CreatePayment] Found credit period:', foundCreditPeriod.id);
+          console.log('[CreatePayment] Found credit period:', foundCreditPeriod.id, 'Status:', status);
         
         const currentCreditAmount = parseFloat(foundCreditPeriod.amount.toString());
         const paymentAmountToApply = Math.min(paymentAmount, currentCreditAmount);
@@ -841,20 +844,21 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
             return existing ? `${existing}\n${entry}` : entry;
           };
           
-          // Calculate remaining amount
+            if (status === 'completed') {
+              // For completed status, reduce credit amount
           const remainingAmount = currentCreditAmount - paymentAmountToApply;
           
           if (remainingAmount <= 0) {
             // Full payment - set amount to 0
             creditUpdateData.amount = 0;
             creditUpdateData.description = appendDescription(
-              `Fully paid off on ${new Date().toISOString().split('T')[0]} via ${payment_method}`
+                  `Payment of ₹${paymentAmountToApply.toFixed(2)} completed on ${new Date().toISOString().split('T')[0]} via ${payment_method}. Fully paid off.`
             );
           } else {
             // Partial payment - reduce the amount
             creditUpdateData.amount = remainingAmount;
             creditUpdateData.description = appendDescription(
-              `Partial payment of $${paymentAmountToApply.toFixed(2)} received on ${new Date().toISOString().split('T')[0]} via ${payment_method}. Remaining: $${remainingAmount.toFixed(2)}`
+                  `Payment of ₹${paymentAmountToApply.toFixed(2)} completed on ${new Date().toISOString().split('T')[0]} via ${payment_method}. Remaining: ₹${remainingAmount.toFixed(2)}`
             );
           }
           
@@ -869,9 +873,9 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
           if (updateCreditError) {
             console.error('[CreatePayment] Error updating credit period:', updateCreditError);
           } else {
-            console.log('[CreatePayment] Credit period updated successfully:', updatedCreditPeriod);
+                console.log('[CreatePayment] Credit period updated successfully for completed payment:', updatedCreditPeriod);
             
-            // Update customer's current_credit
+                // Update customer's current_credit (reduce it)
             const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
               .from('customers')
               .select('id, current_credit')
@@ -899,6 +903,61 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
                   paymentProcessed: paymentAmountToApply,
                   new: newCreditAmount
                 });
+                  }
+                }
+              }
+            } else if (status === 'refunded') {
+              // For refunded status, add amount back to credit
+              const refundAmount = paymentAmountToApply;
+              const newCreditAmount = currentCreditAmount + refundAmount;
+              
+              creditUpdateData.amount = newCreditAmount;
+              creditUpdateData.description = appendDescription(
+                `Payment of ₹${refundAmount.toFixed(2)} refunded on ${new Date().toISOString().split('T')[0]}. Credit amount restored to ₹${newCreditAmount.toFixed(2)}.`
+              );
+              
+              // Update credit period
+              const { data: updatedCreditPeriod, error: updateCreditError } = await (supabaseAdmin || supabase)
+                .from('credit_periods')
+                .update(creditUpdateData)
+                .eq('id', foundCreditPeriod.id)
+                .eq('company_id', req.companyId)
+                .select();
+                
+              if (updateCreditError) {
+                console.error('[CreatePayment] Error updating credit period:', updateCreditError);
+              } else {
+                console.log('[CreatePayment] Credit period updated successfully for refunded payment:', updatedCreditPeriod);
+                
+                // Update customer's current_credit (add it back)
+                const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
+                  .from('customers')
+                  .select('id, current_credit')
+                  .eq('user_id', order.user_id)
+                  .eq('company_id', req.companyId)
+                  .single();
+                  
+                if (customerError) {
+                  console.error('[CreatePayment] Error finding customer:', customerError);
+                } else if (customer) {
+                  const currentCredit = parseFloat(customer.current_credit.toString());
+                  const newCreditAmount = currentCredit + refundAmount;
+                  
+                  const { error: customerUpdateError } = await (supabaseAdmin || supabase)
+                    .from('customers')
+                    .update({ current_credit: newCreditAmount })
+                    .eq('id', customer.id)
+                    .eq('company_id', req.companyId);
+                    
+                  if (customerUpdateError) {
+                    console.error('[CreatePayment] Error updating customer credit:', customerUpdateError);
+                  } else {
+                    console.log('[CreatePayment] Customer current credit updated successfully for refund:', {
+                      previous: currentCredit,
+                      refundAmount: refundAmount,
+                      new: newCreditAmount
+                    });
+                  }
               }
             }
           }
@@ -907,6 +966,9 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
     } catch (creditUpdateError) {
       console.error('[CreatePayment] Error handling credit period update:', creditUpdateError);
       // Don't throw error as payment was created successfully
+      }
+    } else {
+      console.log('[CreatePayment] Skipping credit_periods update - payment status is', status, '(only updates for completed/refunded)');
     }
 
     // Update order payment_status based on total paid amount
@@ -1277,5 +1339,467 @@ export const createMissingPaymentRecords = async (req: Request, res: Response) =
       throw error;
     }
     throw new ApiError(500, 'Error creating missing payment records');
+  }
+};
+
+// Update payment status (admin and sales only)
+export const updatePayment = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status, amount, payment_method, transaction_id, cheque_no, payment_date } = req.body;
+
+    if (!req.user) {
+      throw new ApiError(401, 'Authentication required');
+    }
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    const userId = req.user.id;
+
+    // Check roles - only admin and sales can update payments
+    const isAdmin = await hasAnyRole(userId, req.companyId, ['admin']);
+    const isSales = await hasAnyRole(userId, req.companyId, ['sales']);
+
+    if (!isAdmin && !isSales) {
+      throw new ApiError(403, 'Admin or Sales access required');
+    }
+
+    // Get the payment to verify it exists and belongs to the company
+    const { data: payment, error: paymentError } = await (supabaseAdmin || supabase)
+      .from('payments')
+      .select('*, order_id')
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .single();
+
+    if (paymentError || !payment) {
+      throw new ApiError(404, 'Payment not found');
+    }
+
+    // Build update data
+    const updateData: any = {
+      updated_at: new Date().toISOString()
+    };
+
+    if (amount !== undefined) {
+      // Validate amount
+      const numericAmount = parseFloat(amount);
+      if (isNaN(numericAmount) || numericAmount <= 0) {
+        throw new ApiError(400, 'Amount must be a positive number');
+      }
+      updateData.amount = numericAmount;
+    }
+
+    if (status) {
+      // Validate status
+      const validStatuses = ['pending', 'completed', 'failed', 'refunded'];
+      if (!validStatuses.includes(status)) {
+        throw new ApiError(400, `Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+      }
+      updateData.status = status;
+    }
+
+    if (payment_method) {
+      updateData.payment_method = payment_method;
+    }
+
+    if (transaction_id !== undefined) {
+      updateData.transaction_id = transaction_id || null;
+    }
+
+    if (cheque_no !== undefined) {
+      updateData.cheque_no = cheque_no || null;
+    }
+
+    if (payment_date) {
+      updateData.payment_date = payment_date;
+    }
+
+    // Update payment
+    const { data: updatedPayment, error: updateError } = await (supabaseAdmin || supabase)
+      .from('payments')
+      .update(updateData)
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .select()
+      .single();
+
+    if (updateError) {
+      throw new ApiError(500, `Failed to update payment: ${updateError.message}`);
+    }
+
+    // Update credit_periods table based on payment status
+    // ONLY update for:
+    // 1. Status is 'completed' (reduce credit)
+    // 2. Status is 'refunded' (add credit back)
+    // 3. Status is changing FROM 'completed'/'refunded' TO 'pending'/'failed' (reverse previous change)
+    // DO NOT update credit_periods for:
+    // - Status is 'pending' and was already 'pending' or 'failed'
+    // - Status is 'failed' and was already 'pending' or 'failed'
+    // - Any other case where status is 'pending' or 'failed'
+    
+    // Early exit checks
+    if (!payment.order_id || !status) {
+      // No order_id or no status change - skip credit_periods update
+      console.log('[UpdatePayment] Skipping credit_periods update - no order_id or no status provided');
+    } else {
+      const isStatusPendingOrFailed = status === 'pending' || status === 'failed';
+      const wasStatusCompletedOrRefunded = payment.status === 'completed' || payment.status === 'refunded';
+      
+      // CRITICAL: Block any credit_periods update if status is pending/failed and wasn't previously completed/refunded
+      // This MUST be checked first before any other logic
+      if (isStatusPendingOrFailed && !wasStatusCompletedOrRefunded) {
+        console.log('[UpdatePayment] BLOCKED: Status is pending/failed and was not previously completed/refunded. Skipping credit_periods update entirely.', {
+          currentStatus: status,
+          previousStatus: payment.status,
+          orderId: payment.order_id
+        });
+        // Do NOT proceed with credit_periods update - exit early
+        // This prevents credit_periods from being updated for pending/failed payments
+        // Return early - do not execute any credit_periods update logic
+      } else {
+        // Proceed with credit_periods update logic
+        const isStatusChanging = status !== payment.status;
+        const isStatusCompleted = status === 'completed';
+        const isStatusRefunded = status === 'refunded';
+        
+        // Only update credit_periods if:
+        // 1. Status is being changed to 'completed' OR
+        // 2. Status is being changed to 'refunded' OR
+        // 3. Status is being changed to 'pending'/'failed' AND previous status was 'completed'/'refunded' (reversal)
+        const shouldUpdateCreditPeriods = isStatusChanging && 
+          (isStatusCompleted || isStatusRefunded || 
+           (isStatusPendingOrFailed && wasStatusCompletedOrRefunded));
+        
+        console.log('[UpdatePayment] Credit period update decision:', {
+          isStatusChanging,
+          isStatusCompleted,
+          isStatusRefunded,
+          isStatusPendingOrFailed,
+          wasStatusCompletedOrRefunded,
+          shouldUpdateCreditPeriods,
+          currentStatus: status,
+          previousStatus: payment.status,
+          orderId: payment.order_id
+        });
+        
+        if (shouldUpdateCreditPeriods) {
+          // Final safety check: Double-verify we're not updating for pending/failed without reversal
+          if (isStatusPendingOrFailed && !wasStatusCompletedOrRefunded) {
+            console.error('[UpdatePayment] ERROR: Should not reach here - pending/failed without reversal should have been blocked earlier!');
+            // Do not proceed - skip credit_periods update
+          } else {
+            try {
+              // Find associated credit period
+              const { data: foundCreditPeriod, error: creditError } = await (supabaseAdmin || supabase)
+                .from('credit_periods')
+                .select('*')
+                .eq('order_id', payment.order_id)
+                .eq('company_id', req.companyId)
+                .maybeSingle();
+                
+              if (creditError) {
+                console.error('[UpdatePayment] Error finding credit period for order:', creditError);
+              } else if (foundCreditPeriod) {
+                console.log('[UpdatePayment] Found credit period:', foundCreditPeriod.id, 'Status change:', payment.status, '->', status);
+                
+                const currentCreditAmount = parseFloat(foundCreditPeriod.amount.toString());
+                const paymentAmountToProcess = amount !== undefined ? parseFloat(amount.toString()) : parseFloat(payment.amount.toString());
+                const previousStatus = payment.status;
+                
+                // Helper to append to existing description instead of overwriting
+                const appendDescription = (entry: string) => {
+                  const existing = foundCreditPeriod.description || '';
+                  return existing ? `${existing}\n${entry}` : entry;
+                };
+                
+                // Prepare credit period update data
+                const creditUpdateData: any = {};
+                
+                // Handle status changes: reverse previous credit changes if needed
+                if ((previousStatus === 'completed' || previousStatus === 'refunded') && 
+                    (status === 'pending' || status === 'failed')) {
+                  // Reverse the previous credit change
+                  if (previousStatus === 'completed') {
+                    // Was completed, now pending/failed - add the amount back to credit
+                    const previousAmount = parseFloat(payment.amount.toString());
+                    const newCreditAmount = currentCreditAmount + previousAmount;
+                    
+                    creditUpdateData.amount = newCreditAmount;
+                    creditUpdateData.description = appendDescription(
+                      `Payment status changed from completed to ${status} on ${new Date().toISOString().split('T')[0]}. Credit amount restored to ₹${newCreditAmount.toFixed(2)}.`
+                    );
+                  } else if (previousStatus === 'refunded') {
+                    // Was refunded, now pending/failed - reduce credit again (reverse the refund)
+                    const previousAmount = parseFloat(payment.amount.toString());
+                    const newCreditAmount = Math.max(0, currentCreditAmount - previousAmount);
+                    
+                    creditUpdateData.amount = newCreditAmount;
+                    creditUpdateData.description = appendDescription(
+                      `Payment status changed from refunded to ${status} on ${new Date().toISOString().split('T')[0]}. Credit amount adjusted to ₹${newCreditAmount.toFixed(2)}.`
+                    );
+                  }
+                  
+                  // Update credit period
+                  if (creditUpdateData.amount !== undefined) {
+              const { data: updatedCreditPeriod, error: updateCreditError } = await (supabaseAdmin || supabase)
+                .from('credit_periods')
+                .update(creditUpdateData)
+                .eq('id', foundCreditPeriod.id)
+                .eq('company_id', req.companyId)
+                .select();
+                
+              if (updateCreditError) {
+                console.error('[UpdatePayment] Error updating credit period:', updateCreditError);
+              } else {
+                console.log('[UpdatePayment] Credit period updated for status reversal:', updatedCreditPeriod);
+                
+                // Update customer's current_credit
+                const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
+                  .from('customers')
+                  .select('id, current_credit')
+                  .eq('id', foundCreditPeriod.customer_id)
+                  .eq('company_id', req.companyId)
+                  .single();
+                  
+                if (customerError) {
+                  console.error('[UpdatePayment] Error finding customer:', customerError);
+                } else if (customer) {
+                  const currentCredit = parseFloat(customer.current_credit.toString());
+                  const previousAmount = parseFloat(payment.amount.toString());
+                  let newCreditAmount = currentCredit;
+                  
+                  if (previousStatus === 'completed') {
+                    // Add back the amount that was previously deducted
+                    newCreditAmount = currentCredit + previousAmount;
+                  } else if (previousStatus === 'refunded') {
+                    // Reduce by the amount that was previously added
+                    newCreditAmount = Math.max(0, currentCredit - previousAmount);
+                  }
+                  
+                  const { error: customerUpdateError } = await (supabaseAdmin || supabase)
+                    .from('customers')
+                    .update({ current_credit: newCreditAmount })
+                    .eq('id', customer.id)
+                    .eq('company_id', req.companyId);
+                    
+                  if (customerUpdateError) {
+                    console.error('[UpdatePayment] Error updating customer credit:', customerUpdateError);
+                  } else {
+                    console.log('[UpdatePayment] Customer current credit updated for status reversal:', {
+                      previous: currentCredit,
+                      new: newCreditAmount
+                    });
+                  }
+                }
+              }
+            }
+                } else if (status === 'completed') {
+                  // For completed status, reduce credit amount
+                  const paymentAmountToApply = Math.min(paymentAmountToProcess, currentCreditAmount);
+                  
+                  if (paymentAmountToApply > 0) {
+                    // If previous status was refunded, we need to reverse that first
+                    // But since we're setting to completed, we just apply the reduction
+                    const remainingAmount = currentCreditAmount - paymentAmountToApply;
+                    
+                    if (remainingAmount <= 0) {
+                      // Full payment - set amount to 0
+                      creditUpdateData.amount = 0;
+                      creditUpdateData.description = appendDescription(
+                        `Payment of ₹${paymentAmountToApply.toFixed(2)} completed on ${new Date().toISOString().split('T')[0]} via ${updateData.payment_method || payment.payment_method || 'N/A'}. Fully paid off.`
+                      );
+                    } else {
+                      // Partial payment - reduce the amount
+                      creditUpdateData.amount = remainingAmount;
+                      creditUpdateData.description = appendDescription(
+                        `Payment of ₹${paymentAmountToApply.toFixed(2)} completed on ${new Date().toISOString().split('T')[0]} via ${updateData.payment_method || payment.payment_method || 'N/A'}. Remaining: ₹${remainingAmount.toFixed(2)}`
+                      );
+                    }
+                    
+                    // Update credit period
+                    const { data: updatedCreditPeriod, error: updateCreditError } = await (supabaseAdmin || supabase)
+                      .from('credit_periods')
+                      .update(creditUpdateData)
+                      .eq('id', foundCreditPeriod.id)
+                      .eq('company_id', req.companyId)
+                      .select();
+                      
+                    if (updateCreditError) {
+                      console.error('[UpdatePayment] Error updating credit period:', updateCreditError);
+                    } else {
+                      console.log('[UpdatePayment] Credit period updated for completed payment:', updatedCreditPeriod);
+                      
+                      // Update customer's current_credit (reduce it)
+                      const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
+                        .from('customers')
+                        .select('id, current_credit')
+                        .eq('id', foundCreditPeriod.customer_id)
+                        .eq('company_id', req.companyId)
+                        .single();
+                        
+                      if (customerError) {
+                        console.error('[UpdatePayment] Error finding customer:', customerError);
+                      } else if (customer) {
+                        const currentCredit = parseFloat(customer.current_credit.toString());
+                        const newCreditAmount = Math.max(0, currentCredit - paymentAmountToApply);
+                        
+                        const { error: customerUpdateError } = await (supabaseAdmin || supabase)
+                          .from('customers')
+                          .update({ current_credit: newCreditAmount })
+                          .eq('id', customer.id)
+                          .eq('company_id', req.companyId);
+                          
+                        if (customerUpdateError) {
+                          console.error('[UpdatePayment] Error updating customer credit:', customerUpdateError);
+                        } else {
+                          console.log('[UpdatePayment] Customer current credit updated:', {
+                            previous: currentCredit,
+                            paymentProcessed: paymentAmountToApply,
+                            new: newCreditAmount
+                          });
+                        }
+                      }
+                    }
+                  }
+                } else if (status === 'refunded') {
+                  // For refunded status, add amount back to credit
+                  const refundAmount = paymentAmountToProcess;
+                  
+                  // If previous status was completed, we need to reverse that reduction
+                  // Add the refunded amount back to credit
+                  const newCreditAmount = currentCreditAmount + refundAmount;
+                  
+                  creditUpdateData.amount = newCreditAmount;
+                  creditUpdateData.description = appendDescription(
+                    `Payment of ₹${refundAmount.toFixed(2)} refunded on ${new Date().toISOString().split('T')[0]}. Credit amount restored to ₹${newCreditAmount.toFixed(2)}.`
+                  );
+                  
+                  // Update credit period
+                  const { data: updatedCreditPeriod, error: updateCreditError } = await (supabaseAdmin || supabase)
+                    .from('credit_periods')
+                    .update(creditUpdateData)
+                    .eq('id', foundCreditPeriod.id)
+                    .eq('company_id', req.companyId)
+                    .select();
+                    
+                  if (updateCreditError) {
+                    console.error('[UpdatePayment] Error updating credit period:', updateCreditError);
+                  } else {
+                    console.log('[UpdatePayment] Credit period updated for refunded payment:', updatedCreditPeriod);
+                    
+                    // Update customer's current_credit (add it back)
+                    const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
+                      .from('customers')
+                      .select('id, current_credit')
+                      .eq('id', foundCreditPeriod.customer_id)
+                      .eq('company_id', req.companyId)
+                      .single();
+                      
+                    if (customerError) {
+                      console.error('[UpdatePayment] Error finding customer:', customerError);
+                    } else if (customer) {
+                      const currentCredit = parseFloat(customer.current_credit.toString());
+                      const newCreditAmount = currentCredit + refundAmount;
+                      
+                      const { error: customerUpdateError } = await (supabaseAdmin || supabase)
+                        .from('customers')
+                        .update({ current_credit: newCreditAmount })
+                        .eq('id', customer.id)
+                        .eq('company_id', req.companyId);
+                        
+                      if (customerUpdateError) {
+                        console.error('[UpdatePayment] Error updating customer credit:', customerUpdateError);
+                      } else {
+                        console.log('[UpdatePayment] Customer current credit updated for refund:', {
+                          previous: currentCredit,
+                          refundAmount: refundAmount,
+                          new: newCreditAmount
+                        });
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (creditUpdateError) {
+              console.error('[UpdatePayment] Error handling credit period update:', creditUpdateError);
+              // Don't throw error as payment was updated successfully
+            }
+          }
+        }
+      }
+    }
+
+    // If payment status changed to completed or amount changed, update order payment status
+    if ((status === 'completed' || amount !== undefined) && payment.order_id) {
+      try {
+        // Get order total
+        const { data: order } = await (supabaseAdmin || supabase)
+          .from('orders')
+          .select('total_amount, payment_status')
+          .eq('id', payment.order_id)
+          .eq('company_id', req.companyId)
+          .single();
+
+        if (order) {
+          // Calculate total paid amount for this order
+          // Get all payments for this order (after the update, so it includes the updated amount)
+          const { data: allPayments } = await (supabaseAdmin || supabase)
+            .from('payments')
+            .select('amount, status')
+            .eq('order_id', payment.order_id)
+            .eq('company_id', req.companyId);
+
+          if (allPayments) {
+            // Sum only completed payments
+            const totalPaid = allPayments
+              .filter(p => p.status === 'completed')
+              .reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+
+            const orderTotal = parseFloat(order.total_amount.toString());
+            
+            let newPaymentStatus = order.payment_status;
+            if (totalPaid >= orderTotal) {
+              newPaymentStatus = 'paid';
+            } else if (totalPaid > 0) {
+              newPaymentStatus = 'partial';
+            } else {
+              // If no completed payments, set to pending (unless it was credit)
+              if (order.payment_status !== 'credit') {
+                newPaymentStatus = 'pending';
+              }
+            }
+
+            // Update order payment_status if it changed
+            if (newPaymentStatus !== order.payment_status) {
+              await (supabaseAdmin || supabase)
+                .from('orders')
+                .update({ 
+                  payment_status: newPaymentStatus,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', payment.order_id)
+                .eq('company_id', req.companyId);
+            }
+          }
+        }
+      } catch (orderError) {
+        console.error('Error updating order payment status:', orderError);
+        // Don't fail the payment update if order update fails
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: updatedPayment,
+      message: 'Payment updated successfully'
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, 'Error updating payment');
   }
 }; 

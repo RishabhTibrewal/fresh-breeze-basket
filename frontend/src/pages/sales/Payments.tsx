@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Card,
   CardContent,
@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Eye, DollarSign, CheckCircle, Clock, XCircle } from "lucide-react";
+import { Plus, Search, Eye, DollarSign, CheckCircle, Clock, XCircle, Edit } from "lucide-react";
 import { paymentsService, Payment } from '@/api/payments';
 import { useCanAccess } from '@/hooks/usePermissions';
 import {
@@ -30,14 +30,32 @@ import {
 } from "@/components/ui/select";
 import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 export default function Payments() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const canWrite = useCanAccess('sales.write');
   
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [methodFilter, setMethodFilter] = useState<string>('all');
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<string>('');
+  const [updateAmount, setUpdateAmount] = useState<string>('');
+  const [updateMethod, setUpdateMethod] = useState<string>('');
+  const [updateTransactionId, setUpdateTransactionId] = useState<string>('');
+  const [updateChequeNo, setUpdateChequeNo] = useState<string>('');
+  const [updatePaymentDate, setUpdatePaymentDate] = useState<string>('');
 
   // Fetch payments
   const { data: payments = [], isLoading } = useQuery({
@@ -98,6 +116,57 @@ export default function Payments() {
       cheque: 'Cheque',
     };
     return methodMap[method] || method;
+  };
+
+  const updatePaymentMutation = useMutation({
+    mutationFn: (data: { id: string; status?: string; amount?: number; payment_method?: string; transaction_id?: string | null; cheque_no?: string | null; payment_date?: string }) => {
+      const { id, ...paymentData } = data;
+      return paymentsService.update(id, paymentData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      toast.success('Payment updated successfully');
+      setEditingPayment(null);
+      setUpdateStatus('');
+      setUpdateAmount('');
+      setUpdateMethod('');
+      setUpdateTransactionId('');
+      setUpdateChequeNo('');
+      setUpdatePaymentDate('');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to update payment');
+    },
+  });
+
+  const handleEditPayment = (payment: Payment) => {
+    setEditingPayment(payment);
+    setUpdateStatus(payment.status);
+    setUpdateAmount(payment.amount.toString());
+    setUpdateMethod(payment.payment_method);
+    setUpdateTransactionId(payment.transaction_id || '');
+    setUpdateChequeNo(payment.cheque_no || '');
+    setUpdatePaymentDate(payment.payment_date || '');
+  };
+
+  const handleUpdatePayment = () => {
+    if (!editingPayment) return;
+    
+    const amount = parseFloat(updateAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error('Please enter a valid amount');
+      return;
+    }
+    
+    updatePaymentMutation.mutate({
+      id: editingPayment.id,
+      status: updateStatus,
+      amount: amount,
+      payment_method: updateMethod,
+      transaction_id: updateTransactionId || null,
+      cheque_no: updateChequeNo || null,
+      payment_date: updatePaymentDate || undefined,
+    });
   };
 
   return (
@@ -281,13 +350,26 @@ export default function Payments() {
                         {getStatusBadge(payment.status)}
                       </TableCell>
                       <TableCell>
+                        <div className="flex items-center gap-2">
+                          {canWrite && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleEditPayment(payment)}
+                              title="Update Payment"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          )}
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => navigate(`/sales/orders/${payment.order_id}`)}
+                            title="View Order"
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -297,6 +379,112 @@ export default function Payments() {
           )}
         </CardContent>
       </Card>
+
+      {/* Update Payment Dialog */}
+      <Dialog open={!!editingPayment} onOpenChange={(open) => !open && setEditingPayment(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Update Payment Status</DialogTitle>
+            <DialogDescription>
+              Update payment status and details for payment ID: {editingPayment?.id?.substring(0, 8)}...
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="amount">Payment Amount *</Label>
+              <Input
+                id="amount"
+                type="number"
+                step="0.01"
+                min="0"
+                value={updateAmount}
+                onChange={(e) => setUpdateAmount(e.target.value)}
+                placeholder="Enter amount"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="status">Payment Status *</Label>
+              <Select value={updateStatus} onValueChange={setUpdateStatus}>
+                <SelectTrigger id="status">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="refunded">Refunded</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="method">Payment Method</Label>
+              <Select value={updateMethod} onValueChange={setUpdateMethod}>
+                <SelectTrigger id="method">
+                  <SelectValue placeholder="Select method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="neft">NEFT</SelectItem>
+                  <SelectItem value="rtgs">RTGS</SelectItem>
+                  <SelectItem value="upi">UPI</SelectItem>
+                  <SelectItem value="cheque">Cheque</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="transaction_id">Transaction ID</Label>
+              <Input
+                id="transaction_id"
+                value={updateTransactionId}
+                onChange={(e) => setUpdateTransactionId(e.target.value)}
+                placeholder="Enter transaction ID"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cheque_no">Cheque Number</Label>
+              <Input
+                id="cheque_no"
+                value={updateChequeNo}
+                onChange={(e) => setUpdateChequeNo(e.target.value)}
+                placeholder="Enter cheque number"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="payment_date">Payment Date</Label>
+              <Input
+                id="payment_date"
+                type="date"
+                value={updatePaymentDate}
+                onChange={(e) => setUpdatePaymentDate(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditingPayment(null);
+                setUpdateStatus('');
+                setUpdateAmount('');
+                setUpdateMethod('');
+                setUpdateTransactionId('');
+                setUpdateChequeNo('');
+                setUpdatePaymentDate('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleUpdatePayment}
+              disabled={updatePaymentMutation.isPending || !updateStatus || !updateAmount}
+            >
+              {updatePaymentMutation.isPending ? 'Updating...' : 'Update Payment'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

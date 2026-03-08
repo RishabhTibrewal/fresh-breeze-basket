@@ -30,7 +30,7 @@ import { cn } from '@/lib/utils';
 
 const warehouseSchema = z.object({
   name: z.string().min(1, 'Warehouse name is required'),
-  code: z.string().min(1, 'Warehouse code is required'),
+  code: z.string().optional(), // Auto-generated on backend
   address: z.string().optional(),
   city: z.string().optional(),
   state: z.string().optional(),
@@ -119,7 +119,8 @@ export default function WarehouseForm({ warehouse, onSuccess, onCancel }: Wareho
 
   const createMutation = useMutation({
     mutationFn: async (data: WarehouseFormValues) => {
-      const { warehouse_manager_ids, ...warehouseData } = data;
+      const { warehouse_manager_ids, code, ...warehouseData } = data;
+      // Don't send code field - it will be auto-generated on backend
       const createdWarehouse = await warehousesService.create(warehouseData as any);
       
       // Assign warehouse managers if any selected (filter out empty strings)
@@ -229,12 +230,17 @@ export default function WarehouseForm({ warehouse, onSuccess, onCancel }: Wareho
             name="code"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Warehouse Code *</FormLabel>
+                <FormLabel>Warehouse Code {warehouse ? '' : '(Auto-generated)'}</FormLabel>
                 <FormControl>
-                  <Input placeholder="WH-001" {...field} />
+                  <Input 
+                    placeholder={warehouse ? "WH-2024-001" : "Auto-generated (e.g., WH-2024-001)"} 
+                    {...field} 
+                    disabled={!warehouse}
+                    value={warehouse ? field.value : 'Auto-generated on save'}
+                  />
                 </FormControl>
                 <FormDescription>
-                  Unique code for this warehouse
+                  {warehouse ? 'Warehouse code (can be edited)' : 'Code will be auto-generated automatically'}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

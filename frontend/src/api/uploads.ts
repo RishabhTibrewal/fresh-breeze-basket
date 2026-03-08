@@ -25,14 +25,10 @@ export const uploadsService = {
     const formData = new FormData();
     formData.append('image', file);
 
+    // Content-Type header is automatically removed by apiClient interceptor for FormData
     const { data } = await apiClient.post<{ success: boolean; url: string; fileName: string }>(
       `/uploads/category/${categoryId}`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
+      formData
     );
 
     return {
@@ -50,14 +46,18 @@ export const uploadsService = {
     formData.append('images', file);
     formData.append('isPrimary', isPrimary.toString());
 
+    console.log('[Upload Product Image] Sending request:', {
+      productId,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      isPrimary
+    });
+
+    // Content-Type header is automatically removed by apiClient interceptor for FormData
     const { data } = await apiClient.post<ProductImageUploadResponse>(
       `/uploads/product/${productId}`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
+      formData
     );
 
     return {
@@ -77,14 +77,10 @@ export const uploadsService = {
     });
     formData.append('isPrimary', isPrimary.toString());
 
+    // Content-Type header is automatically removed by apiClient interceptor for FormData
     const { data } = await apiClient.post<ProductImageUploadResponse>(
       `/uploads/product/${productId}`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
+      formData
     );
 
     return data;
@@ -98,14 +94,10 @@ export const uploadsService = {
     formData.append('invoiceFile', file);
     formData.append('purchaseInvoiceId', purchaseInvoiceId);
 
+    // Content-Type header is automatically removed by apiClient interceptor for FormData
     const { data } = await apiClient.post<{ success: boolean; url: string; fileName: string; fileType: string }>(
       `/uploads/purchase-invoice`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
+      formData
     );
 
     return {
@@ -113,6 +105,55 @@ export const uploadsService = {
       url: data.url,
       fileName: data.fileName,
       fileType: data.fileType,
+    };
+  },
+
+  /**
+   * Upload brand image (generic image upload)
+   * Returns just the URL string for convenience
+   */
+  async uploadImage(file: File, folder: string = 'brands'): Promise<string> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('folder', folder);
+
+    // Content-Type header is automatically removed by apiClient interceptor for FormData
+    const { data } = await apiClient.post<{ success: boolean; url: string; fileName: string }>(
+      `/uploads/file`,
+      formData
+    );
+
+    if (!data.success || !data.url) {
+      throw new Error('Failed to upload image');
+    }
+
+    return data.url;
+  },
+
+  /**
+   * Upload brand image (with brandId for better organization)
+   */
+  async uploadBrandImage(brandId: string, file: File): Promise<UploadResponse> {
+    const formData = new FormData();
+    formData.append('image', file);
+
+    console.log('[Upload Brand Image] Sending request:', {
+      brandId,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type
+    });
+
+    // Content-Type header is automatically removed by apiClient interceptor for FormData
+    const { data } = await apiClient.post<{ success: boolean; url: string; fileName: string }>(
+      `/uploads/brand/${brandId}`,
+      formData
+    );
+
+    return {
+      success: data.success,
+      url: data.url,
+      fileName: data.fileName,
     };
   },
 };

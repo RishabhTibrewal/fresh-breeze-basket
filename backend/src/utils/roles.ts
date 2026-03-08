@@ -198,8 +198,8 @@ export async function assignUserRoles(
 
     if (error) {
       console.error('Error calling assign_user_roles RPC:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error.message || 'Failed to assign roles',
         details: error.details || undefined
       };
@@ -207,7 +207,7 @@ export async function assignUserRoles(
 
     // Parse the result from the function
     const result = data as { success: boolean; error?: string; deleted_count?: number; inserted_count?: number };
-    
+
     if (!result.success) {
       console.error('[assignUserRoles] Function returned error:', result);
       return { 
@@ -217,8 +217,8 @@ export async function assignUserRoles(
     }
 
     console.log('[assignUserRoles] Successfully assigned roles:', {
-      userId,
-      companyId,
+        userId,
+        companyId,
       roleNames,
       deletedCount: result.deleted_count,
       insertedCount: result.inserted_count

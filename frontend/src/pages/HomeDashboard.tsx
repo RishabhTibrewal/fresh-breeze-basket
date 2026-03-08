@@ -12,7 +12,12 @@ import { useAuth } from '@/contexts/AuthContext';
 
 const ModuleCard: React.FC<{ module: ModuleConfig }> = ({ module }) => {
   const navigate = useNavigate();
-  const { data: kpiData, isLoading } = useModuleKPIs(module.key);
+  const { data: kpiData, isLoading, error } = useModuleKPIs(module.key);
+
+  // Log KPI errors for debugging
+  if (error) {
+    console.error(`[ModuleCard] Error loading KPIs for ${module.key}:`, error);
+  }
 
   return (
     <Card 
@@ -93,6 +98,18 @@ const HomeDashboard: React.FC = () => {
 
   const userPermissionCodes = permissions.map(p => p.permission_code);
   const accessibleModules = getAccessibleModules(userPermissionCodes, companyModules);
+
+  // Debug logging
+  console.log('[HomeDashboard] Debug info:', {
+    userPermissionCodes,
+    companyModules,
+    accessibleModules: accessibleModules.map(m => m.key),
+    procurementModule: {
+      inCompanyModules: companyModules.includes('procurement'),
+      hasPermission: userPermissionCodes.includes('procurement.read'),
+      showOnDashboard: true
+    }
+  });
 
   return (
     <div className="min-h-screen bg-gray-50">

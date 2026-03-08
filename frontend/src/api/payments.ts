@@ -130,5 +130,17 @@ export const paymentsService = {
   }): Promise<Payment> {
     const { data } = await apiClient.post<{ success: boolean; data: Payment }>('/payments/create-record', paymentData);
     return data.data;
+  },
+
+  async update(id: string, paymentData: {
+    status?: 'pending' | 'completed' | 'failed' | 'refunded';
+    amount?: number;
+    payment_method?: string;
+    transaction_id?: string | null;
+    cheque_no?: string | null;
+    payment_date?: string;
+  }): Promise<Payment> {
+    const { data } = await apiClient.put<{ success: boolean; data: Payment }>(`/payments/${id}`, paymentData);
+    return data.data;
   }
 }; 

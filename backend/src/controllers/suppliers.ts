@@ -3,6 +3,40 @@ import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError, ValidationError } from '../middleware/error';
 
 /**
+ * Generate supplier code (e.g., SUP-2024-001)
+ */
+const generateSupplierCode = async (companyId: string): Promise<string> => {
+  const year = new Date().getFullYear();
+  
+  const adminClient = supabaseAdmin || supabase;
+  const { data: latestSupplier, error } = await adminClient
+    .from('suppliers')
+    .select('supplier_code')
+    .eq('company_id', companyId)
+    .ilike('supplier_code', `SUP-${year}-%`)
+    .order('supplier_code', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error fetching latest supplier code:', error);
+  }
+
+  let sequence = 1;
+  if (latestSupplier && latestSupplier.supplier_code) {
+    const parts = latestSupplier.supplier_code.split('-');
+    if (parts.length === 3) {
+      const parsedSequence = parseInt(parts[2], 10);
+      if (!isNaN(parsedSequence) && parsedSequence > 0) {
+        sequence = parsedSequence + 1;
+      }
+    }
+  }
+
+  return `SUP-${year}-${sequence.toString().padStart(3, '0')}`;
+};
+
+/**
  * Create a new supplier
  */
 export const createSupplier = async (req: Request, res: Response, next: NextFunction) => {
@@ -44,11 +78,14 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
       throw new ValidationError('Company context is required');
     }
 
+    // Auto-generate supplier code if not provided
+    const finalSupplierCode = supplier_code || await generateSupplierCode(req.companyId);
+
     // Create supplier
     const { data: supplier, error: supplierError } = await (supabaseAdmin || supabase)
       .from('suppliers')
       .insert({
-        supplier_code,
+        supplier_code: finalSupplierCode,
         name,
         contact_name,
         email,

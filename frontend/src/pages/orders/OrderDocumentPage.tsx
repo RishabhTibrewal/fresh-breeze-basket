@@ -239,9 +239,9 @@ export default function OrderDocumentPage() {
 
       const returnItems = (order.order_items || (order as any).items || []).map(
         (item: any) => ({
-          order_item_id: item.id,
+          product_id: item.product_id,
+          variant_id: item.variant_id || undefined,
           quantity: item.quantity,
-          reason: returnReason || "Return requested",
         })
       );
 

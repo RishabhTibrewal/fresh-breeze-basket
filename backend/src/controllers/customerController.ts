@@ -147,6 +147,24 @@ export const getCustomerById = async (req: Request, res: Response) => {
       console.error('Error fetching credit periods:', creditError);
     }
 
+    // Get payments for customer's orders
+    const orderIds = orders?.map(order => order.id) || [];
+    let payments: any[] = [];
+    if (orderIds.length > 0) {
+      const { data: paymentsData, error: paymentsError } = await (supabaseAdmin || supabase)
+        .from('payments')
+        .select('*')
+        .in('order_id', orderIds)
+        .eq('company_id', req.companyId)
+        .order('created_at', { ascending: false });
+
+      if (paymentsError) {
+        console.error('Error fetching payments:', paymentsError);
+      } else {
+        payments = paymentsData || [];
+      }
+    }
+
     // Calculate order metrics
     const filteredOrders = orders?.filter(order => order.status !== 'cancelled') || [];
     const totalOrders = filteredOrders.length;
@@ -170,6 +188,8 @@ export const getCustomerById = async (req: Request, res: Response) => {
       current_credit: customer.current_credit,
       credit_period_days: customer.credit_period_days,
       credit_periods: creditPeriods || [],
+      orders: filteredOrders || [],
+      payments: payments || [],
       active_credit: activeCredit
     };
 
@@ -339,6 +359,9 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       console.error('Error fetching customer orders:', ordersError);
     }
 
+    // Filter orders (exclude cancelled) - declare early so it can be used for payments
+    const filteredOrders = orders?.filter(order => order.status !== 'cancelled') || [];
+
     // Get credit periods information (complete ledger, filtered by company_id)
     const { data: creditPeriods, error: creditError } = await adminClient
       .from('credit_periods')
@@ -351,8 +374,25 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       console.error('Error fetching credit periods:', creditError);
     }
 
+    // Get payments for customer's orders
+    const orderIds = filteredOrders.map(order => order.id);
+    let payments: any[] = [];
+    if (orderIds.length > 0) {
+      const { data: paymentsData, error: paymentsError } = await adminClient
+        .from('payments')
+        .select('*')
+        .in('order_id', orderIds)
+        .eq('company_id', req.companyId)
+        .order('created_at', { ascending: false });
+
+      if (paymentsError) {
+        console.error('Error fetching payments:', paymentsError);
+      } else {
+        payments = paymentsData || [];
+      }
+    }
+
     // Calculate order metrics
-    const filteredOrders = orders?.filter(order => order.status !== 'cancelled') || [];
     const totalOrders = filteredOrders.length;
     const totalSpent = filteredOrders.reduce((sum, order) => sum + parseFloat(order.total_amount.toString()), 0) || 0;
     
@@ -379,6 +419,7 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       credit_period_days: customer.credit_period_days,
       credit_periods: creditPeriods || [],
       orders: filteredOrders || [], // Include orders for wholesale customers too
+      payments: payments || [], // Include payments for customer's orders
       profile: profile || null,
       sales_executive_id: customer.sales_executive_id,
       created_at: customer.created_at,

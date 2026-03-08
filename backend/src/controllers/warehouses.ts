@@ -2,6 +2,40 @@ import { Request, Response } from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
+/**
+ * Generate warehouse code (e.g., WH-2024-001)
+ */
+const generateWarehouseCode = async (companyId: string): Promise<string> => {
+  const year = new Date().getFullYear();
+  
+  const adminClient = supabaseAdmin || supabase;
+  const { data: latestWarehouse, error } = await adminClient
+    .from('warehouses')
+    .select('code')
+    .eq('company_id', companyId)
+    .ilike('code', `WH-${year}-%`)
+    .order('code', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error fetching latest warehouse code:', error);
+  }
+
+  let sequence = 1;
+  if (latestWarehouse && latestWarehouse.code) {
+    const parts = latestWarehouse.code.split('-');
+    if (parts.length === 3) {
+      const parsedSequence = parseInt(parts[2], 10);
+      if (!isNaN(parsedSequence) && parsedSequence > 0) {
+        sequence = parsedSequence + 1;
+      }
+    }
+  }
+
+  return `WH-${year}-${sequence.toString().padStart(3, '0')}`;
+};
+
 // Get all warehouses
 export const getAllWarehouses = async (req: Request, res: Response) => {
   try {
@@ -93,15 +127,18 @@ export const createWarehouse = async (req: Request, res: Response) => {
       warehouse_manager_ids = []
     } = req.body;
     
-    if (!name || !code) {
-      throw new ApiError(400, 'Name and code are required');
+    if (!name) {
+      throw new ApiError(400, 'Name is required');
     }
+    
+    // Always auto-generate warehouse code (ignore provided code)
+    const warehouseCode = await generateWarehouseCode(req.companyId);
     
     const { data, error } = await (supabaseAdmin || supabase)
       .from('warehouses')
       .insert({
         name,
-        code,
+        code: warehouseCode,
         address,
         city,
         state,

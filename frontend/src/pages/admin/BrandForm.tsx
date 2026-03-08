@@ -102,20 +102,6 @@ export default function BrandForm() {
     },
   });
 
-  const handleLogoUpload = async (file: File) => {
-    setIsUploading(true);
-    try {
-      const uploadedUrl = await uploadsService.uploadImage(file);
-      setLogoUrl(uploadedUrl);
-      form.setValue('logo_url', uploadedUrl);
-      toast.success('Logo uploaded successfully');
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to upload logo');
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
   const generateSlug = (name: string) => {
     return name
       .toLowerCase()
@@ -249,13 +235,31 @@ export default function BrandForm() {
                     <FormLabel>Brand Logo</FormLabel>
                     <FormControl>
                       <ImageUpload
-                        value={logoUrl}
-                        onChange={(file) => {
-                          if (file) {
-                            handleLogoUpload(file);
+                        value={field.value || ''}
+                        onChange={(url) => {
+                          setLogoUrl(url || '');
+                          field.onChange(url || null);
+                        }}
+                        onFileSelect={async (file) => {
+                          try {
+                            setIsUploading(true);
+                            let uploadedUrl: string;
+                            
+                            // Use brand-specific endpoint if editing (brandId exists), otherwise use generic upload
+                            if (isEditMode && id) {
+                              const result = await uploadsService.uploadBrandImage(id, file);
+                              uploadedUrl = result.url;
                           } else {
-                            setLogoUrl('');
-                            field.onChange(null);
+                              uploadedUrl = await uploadsService.uploadImage(file, 'brands');
+                            }
+                            
+                            setLogoUrl(uploadedUrl);
+                            field.onChange(uploadedUrl);
+                            toast.success('Logo uploaded successfully');
+                          } catch (error: any) {
+                            toast.error(error.message || 'Failed to upload logo');
+                          } finally {
+                            setIsUploading(false);
                           }
                         }}
                         disabled={isUploading}

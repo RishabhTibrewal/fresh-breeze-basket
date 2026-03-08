@@ -28,12 +28,15 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Spinner } from "@/components/ui/spinner";
+import { Label } from "@/components/ui/label";
 import { productsService, type Product, type CreateProductInput } from "@/api/products";
 import { categoriesService, type Category } from "@/api/categories";
 import { BrandSelector } from "@/components/brands/BrandSelector";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { ImageUpload } from "@/components/ui/image-upload";
+import { uploadsService } from "@/api/uploads";
 
 // Catalog-only product form schema
 const formSchema = z.object({
@@ -58,6 +61,9 @@ export default function ProductForm() {
   const isMobile = useIsMobile();
   const [currentStep, setCurrentStep] = useState(1);
   const isEditMode = Boolean(id);
+  const [productImageFile, setProductImageFile] = useState<File | null>(null);
+  const [productImageUrl, setProductImageUrl] = useState<string>('');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   // Determine base path based on current location
   const basePath = location.pathname.startsWith('/inventory') ? '/inventory' : '/admin';
@@ -106,12 +112,46 @@ export default function ProductForm() {
         product_code: product.product_code || "",
         slug: product.slug || "",
       });
+      // Set product image URL if available
+      // Prioritize image_url (main product image) over additional_images
+      if (product.image_url) {
+        setProductImageUrl(product.image_url);
+      } else if (product.additional_images && product.additional_images.length > 0) {
+        setProductImageUrl(product.additional_images[0]);
+      }
     }
   }, [product, form]);
 
   const createProduct = useMutation({
     mutationFn: (data: CreateProductInput) => productsService.create(data),
-    onSuccess: () => {
+    onSuccess: async (createdProduct) => {
+      // Upload image if provided
+      if (productImageFile && createdProduct.id) {
+        try {
+          setIsUploadingImage(true);
+          
+          // Verify file is still valid
+          if (!(productImageFile instanceof File)) {
+            throw new Error('Invalid file object');
+          }
+          
+          console.log('[ProductForm] Uploading image:', {
+            productId: createdProduct.id,
+            fileName: productImageFile.name,
+            fileSize: productImageFile.size,
+            fileType: productImageFile.type
+          });
+          
+          await uploadsService.uploadProductImage(createdProduct.id, productImageFile, true);
+          toast.success("Product image uploaded successfully");
+        } catch (error: any) {
+          console.error('Error uploading product image:', error);
+          const errorMessage = error.response?.data?.error || error.message || "Product created but image upload failed";
+          toast.error(errorMessage);
+        } finally {
+          setIsUploadingImage(false);
+        }
+      }
       queryClient.invalidateQueries({ queryKey: ["products"] });
       toast.success("Product created successfully");
       navigate(`${basePath}/products`);
@@ -124,7 +164,34 @@ export default function ProductForm() {
   const updateProduct = useMutation({
     mutationFn: (data: { id: string; data: CreateProductInput }) => 
       productsService.update(data.id, data.data),
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Upload image if a new file was selected
+      if (productImageFile && id) {
+        try {
+          setIsUploadingImage(true);
+          
+          // Verify file is still valid
+          if (!(productImageFile instanceof File)) {
+            throw new Error('Invalid file object');
+          }
+          
+          console.log('[ProductForm] Uploading image for update:', {
+            productId: id,
+            fileName: productImageFile.name,
+            fileSize: productImageFile.size,
+            fileType: productImageFile.type
+          });
+          
+          await uploadsService.uploadProductImage(id, productImageFile, true);
+          toast.success("Product image uploaded successfully");
+        } catch (error: any) {
+          console.error('Error uploading product image:', error);
+          const errorMessage = error.response?.data?.error || error.message || "Product updated but image upload failed";
+          toast.error(errorMessage);
+        } finally {
+          setIsUploadingImage(false);
+        }
+      }
       queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["product", id] });
       toast.success("Product updated successfully");
@@ -486,6 +553,30 @@ export default function ProductForm() {
                     </FormItem>
                   )}
                 />
+
+                <div className="space-y-2">
+                  <Label>Product Image</Label>
+                  <ImageUpload
+                    value={productImageUrl}
+                    onChange={(url) => {
+                      setProductImageUrl(url);
+                      if (!url) {
+                        setProductImageFile(null);
+                      }
+                    }}
+                    onFileSelect={(file) => {
+                      setProductImageFile(file);
+                      // Create preview URL
+                      const previewUrl = URL.createObjectURL(file);
+                      setProductImageUrl(previewUrl);
+                    }}
+                    disabled={isUploadingImage}
+                    size="default"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Upload a product image (optional). This will be set as the primary image.
+                  </p>
+                </div>
 
                 {!isMobile && (
                   <Button type="button" onClick={handleNext} variant="outline">

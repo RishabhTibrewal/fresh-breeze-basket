@@ -344,7 +344,7 @@ const App: React.FC = () => {
                       <Route index element={<AdminHome />} />
                       <Route path="products" element={<ProductList />} />
                       {/* E-commerce orders are sales orders - use same Orders component */}
-                      <Route path="orders" element={<Orders />} />
+                      <Route path="orders" element={<AdminOrderList />} />
                       <Route path="settings" element={<AdminSettings />} />
                     </Route>
                     

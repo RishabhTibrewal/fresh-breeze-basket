@@ -7,7 +7,8 @@ import {
   getAllPayments,
   linkPaymentToOrder,
   createPaymentRecord,
-  createMissingPaymentRecords
+  createMissingPaymentRecords,
+  updatePayment
 } from '../controllers';
 import { protect } from '../middleware/auth';
 
@@ -25,6 +26,7 @@ router.get('/history', protect, getPaymentHistory);
 router.post('/link-to-order', protect, linkPaymentToOrder);
 router.post('/create-record', protect, createPaymentRecord);
 router.post('/create-missing-records', protect, createMissingPaymentRecords);
+router.put('/:id', protect, updatePayment);
 router.get('/:id', protect, getPaymentById);
 
 export default router; 

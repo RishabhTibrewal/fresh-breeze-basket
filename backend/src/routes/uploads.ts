@@ -10,7 +10,7 @@ import {
   isImageFile,
   isPdfFile 
 } from '../utils/imageCompression';
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 
 // Extend Express Request type to include file from multer
 interface MulterRequest extends express.Request {
@@ -289,13 +289,154 @@ router.post('/category/:categoryId', protect, adminOnly, upload.single('image'),
 });
 
 /**
+ * Upload brand image to Cloudflare R2
+ * POST /api/uploads/brand/:brandId
+ * Requires authentication and admin role
+ */
+router.post('/brand/:brandId', protect, adminOnly, upload.single('image'), async (req: MulterRequest, res: Response) => {
+  try {
+    const file = req.file;
+    const { brandId } = req.params;
+
+    // Debug logging
+    console.log('[Brand Upload] Request received:', {
+      brandId,
+      hasFile: !!file,
+      fileField: file?.fieldname,
+      contentType: req.headers['content-type'],
+      bodyKeys: Object.keys(req.body || {}),
+      fileSize: file?.size,
+      fileName: file?.originalname
+    });
+
+    if (!file) {
+      console.error('[Brand Upload] No file received. Request details:', {
+        headers: req.headers,
+        body: req.body,
+        files: (req as any).files
+      });
+      return res.status(400).json({ 
+        success: false,
+        error: 'No file uploaded' 
+      });
+    }
+
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Company context is required'
+      });
+    }
+
+    // Validate file type
+    if (!isImageFile(file.mimetype)) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Invalid file type. Only images (JPEG, PNG, WebP) are allowed.' 
+      });
+    }
+
+    // Compress image
+    const compressedBuffer = await compressCategoryImage(file.buffer);
+
+    // Generate unique filename
+    const fileExtension = 'jpg'; // Always save as jpeg after compression
+    const fileName = `brands/${brandId}-${Date.now()}.${fileExtension}`;
+
+    // Upload to Cloudflare R2
+    const parallelUploads3 = new Upload({
+      client: r2Client,
+      params: {
+        Bucket: process.env.R2_BUCKET_NAME || '',
+        Key: fileName,
+        Body: compressedBuffer,
+        ContentType: 'image/jpeg',
+      },
+    });
+
+    await parallelUploads3.done();
+
+    // Construct public URL
+    // Format: https://pub-{hash}.r2.dev/{fileName}
+    const publicDomain = (process.env.R2_PUBLIC_DOMAIN || '').trim();
+    let imageUrl: string;
+    
+    if (publicDomain && publicDomain.length > 0) {
+      // Remove trailing slash if present, then append fileName
+      const cleanDomain = publicDomain.replace(/\/$/, '');
+      imageUrl = `${cleanDomain}/${fileName}`;
+    } else {
+      // Fallback to R2 default URL format
+      console.warn('⚠️ R2_PUBLIC_DOMAIN not set! Using fallback URL format.');
+      const bucketName = process.env.R2_BUCKET_NAME || '';
+      const accountId = process.env.R2_ACCOUNT_ID || '';
+      imageUrl = `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/${fileName}`;
+    }
+
+    // Update brand logo_url in database
+    // Use admin client to bypass RLS since we're in an admin-only route
+    const client = supabaseAdmin || supabase;
+    const { error: updateError } = await client
+      .from('brands')
+      .update({ logo_url: imageUrl })
+      .eq('id', brandId)
+      .eq('company_id', req.companyId);
+
+    if (updateError) {
+      console.error('Error updating brand logo_url:', updateError);
+      // Don't fail the request, just log the error
+      // The URL is still returned so the frontend can use it
+    }
+
+    res.json({ 
+      success: true, 
+      url: imageUrl,
+      fileName: fileName,
+    });
+
+  } catch (error: any) {
+    console.error('Brand Upload Error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message || 'Upload failed' 
+    });
+  }
+});
+
+/**
  * Upload product image(s) to Cloudflare R2
  * POST /api/uploads/product/:productId
  * Supports single or multiple images
  * Requires authentication and admin role
  */
-router.post('/product/:productId', protect, adminOnly, upload.array('images', 10), async (req: MulterRequest, res: Response) => {
+// Multer error handler middleware for product uploads
+const handleProductUpload = (req: MulterRequest, res: Response, next: express.NextFunction) => {
+  upload.array('images', 10)(req, res, (err: any) => {
+    if (err) {
+      console.error('[Product Upload] Multer error in middleware:', err);
+      // Store error for route handler to process
+      (req as any).multerError = err;
+      // Continue to route handler so it can return proper error response
+    }
+    next();
+  });
+};
+
+router.post('/product/:productId', protect, adminOnly, handleProductUpload, async (req: MulterRequest, res: Response) => {
   try {
+    const { productId } = req.params;
+    
+    // Debug logging
+    console.log('[Product Upload] Request received:', {
+      productId,
+      hasFile: !!req.file,
+      hasFiles: !!req.files,
+      filesCount: Array.isArray(req.files) ? req.files.length : 0,
+      contentType: req.headers['content-type'],
+      bodyKeys: Object.keys(req.body || {}),
+      isPrimary: req.body.isPrimary
+    });
+
     if (!req.companyId) {
       return res.status(400).json({
         success: false,
@@ -304,10 +445,14 @@ router.post('/product/:productId', protect, adminOnly, upload.array('images', 10
     }
 
     // Handle multer errors (file size, etc.)
-    if (req.file === undefined && !req.files) {
+    // Note: With upload.array(), files are in req.files, not req.file
+    const files = req.files as Express.Multer.File[];
+    
+    if (!files || files.length === 0) {
       // Check if it's a multer error
       const multerError = (req as any).multerError;
       if (multerError) {
+        console.error('[Product Upload] Multer error:', multerError);
         if (multerError.code === 'LIMIT_FILE_SIZE') {
           return res.status(413).json({ 
             success: false,
@@ -319,48 +464,70 @@ router.post('/product/:productId', protect, adminOnly, upload.array('images', 10
           error: multerError.message || 'File upload error' 
         });
       }
-    }
-
-    const files = req.files as Express.Multer.File[];
-    const { productId } = req.params;
-    const isPrimary = req.body.isPrimary === 'true' || req.body.isPrimary === true;
-
-    if (!files || files.length === 0) {
+      
+      // No files and no multer error - log details
+      console.error('[Product Upload] No files received. Request details:', {
+        headers: req.headers,
+        body: req.body,
+        files: req.files,
+        file: req.file,
+        contentType: req.headers['content-type']
+      });
       return res.status(400).json({ 
         success: false,
-        error: 'No files uploaded' 
+        error: 'No files uploaded. Please ensure the file is being sent correctly.' 
       });
     }
+
+    const isPrimary = req.body.isPrimary === 'true' || req.body.isPrimary === true;
 
     const uploadedImages = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
 
+      console.log('[Product Upload] Processing file:', {
+        index: i,
+        originalName: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+        fieldname: file.fieldname
+      });
+
       // Validate file type
       if (!isImageFile(file.mimetype)) {
+        console.warn('[Product Upload] File rejected - invalid mimetype:', {
+          originalName: file.originalname,
+          mimetype: file.mimetype,
+          expectedTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/jpg']
+        });
         continue; // Skip invalid files
       }
 
-      // Compress image
-      const compressedBuffer = await compressProductImage(file.buffer);
+      try {
+        // Compress image
+        console.log('[Product Upload] Compressing image...');
+        const compressedBuffer = await compressProductImage(file.buffer);
+        console.log('[Product Upload] Image compressed, size:', compressedBuffer.length);
 
-      // Generate unique filename
-      const fileExtension = 'jpg';
-      const fileName = `products/${productId}-${Date.now()}-${i}.${fileExtension}`;
+        // Generate unique filename
+        const fileExtension = 'jpg';
+        const fileName = `products/${productId}-${Date.now()}-${i}.${fileExtension}`;
+        console.log('[Product Upload] Uploading to R2:', fileName);
 
-      // Upload to Cloudflare R2
-      const parallelUploads3 = new Upload({
-        client: r2Client,
-        params: {
-          Bucket: process.env.R2_BUCKET_NAME || '',
-          Key: fileName,
-          Body: compressedBuffer,
-          ContentType: 'image/jpeg',
-        },
-      });
+        // Upload to Cloudflare R2
+        const parallelUploads3 = new Upload({
+          client: r2Client,
+          params: {
+            Bucket: process.env.R2_BUCKET_NAME || '',
+            Key: fileName,
+            Body: compressedBuffer,
+            ContentType: 'image/jpeg',
+          },
+        });
 
-      await parallelUploads3.done();
+        await parallelUploads3.done();
+        console.log('[Product Upload] R2 upload completed');
 
       // Construct public URL
       // Format: https://pub-{hash}.r2.dev/products/{productId}-{timestamp}-{index}.jpg
@@ -383,30 +550,61 @@ router.post('/product/:productId', protect, adminOnly, upload.array('images', 10
       
       console.log('Generated image URL:', imageUrl);
 
-      // Save to product_images table
-      const { data: imageData, error: insertError } = await supabase
-        .from('product_images')
-        .insert({
-          product_id: productId,
-          image_url: imageUrl,
-          is_primary: i === 0 && isPrimary,
-          display_order: i,
-          company_id: req.companyId
-        })
-        .select()
-        .single();
+      // Update products table image_url
+      // Products table stores only one image in image_url field
+      // product_images table is used by variants, not regular products
+      // Always update for the first image (i === 0) since products only have one image
+      if (i === 0) {
+        // Use admin client to bypass RLS since we're in an admin-only route
+        const client = supabaseAdmin || supabase;
+        const { data: updatedProduct, error: productUpdateError } = await client
+          .from('products')
+          .update({ image_url: imageUrl })
+          .eq('id', productId)
+          .eq('company_id', req.companyId)
+          .select('id, image_url')
+          .maybeSingle();
 
-      if (insertError) {
-        console.error('Error saving product image:', insertError);
-        continue; // Skip this image but continue with others
+        if (productUpdateError) {
+          console.error('[Product Upload] Error updating product image_url:', productUpdateError);
+          throw new Error(`Failed to update product image_url: ${productUpdateError.message}`);
+        } else if (!updatedProduct) {
+          // No rows updated - product doesn't exist with this ID and company_id
+          console.error('[Product Upload] No product found:', {
+            productId,
+            companyId: req.companyId
+          });
+          throw new Error(`Failed to update product image_url: Product not found`);
+        } else {
+          console.log('[Product Upload] Successfully updated product image_url:', {
+            productId: updatedProduct.id,
+            imageUrl: updatedProduct.image_url
+          });
+        }
       }
 
+      // Add to uploaded images array for response
       uploadedImages.push({
-        id: imageData.id,
+        id: productId, // Use product ID since we're not creating product_images records
         url: imageUrl,
         fileName: fileName,
       });
+      } catch (uploadError: any) {
+        console.error('[Product Upload] Error processing file:', {
+          index: i,
+          originalName: file.originalname,
+          error: uploadError.message,
+          stack: uploadError.stack
+        });
+        // Continue with next file
+        continue;
+      }
     }
+    
+    console.log('[Product Upload] Final result:', {
+      totalFiles: files.length,
+      uploadedCount: uploadedImages.length
+    });
 
     if (uploadedImages.length === 0) {
       return res.status(400).json({ 

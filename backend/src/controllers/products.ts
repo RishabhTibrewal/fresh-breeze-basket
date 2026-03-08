@@ -441,6 +441,41 @@ export const getProductById = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Generate product code (e.g., PRD-2024-001)
+ */
+const generateProductCode = async (companyId: string): Promise<string> => {
+  const year = new Date().getFullYear();
+  
+  const adminClient = supabaseAdmin || supabase;
+  const { data: latestProduct, error } = await adminClient
+    .from('products')
+    .select('product_code')
+    .eq('company_id', companyId)
+    .not('product_code', 'is', null)
+    .ilike('product_code', `PRD-${year}-%`)
+    .order('product_code', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error fetching latest product code:', error);
+  }
+
+  let sequence = 1;
+  if (latestProduct && latestProduct.product_code) {
+    const parts = latestProduct.product_code.split('-');
+    if (parts.length === 3) {
+      const parsedSequence = parseInt(parts[2], 10);
+      if (!isNaN(parsedSequence) && parsedSequence > 0) {
+        sequence = parsedSequence + 1;
+      }
+    }
+  }
+
+  return `PRD-${year}-${sequence.toString().padStart(3, '0')}`;
+};
+
 // Create a new product (admin only)
 // Uses ProductService which automatically creates DEFAULT variant
 export const createProduct = async (req: Request, res: Response) => {
@@ -479,6 +514,17 @@ export const createProduct = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Product name is required');
     }
     
+    // Auto-generate product code if not provided or empty
+    const finalProductCode = (product_code && product_code.trim() !== '') 
+      ? product_code 
+      : await generateProductCode(req.companyId);
+    
+    console.log('[CreateProduct] Product code:', {
+      provided: product_code,
+      final: finalProductCode,
+      willGenerate: !product_code || product_code.trim() === ''
+    });
+    
     // Use ProductService to create product with automatic DEFAULT variant
     const productService = new ProductService(req.companyId);
     
@@ -508,7 +554,7 @@ export const createProduct = async (req: Request, res: Response) => {
         best_before, // Deprecated: will be applied to DEFAULT variant
         unit, // Deprecated: will be applied to DEFAULT variant
         badge, // Deprecated: will be applied to DEFAULT variant
-        product_code,
+        product_code: finalProductCode,
         hsn_code, // Deprecated: will be applied to DEFAULT variant as 'hsn'
         tax, // Deprecated: will be applied to DEFAULT variant
         brand_id, // Product-level brand

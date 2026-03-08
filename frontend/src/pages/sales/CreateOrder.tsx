@@ -1065,6 +1065,7 @@ export default function CreateOrder() {
                                         <TableCell>
                                           <div className="flex items-center gap-1">
                                             <Button
+                                              type="button"
                                               variant="outline"
                                               size="icon"
                                               className="h-6 w-6"
@@ -1083,6 +1084,7 @@ export default function CreateOrder() {
                                               disabled={!item.product_id}
                                             />
                                             <Button
+                                              type="button"
                                               variant="outline"
                                               size="icon"
                                               className="h-6 w-6"

@@ -35,6 +35,25 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
   withCredentials: true, // Important for cookies/sessions
+  // Custom transformRequest to handle FormData properly
+  transformRequest: [(data, headers) => {
+    // If data is FormData, remove Content-Type header - browser will set it with boundary
+    if (data instanceof FormData) {
+      if (headers) {
+        delete headers['Content-Type'];
+        delete headers['content-type'];
+      }
+      return data; // Return FormData as-is
+    }
+    // For other data types, use default JSON transformation
+    if (typeof data === 'object' && data !== null && !(data instanceof FormData)) {
+      if (headers) {
+        headers['Content-Type'] = 'application/json';
+      }
+      return JSON.stringify(data);
+    }
+    return data;
+  }],
 });
 
 // Keep track of the current refresh promise to prevent multiple refreshes in parallel
@@ -47,6 +66,18 @@ let isRefreshing = false;
 // Add request interceptor for auth token
 apiClient.interceptors.request.use(
   async (config) => {
+    // If sending FormData, remove Content-Type header to let browser set it with boundary
+    if (config.data instanceof FormData) {
+      // Remove Content-Type header completely - browser will set it with boundary
+      if (config.headers) {
+        delete config.headers['Content-Type'];
+        delete config.headers['content-type'];
+      }
+      // Prevent axios from automatically setting Content-Type
+      config.headers = config.headers || {};
+      // Don't set Content-Type - let the browser handle it
+    }
+    
     // Extract subdomain from current host and add as header for tenant resolution
     if (typeof window !== 'undefined') {
       const hostname = window.location.hostname;

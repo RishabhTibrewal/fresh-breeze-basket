@@ -124,7 +124,7 @@ export class ProductService {
         best_before: productData.best_before || null,
         unit: productData.unit || null,
         badge: productData.badge || null,
-        product_code: productData.product_code || null,
+        product_code: productData.product_code || null, // Controller ensures this is always set if needed
         hsn_code: productData.hsn_code || null,
         brand_id: productData.brand_id || null,
         // Note: tax_id is not set at product level - it's variant-specific
