@@ -10,6 +10,7 @@ import { useReport } from '@/hooks/useReport';
 import { formatCurrency } from '@/lib/utils';
 
 interface OrderRow {
+  [key: string]: unknown;
   order_id: string;
   order_date: string;
   customer_name: string;
