@@ -25,6 +25,7 @@ import {
 
 export default function CreateSupplierPayment() {
   const navigate = useNavigate();
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
   const [searchParams] = useSearchParams();
   const invoiceId = searchParams.get('invoice');
   const queryClient = useQueryClient();
@@ -80,7 +81,7 @@ export default function CreateSupplierPayment() {
       toast.success('Payment recorded successfully');
       queryClient.invalidateQueries({ queryKey: ['supplier-payments'] });
       queryClient.invalidateQueries({ queryKey: ['purchase-invoices'] });
-      navigate('/procurement/supplier-payments');
+      navigate(`${moduleBase}/supplier-payments`);
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.error || 'Failed to record payment');
@@ -124,7 +125,7 @@ export default function CreateSupplierPayment() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate('/procurement/supplier-payments')}
+          onClick={() => navigate(-1)}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -302,7 +303,7 @@ export default function CreateSupplierPayment() {
                     type="button"
                     variant="outline"
                     className="flex-1"
-                    onClick={() => navigate('/procurement/supplier-payments')}
+                    onClick={() => navigate(-1)}
                   >
                     Cancel
                   </Button>

@@ -43,6 +43,7 @@ export default function CreateGoodsReceipt() {
   const poId = searchParams.get('po');
   const queryClient = useQueryClient();
   const { isAdmin, hasWarehouseAccess } = useAuth();
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
 
   const [purchaseOrderId, setPurchaseOrderId] = useState(poId || '');
   const [warehouseId, setWarehouseId] = useState('');
@@ -190,7 +191,7 @@ export default function CreateGoodsReceipt() {
       queryClient.invalidateQueries({ queryKey: ['goods-receipts'] });
       queryClient.invalidateQueries({ queryKey: ['goods-receipt', id] });
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      navigate(isEditMode ? `/procurement/goods-receipts/${id}` : '/procurement/goods-receipts');
+      navigate(isEditMode ? `${moduleBase}/goods-receipts/${id}` : `${moduleBase}/goods-receipts`);
     },
     onError: (error: any) => {
       const errorMessage = getErrorMessage(error) || `Failed to ${isEditMode ? 'update' : 'create'} goods receipt`;
@@ -287,7 +288,7 @@ export default function CreateGoodsReceipt() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate(isEditMode ? `/procurement/goods-receipts/${id}` : '/procurement/goods-receipts')}
+          onClick={() => navigate(-1)}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -506,7 +507,7 @@ export default function CreateGoodsReceipt() {
                 <Button
                   variant="outline"
                   className="flex-1"
-                  onClick={() => navigate(isEditMode ? `/procurement/goods-receipts/${id}` : '/procurement/goods-receipts')}
+                  onClick={() => navigate(-1)}
                 >
                   Cancel
                 </Button>

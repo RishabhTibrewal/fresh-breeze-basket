@@ -34,6 +34,7 @@ export default function PurchaseOrderDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { isAdmin, isAccounts, isWarehouseManager, hasWarehouseAccess } = useAuth();
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
 
   // Fetch purchase order
   const { data: purchaseOrder, isLoading } = useQuery({
@@ -107,7 +108,7 @@ export default function PurchaseOrderDetail() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate('/admin/purchase-orders')}
+          onClick={() => navigate(-1)}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -249,7 +250,7 @@ export default function PurchaseOrderDetail() {
                     <div
                       key={grn.id}
                       className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted"
-                      onClick={() => navigate(`/procurement/goods-receipts/${grn.id}`)}
+                      onClick={() => navigate(`${moduleBase}/goods-receipts/${grn.id}`)}
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
@@ -260,7 +261,7 @@ export default function PurchaseOrderDetail() {
                             className="h-6 w-6"
                             onClick={(e) => {
                               e.stopPropagation();
-                              navigate(`/procurement/goods-receipts/${grn.id}`);
+                              navigate(`${moduleBase}/goods-receipts/${grn.id}`);
                             }}
                           >
                             <ExternalLink className="h-3 w-3" />
@@ -291,7 +292,7 @@ export default function PurchaseOrderDetail() {
                       <div
                         key={invoice.id}
                         className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted"
-                        onClick={() => navigate(`/procurement/purchase-invoices/${invoice.id}`)}
+                        onClick={() => navigate(`${moduleBase}/purchase-invoices/${invoice.id}`)}
                       >
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
@@ -302,7 +303,7 @@ export default function PurchaseOrderDetail() {
                               className="h-6 w-6"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigate(`/procurement/purchase-invoices/${invoice.id}`);
+                                navigate(`${moduleBase}/purchase-invoices/${invoice.id}`);
                               }}
                             >
                               <ExternalLink className="h-3 w-3" />
@@ -387,7 +388,7 @@ export default function PurchaseOrderDetail() {
               <div className="flex flex-wrap gap-2">
                 {purchaseOrder.status === 'draft' && isAdmin && (
                   <Button
-                    onClick={() => navigate(`/procurement/purchase-orders/${id}/edit`)}
+                    onClick={() => navigate(`${moduleBase}/purchase-orders/${id}/edit`)}
                   >
                     Edit PO
                   </Button>
@@ -444,7 +445,7 @@ export default function PurchaseOrderDetail() {
                   >
                     <StatusTransitionButton
                       label="Create GRN"
-                      onClick={() => navigate(`/procurement/goods-receipts/new?po=${id}`)}
+                      onClick={() => navigate(`${moduleBase}/goods-receipts/new?po=${id}`)}
                       requiredRoles={['warehouse_manager', 'admin']}
                       requiredWarehouseAccess={purchaseOrder.warehouse_id}
                       currentStatus={purchaseOrder.status}

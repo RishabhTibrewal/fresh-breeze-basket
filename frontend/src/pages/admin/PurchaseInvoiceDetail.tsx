@@ -34,6 +34,7 @@ export default function PurchaseInvoiceDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { isAdmin, isAccounts } = useAuth();
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
 
   // Fetch invoice
   const { data: invoice, isLoading } = useQuery({
@@ -96,7 +97,7 @@ export default function PurchaseInvoiceDetail() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate('/admin/purchase-invoices')}
+          onClick={() => navigate(-1)}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -113,7 +114,7 @@ export default function PurchaseInvoiceDetail() {
           {isAdmin && invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
             <Button
               variant="outline"
-              onClick={() => navigate(`/procurement/purchase-invoices/${invoice.id}/edit`)}
+              onClick={() => navigate(`${moduleBase}/purchase-invoices/${invoice.id}/edit`)}
             >
               <Pencil className="h-4 w-4 mr-2" />
               Edit
@@ -169,7 +170,7 @@ export default function PurchaseInvoiceDetail() {
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
-                        onClick={() => navigate(`/procurement/purchase-orders/${invoice.purchase_order_id}`)}
+                        onClick={() => navigate(`${moduleBase}/purchase-orders/${invoice.purchase_order_id}`)}
                       >
                         <ExternalLink className="h-3 w-3" />
                       </Button>
@@ -187,7 +188,7 @@ export default function PurchaseInvoiceDetail() {
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
-                        onClick={() => navigate(`/procurement/goods-receipts/${invoice.goods_receipt_id}`)}
+                        onClick={() => navigate(`${moduleBase}/goods-receipts/${invoice.goods_receipt_id}`)}
                       >
                         <ExternalLink className="h-3 w-3" />
                       </Button>
@@ -345,7 +346,7 @@ export default function PurchaseInvoiceDetail() {
                       <TableRow 
                         key={payment.id}
                         className="cursor-pointer hover:bg-muted"
-                        onClick={() => navigate(`/procurement/supplier-payments/${payment.id}`)}
+                        onClick={() => navigate(`${moduleBase}/supplier-payments/${payment.id}`)}
                       >
                         <TableCell className="font-medium">{payment.payment_number}</TableCell>
                         <TableCell>
@@ -427,7 +428,7 @@ export default function PurchaseInvoiceDetail() {
               {(isAdmin || isAccounts) && (
                 <Button
                   className="w-full"
-                  onClick={() => navigate(`/procurement/supplier-payments/new?invoice=${id}`)}
+                  onClick={() => navigate(`${moduleBase}/supplier-payments/new?invoice=${id}`)}
                   disabled={balance === 0}
                 >
                   <DollarSign className="h-4 w-4 mr-2" />

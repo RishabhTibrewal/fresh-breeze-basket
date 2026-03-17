@@ -42,7 +42,8 @@ export default function CreatePurchaseInvoice() {
   const [searchParams] = useSearchParams();
   const grnId = searchParams.get('grn');
   const queryClient = useQueryClient();
-  const { isAdmin, isAccounts } = useAuth();
+  const { user, isAdmin, isAccounts } = useAuth();
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
 
   const [goodsReceiptId, setGoodsReceiptId] = useState(grnId || '');
   const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState('');
@@ -190,7 +191,7 @@ export default function CreatePurchaseInvoice() {
       toast.success('Invoice created successfully from GRN');
       queryClient.invalidateQueries({ queryKey: ['purchase-invoices'] });
       queryClient.invalidateQueries({ queryKey: ['invoice-by-grn', goodsReceiptId] });
-      navigate(`/procurement/purchase-invoices/${invoice.id}`);
+      navigate(`${moduleBase}/purchase-invoices/${invoice.id}`);
     },
     onError: (error: any) => {
       handleApiError(error, 'create invoice from GRN', ['accounts', 'admin']);
@@ -209,7 +210,7 @@ export default function CreatePurchaseInvoice() {
       toast.success(isEditMode ? 'Purchase invoice updated successfully' : 'Purchase invoice created successfully');
       queryClient.invalidateQueries({ queryKey: ['purchase-invoices'] });
       queryClient.invalidateQueries({ queryKey: ['purchase-invoice', id] });
-      navigate(isEditMode ? `/admin/purchase-invoices/${id}` : '/admin/purchase-invoices');
+      navigate(isEditMode ? `${moduleBase}/purchase-invoices/${id}` : `${moduleBase}/purchase-invoices`);
     },
     onError: (error: any) => {
       handleApiError(error, isEditMode ? 'update purchase invoice' : 'create purchase invoice', ['accounts', 'admin']);
@@ -328,7 +329,7 @@ export default function CreatePurchaseInvoice() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate(isEditMode ? `/admin/purchase-invoices/${id}` : '/admin/purchase-invoices')}
+          onClick={() => navigate(-1)}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -377,7 +378,7 @@ export default function CreatePurchaseInvoice() {
             </div>
             <Button
               variant="outline"
-              onClick={() => navigate(`/procurement/purchase-invoices/${existingInvoice.id}`)}
+              onClick={() => navigate(`${moduleBase}/purchase-invoices/${existingInvoice.id}`)}
               className="ml-4"
             >
               <ExternalLink className="h-4 w-4 mr-2" />
@@ -633,8 +634,8 @@ export default function CreatePurchaseInvoice() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-6 w-6"
-                          onClick={() => navigate(`/procurement/goods-receipts/${selectedGRN.id}`)}
+                          className="h-6 w-6 ml-2"
+                          onClick={() => navigate(`${moduleBase}/goods-receipts/${selectedGRN.id}`)}
                         >
                           <ExternalLink className="h-3 w-3" />
                         </Button>
@@ -669,7 +670,7 @@ export default function CreatePurchaseInvoice() {
                       type="button"
                       variant="outline"
                       className="flex-1"
-                      onClick={() => navigate(isEditMode ? `/admin/purchase-invoices/${id}` : '/admin/purchase-invoices')}
+                      onClick={() => navigate(-1)}
                     >
                       Cancel
                     </Button>

@@ -42,24 +42,26 @@ type AddressFormType = z.infer<typeof addressSchema>;
 
 interface CustomerAddressFormProps {
   customerId: string;
+  addressId?: string;
+  initialData?: Partial<CustomerAddress>;
   onClose: () => void;
-  onAddressAdded: (address: any) => void;
+  onAddressSaved: (address: any) => void;
 }
 
-export default function CustomerAddressForm({ customerId, onClose, onAddressAdded }: CustomerAddressFormProps) {
+export default function CustomerAddressForm({ customerId, addressId, initialData, onClose, onAddressSaved }: CustomerAddressFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<AddressFormType>({
     resolver: zodResolver(addressSchema),
     defaultValues: {
-      address_type: 'shipping',
-      address_line1: '',
-      address_line2: '',
-      city: '',
-      state: '',
-      postal_code: '',
-      country: '',
-      is_default: false,
+      address_type: (initialData?.address_type as 'shipping' | 'billing' | 'both') || 'shipping',
+      address_line1: initialData?.address_line1 || '',
+      address_line2: initialData?.address_line2 || '',
+      city: initialData?.city || '',
+      state: initialData?.state || '',
+      postal_code: initialData?.postal_code || '',
+      country: initialData?.country || '',
+      is_default: initialData?.is_default || false,
     },
   });
 
@@ -84,15 +86,21 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
         is_default: data.is_default,
       };
       
-      // Use the customer service to add address to the specific customer
-      const result = await customerService.addCustomerAddress(customerId, addressData);
-      toast.success('Address added to customer account');
+      // Use the customer service to add or edit address
+      let result;
+      if (addressId) {
+        result = await customerService.editCustomerAddress(customerId, addressId, addressData);
+        toast.success('Address updated successfully');
+      } else {
+        result = await customerService.addCustomerAddress(customerId, addressData);
+        toast.success('Address added to customer account');
+      }
       
-      // Call the callback with the new address
-      onAddressAdded(result);
+      // Call the callback with the saved address
+      onAddressSaved(result);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to add address to customer');
-      console.error('Error adding customer address:', error);
+      toast.error(error.message || `Failed to ${addressId ? 'update' : 'add'} address`);
+      console.error(`Error ${addressId ? 'updating' : 'adding'} customer address:`, error);
     } finally {
       setIsSubmitting(false);
     }
@@ -109,7 +117,9 @@ export default function CustomerAddressForm({ customerId, onClose, onAddressAdde
       }}
     >
       <div className="flex justify-between items-center">
-        <h3 className="text-base sm:text-lg font-medium break-words">Add New Address</h3>
+        <h3 className="text-base sm:text-lg font-medium break-words">
+          {addressId ? 'Edit Address' : 'Add New Address'}
+        </h3>
         <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0">
           <X className="h-4 w-4" />
         </Button>

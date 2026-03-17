@@ -70,6 +70,7 @@ export default function CreatePurchaseOrder() {
   const isEditMode = !!id;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
   const { isAdmin, warehouses, hasWarehouseAccess } = useAuth();
   const [items, setItems] = useState<OrderItem[]>([]);
   const [supplierId, setSupplierId] = useState('');
@@ -158,7 +159,7 @@ export default function CreatePurchaseOrder() {
       toast.success(isEditMode ? 'Purchase order updated successfully' : 'Purchase order created successfully');
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['purchase-order', id] });
-      navigate('/procurement/purchase-orders');
+      navigate(`${moduleBase}/purchase-orders`);
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.error || `Failed to ${isEditMode ? 'update' : 'create'} purchase order`);
@@ -402,7 +403,7 @@ export default function CreatePurchaseOrder() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate('/procurement/purchase-orders')}
+          onClick={() => navigate(-1)}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -576,11 +577,6 @@ export default function CreatePurchaseOrder() {
                                           return nameMatch || codeMatch;
                                         })
                                         .map((product: any) => {
-                                          // Check if product is already used in another row
-                                          const isUsedInOtherRow = items.some(
-                                            (i) => i.product_id === product.id && i.id !== item.id
-                                          );
-                                          
                                           // Get variant information
                                           const variants = product.variants || [];
                                           const defaultVariant = variants.find((v: any) => v.is_default) || variants[0];
@@ -608,13 +604,12 @@ export default function CreatePurchaseOrder() {
                                             variantInfo = ` - ₹${product.sale_price || product.price || 0}`;
                                           }
                                           
-                                          const displayText = `${product.name}${variantInfo}${isUsedInOtherRow ? ' (Already added)' : ''}`;
+                                          const displayText = `${product.name}${variantInfo}`;
                                           
                                           return (
                                             <CommandItem
                                               key={product.id}
                                               value={displayText}
-                                              disabled={isUsedInOtherRow}
                                               onSelect={async () => {
                                                 await updateProductForRow(item.id, product.id);
                                                 setProductSearchOpen(prev => ({ ...prev, [item.id]: false }));
@@ -773,7 +768,7 @@ export default function CreatePurchaseOrder() {
           <Button
             variant="outline"
             className="w-full"
-            onClick={() => navigate('/procurement/purchase-orders')}
+            onClick={() => navigate(-1)}
           >
             Cancel
           </Button>

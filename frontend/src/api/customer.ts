@@ -167,8 +167,39 @@ export const customerService = {
     try {
       const { data } = await apiClient.post(`/customer/${customerId}/address`, address);
       return data;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error adding customer address:', error);
+      if (error.response && error.response.data && error.response.data.message) {
+        throw new Error(error.response.data.message);
+      }
+      throw error;
+    }
+  },
+
+  // Edit a customer address
+  async editCustomerAddress(customerId: string, addressId: string, address: CustomerAddress): Promise<any> {
+    try {
+      const { data } = await apiClient.put(`/customer/${customerId}/address/${addressId}`, address);
+      return data;
+    } catch (error: any) {
+      console.error('Error updating customer address:', error);
+      if (error.response && error.response.data && error.response.data.message) {
+        throw new Error(error.response.data.message);
+      }
+      throw error;
+    }
+  },
+
+  // Delete a customer address
+  async deleteCustomerAddress(customerId: string, addressId: string): Promise<any> {
+    try {
+      const { data } = await apiClient.delete(`/customer/${customerId}/address/${addressId}`);
+      return data;
+    } catch (error: any) {
+      console.error('Error deleting customer address:', error);
+      if (error.response && error.response.data && error.response.data.message) {
+        throw new Error(error.response.data.message);
+      }
       throw error;
     }
   }

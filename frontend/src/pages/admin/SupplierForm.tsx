@@ -17,6 +17,7 @@ import { suppliersService, CreateSupplierData } from '@/api/suppliers';
 
 export default function SupplierForm() {
   const navigate = useNavigate();
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const isEditMode = !!id;
@@ -120,7 +121,7 @@ export default function SupplierForm() {
     onSuccess: () => {
       toast.success(`Supplier ${isEditMode ? 'updated' : 'created'} successfully`);
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-      navigate('/procurement/suppliers');
+      navigate(`${moduleBase}/suppliers`);
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.error || `Failed to ${isEditMode ? 'update' : 'create'} supplier`);
@@ -175,7 +176,7 @@ export default function SupplierForm() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate('/procurement/suppliers')}
+          onClick={() => navigate(-1)}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -553,7 +554,7 @@ export default function SupplierForm() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => navigate('/procurement/suppliers')}
+            onClick={() => navigate(-1)}
           >
             Cancel
           </Button>

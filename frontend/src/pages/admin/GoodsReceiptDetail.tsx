@@ -18,6 +18,7 @@ export default function GoodsReceiptDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { isAdmin, isAccounts, isWarehouseManager, hasAnyRole } = useAuth();
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
 
   const { data: grn, isLoading } = useQuery({
     queryKey: ['goods-receipt', id],
@@ -113,7 +114,7 @@ export default function GoodsReceiptDetail() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate('/admin/goods-receipts')}
+          onClick={() => navigate(-1)}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -130,7 +131,7 @@ export default function GoodsReceiptDetail() {
           {isAdmin && (grn.status === 'pending' || grn.status === 'inspected') && (
             <Button
               variant="outline"
-              onClick={() => navigate(`/procurement/goods-receipts/${grn.id}/edit`)}
+              onClick={() => navigate(`${moduleBase}/goods-receipts/${grn.id}/edit`)}
             >
               <Pencil className="h-4 w-4 mr-2" />
               Edit
@@ -182,7 +183,7 @@ export default function GoodsReceiptDetail() {
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6"
-                          onClick={() => navigate(`/procurement/purchase-orders/${grn.purchase_order_id}`)}
+                          onClick={() => navigate(`${moduleBase}/purchase-orders/${grn.purchase_order_id}`)}
                         >
                           <ExternalLink className="h-3 w-3" />
                         </Button>
@@ -295,7 +296,7 @@ export default function GoodsReceiptDetail() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted"
-                    onClick={() => navigate(`/procurement/purchase-invoices/${relatedInvoice.id}`)}>
+                    onClick={() => navigate(`${moduleBase}/purchase-invoices/${relatedInvoice.id}`)}>
                     <div>
                       <p className="font-medium">{relatedInvoice.invoice_number}</p>
                       <p className="text-sm text-muted-foreground">
@@ -396,7 +397,7 @@ export default function GoodsReceiptDetail() {
               {relatedInvoice && (
                 <Button
                   variant="outline"
-                  onClick={() => navigate(`/procurement/purchase-invoices/${relatedInvoice.id}`)}
+                  onClick={() => navigate(`${moduleBase}/purchase-invoices/${relatedInvoice.id}`)}
                 >
                   <FileText className="h-4 w-4 mr-2" />
                   View Invoice

@@ -20,6 +20,7 @@ export default function SupplierPaymentDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { isAdmin, isAccounts } = useAuth();
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
 
   const { data: payment, isLoading } = useQuery({
     queryKey: ['supplier-payment', id],
@@ -57,7 +58,7 @@ export default function SupplierPaymentDetail() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => navigate('/admin/supplier-payments')}
+          onClick={() => navigate(-1)}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -93,7 +94,7 @@ export default function SupplierPaymentDetail() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
-                    onClick={() => navigate(`/procurement/purchase-invoices/${payment.purchase_invoice_id}`)}
+                    onClick={() => navigate(`${moduleBase}/purchase-invoices/${payment.purchase_invoice_id}`)}
                   >
                     <ExternalLink className="h-3 w-3" />
                   </Button>

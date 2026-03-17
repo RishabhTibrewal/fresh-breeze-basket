@@ -38,6 +38,7 @@ export default function Suppliers() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
   const [isActiveFilter, setIsActiveFilter] = useState<string>('all');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
@@ -106,7 +107,7 @@ export default function Suppliers() {
             Manage suppliers and vendor information
           </p>
         </div>
-        <Button onClick={() => navigate('/procurement/suppliers/new')}>
+        <Button onClick={() => navigate(`${moduleBase}/suppliers/new`)}>
           <Plus className="h-4 w-4 mr-2" />
           Add Supplier
         </Button>
@@ -201,7 +202,7 @@ export default function Suppliers() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => navigate(`/procurement/suppliers/${supplier.id}/edit`)}
+                            onClick={() => navigate(`${moduleBase}/suppliers/${supplier.id}/edit`)}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>

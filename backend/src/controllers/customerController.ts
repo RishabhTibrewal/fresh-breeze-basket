@@ -1336,10 +1336,37 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
         message: 'Customer has no associated user ID'
       });
     }
+
+    // Validate required fields
+    const requiredFields = ['address_line1', 'city', 'address_type', 'country'];
+    const missingFields = requiredFields.filter(field => !addressData[field]);
+    
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required fields: ${missingFields.join(', ')}`
+      });
+    }
+
+    // Validate address type
+    const validAddressTypes = ['shipping', 'billing', 'both'];
+    if (!validAddressTypes.includes(addressData.address_type)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid address type. Must be one of: ${validAddressTypes.join(', ')}`
+      });
+    }
     
     // Prepare address data with the customer's user_id
     const newAddress = {
-      ...addressData,
+      address_type: addressData.address_type,
+      address_line1: addressData.address_line1,
+      address_line2: addressData.address_line2 || null,
+      city: addressData.city,
+      state: addressData.state || null,
+      postal_code: addressData.postal_code || null,
+      country: addressData.country,
+      is_default: addressData.is_default || false,
       user_id: customer.user_id,
       company_id: req.companyId
     };
@@ -1352,10 +1379,11 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
       .single();
     
     if (addressError) {
-      console.error('Error creating customer address:', addressError);
+      const errorMsg = addressError.message || JSON.stringify(addressError);
+      console.error('Error creating customer address details:', errorMsg);
       return res.status(500).json({
         success: false,
-        message: 'Failed to add address'
+        message: 'Failed to add address: ' + errorMsg
       });
     }
     
@@ -1376,6 +1404,172 @@ export const addAddressForCustomer = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error in addAddressForCustomer:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error'
+    });
+  }
+};
+
+// Update address for a specific customer
+export const editAddressForCustomer = async (req: Request, res: Response) => {
+  try {
+    const { id: customerId, addressId } = req.params;
+    const addressData = req.body;
+    
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+
+    if (!customerId || !addressId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer ID and Address ID are required'
+      });
+    }
+    
+    // First, get the customer details to get the user_id
+    const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
+      .from('customers')
+      .select('user_id')
+      .eq('id', customerId)
+      .eq('company_id', req.companyId)
+      .single();
+    
+    if (customerError) {
+      return res.status(404).json({
+        success: false, 
+        message: 'Customer not found'
+      });
+    }
+    
+    if (!customer.user_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer has no associated user ID'
+      });
+    }
+
+    // Prepare update data
+    const updateData: any = { updated_at: new Date().toISOString() };
+    if (addressData.address_type) updateData.address_type = addressData.address_type;
+    if (addressData.address_line1 !== undefined) updateData.address_line1 = addressData.address_line1;
+    if (addressData.address_line2 !== undefined) updateData.address_line2 = addressData.address_line2;
+    if (addressData.city !== undefined) updateData.city = addressData.city;
+    if (addressData.state !== undefined) updateData.state = addressData.state;
+    if (addressData.postal_code !== undefined) updateData.postal_code = addressData.postal_code;
+    if (addressData.country !== undefined) updateData.country = addressData.country;
+    if (addressData.is_default !== undefined) updateData.is_default = addressData.is_default;
+    
+    // Update the address record
+    const { data: address, error: addressError } = await (supabaseAdmin || supabase)
+      .from('addresses')
+      .update(updateData)
+      .eq('id', addressId)
+      .eq('user_id', customer.user_id)
+      .eq('company_id', req.companyId)
+      .select('*')
+      .single();
+    
+    if (addressError) {
+      const errorMsg = addressError.message || JSON.stringify(addressError);
+      console.error('Error updating customer address details:', errorMsg);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update address: ' + errorMsg
+      });
+    }
+    
+    // If this address is marked as default, update other addresses of the same type
+    if (address.is_default && updateData.is_default !== undefined) {
+      await (supabaseAdmin || supabase)
+        .from('addresses')
+        .update({ is_default: false })
+        .eq('user_id', customer.user_id)
+        .eq('address_type', address.address_type)
+        .eq('company_id', req.companyId)
+        .neq('id', address.id);
+    }
+    
+    return res.status(200).json({
+      success: true,
+      data: address
+    });
+  } catch (error: any) {
+    console.error('Error in editAddressForCustomer:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error'
+    });
+  }
+};
+
+// Delete address for a specific customer
+export const deleteAddressForCustomer = async (req: Request, res: Response) => {
+  try {
+    const { id: customerId, addressId } = req.params;
+    
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+
+    if (!customerId || !addressId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer ID and Address ID are required'
+      });
+    }
+    
+    // First, get the customer details to get the user_id
+    const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
+      .from('customers')
+      .select('user_id')
+      .eq('id', customerId)
+      .eq('company_id', req.companyId)
+      .single();
+    
+    if (customerError) {
+      return res.status(404).json({
+        success: false, 
+        message: 'Customer not found'
+      });
+    }
+    
+    if (!customer.user_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer has no associated user ID'
+      });
+    }
+    
+    // Delete the address record
+    const { error: addressError } = await (supabaseAdmin || supabase)
+      .from('addresses')
+      .delete()
+      .eq('id', addressId)
+      .eq('user_id', customer.user_id)
+      .eq('company_id', req.companyId);
+    
+    if (addressError) {
+      console.error('Error deleting customer address:', addressError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to delete address'
+      });
+    }
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Address deleted successfully'
+    });
+  } catch (error: any) {
+    console.error('Error in deleteAddressForCustomer:', error);
     return res.status(500).json({
       success: false,
       message: error.message || 'Internal server error'

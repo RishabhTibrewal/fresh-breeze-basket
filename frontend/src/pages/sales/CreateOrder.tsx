@@ -35,7 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Plus, Trash2, ShoppingCart, MapPin, X, Minus, Check, ChevronsUpDown, Package } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Pencil, ShoppingCart, MapPin, X, Minus, Check, ChevronsUpDown, Package } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -678,10 +678,45 @@ export default function CreateOrder() {
       toast.error(`Failed to create order: ${error.response?.data?.error || error.message || 'Unknown error'}`);
     },
   });
+
+  const handleEditAddress = (addressId: string) => {
+    setEditingAddressId(addressId);
+    setShowAddressForm(true);
+  };
+
+  const handleDeleteAddress = async (addressId: string) => {
+    if (!selectedCustomerId) return;
+    if (confirm('Are you sure you want to delete this address?')) {
+      try {
+        await customerService.deleteCustomerAddress(selectedCustomerId, addressId);
+        toast.success('Address deleted successfully');
+        queryClient.invalidateQueries({ queryKey: ['customer-addresses', selectedCustomerId] });
+        
+        // Clear selection if deleted address was selected
+        if (form.getValues('shipping_address_id') === addressId) {
+          form.setValue('shipping_address_id', '');
+        }
+        if (form.getValues('billing_address_id') === addressId) {
+          form.setValue('billing_address_id', '');
+        }
+      } catch (error: any) {
+        toast.error(error.message || 'Failed to delete address');
+      }
+    }
+  };
   
+  // Handle form submission
   const onSubmit = (data: OrderFormValues) => {
     if (items.length === 0) {
       toast.error('Please add at least one product to the order');
+      setActiveTab('products');
+      return;
+    }
+
+    // Check for zero quantity or invalid items
+    const invalidItems = items.filter(item => !item.product_id || item.quantity <= 0);
+    if (invalidItems.length > 0) {
+      toast.error('Please ensure all products have a valid selection and quantity greater than 0');
       setActiveTab('products');
       return;
     }
@@ -1029,11 +1064,6 @@ export default function CreateOrder() {
                                                         return nameMatch || codeMatch;
                                                       })
                                                       .map((product: any) => {
-                                                        // Check if product is already used in another row
-                                                        const isUsedInOtherRow = items.some(
-                                                          (i) => i.product_id === product.id && i.id !== item.id
-                                                        );
-                                                        
                                                         // Get variant information
                                                         const variants = product.variants || [];
                                                         const defaultVariant = variants.find((v: any) => v.is_default) || variants[0];
@@ -1061,13 +1091,12 @@ export default function CreateOrder() {
                                                           variantInfo = ` - ₹${product.sale_price || product.price || 0}`;
                                                         }
                                                         
-                                                        const displayText = `${product.name}${variantInfo}${isUsedInOtherRow ? ' (Already added)' : ''}`;
+                                                        const displayText = `${product.name}${variantInfo}`;
                                                         
                                                         return (
                                                           <CommandItem
                                                             key={product.id}
                                                             value={displayText}
-                                                            disabled={isUsedInOtherRow}
                                                             onSelect={async () => {
                                                               await updateProductForRow(item.id, product.id);
                                                               setProductSearchOpen(prev => ({ ...prev, [item.id]: false }));
@@ -1083,7 +1112,7 @@ export default function CreateOrder() {
                                                             <div className="flex items-center gap-2">
                                                               <Package className="h-4 w-4 text-muted-foreground" />
                                                               <span className="flex-1">{displayText}</span>
-                                    </div>
+                                                            </div>
                                                           </CommandItem>
                                                         );
                                                       })}
@@ -1242,9 +1271,30 @@ export default function CreateOrder() {
                                 {selectedCustomerId ? (
                                 <CustomerAddressForm
                                     customerId={selectedCustomerId}
-                                  onClose={() => setShowAddressForm(false)}
-                                  onAddressAdded={handleAddressAdded}
-                                />
+                                    addressId={editingAddressId || undefined}
+                                    initialData={editingAddressId ? addresses.find((a: any) => a.id === editingAddressId) : undefined}
+                                    onClose={() => {
+                                      setShowAddressForm(false);
+                                      setEditingAddressId(null);
+                                    }}
+                                    onAddressSaved={(address) => {
+                                      queryClient.invalidateQueries({ queryKey: ['customer-addresses', selectedCustomerId] });
+                                      setShowAddressForm(false);
+                                      setEditingAddressId(null);
+                                      
+                                      // If it's a new address or we want to autoselect it
+                                      if (address && address.id && !editingAddressId) {
+                                        if (address.address_type === 'shipping' || address.address_type === 'both') {
+                                          form.setValue('shipping_address_id', address.id);
+                                          if (useSameAsShipping) {
+                                            form.setValue('billing_address_id', address.id);
+                                          }
+                                        } else if (address.address_type === 'billing' && !useSameAsShipping) {
+                                          form.setValue('billing_address_id', address.id);
+                                        }
+                                      }
+                                    }}
+                                  />
                                 ) : (
                                   <div className="p-4 text-center text-muted-foreground">
                                     <p className="text-sm">Please select a customer first before adding an address.</p>
@@ -1292,19 +1342,41 @@ export default function CreateOrder() {
                                             defaultValue={field.value}
                                       className="flex flex-col space-y-2.5 sm:space-y-3"
                                           >
-                                            {addresses.map(address => (
-                                        <div className="flex items-start space-x-2.5 sm:space-x-3 border p-3 sm:p-4 rounded-md min-w-0" key={address.id}>
-                                          <RadioGroupItem value={address.id} id={`shipping-${address.id}`} className="mt-0.5 flex-shrink-0" />
-                                                <label 
-                                                  htmlFor={`shipping-${address.id}`}
-                                            className="flex-1 cursor-pointer text-xs sm:text-sm min-w-0 break-words"
-                                          >
-                                            <div className="font-medium mb-1">{address.address_type} Address</div>
-                                            <div className="break-words">{address.address_line1}</div>
-                                            {address.address_line2 && <div className="break-words">{address.address_line2}</div>}
-                                            <div className="break-words">{address.city}, {address.state}, {address.postal_code}</div>
-                                            <div className="break-words">{address.country}</div>
-                                                </label>
+                                            {addresses.map((address: any) => (
+                                              <div className="flex items-start justify-between border p-3 sm:p-4 rounded-md min-w-0" key={address.id}>
+                                                <div className="flex items-start space-x-2.5 sm:space-x-3 min-w-0 flex-1">
+                                                  <RadioGroupItem value={address.id} id={`shipping-${address.id}`} className="mt-0.5 flex-shrink-0" />
+                                                  <label 
+                                                    htmlFor={`shipping-${address.id}`}
+                                                    className="flex-1 cursor-pointer text-xs sm:text-sm min-w-0 break-words"
+                                                  >
+                                                    <div className="font-medium mb-1">{address.address_type} Address</div>
+                                                    <div className="break-words">{address.address_line1}</div>
+                                                    {address.address_line2 && <div className="break-words">{address.address_line2}</div>}
+                                                    <div className="break-words">{address.city}, {address.state}, {address.postal_code}</div>
+                                                    <div className="break-words">{address.country}</div>
+                                                  </label>
+                                                </div>
+                                                <div className="flex flex-col gap-2 ml-2">
+                                                  <Button 
+                                                    type="button" 
+                                                    variant="ghost" 
+                                                    size="icon" 
+                                                    className="h-7 w-7" 
+                                                    onClick={(e) => { e.preventDefault(); handleEditAddress(address.id); }}
+                                                  >
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                  </Button>
+                                                  <Button 
+                                                    type="button" 
+                                                    variant="ghost" 
+                                                    size="icon" 
+                                                    className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" 
+                                                    onClick={(e) => { e.preventDefault(); handleDeleteAddress(address.id); }}
+                                                  >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                  </Button>
+                                                </div>
                                               </div>
                                             ))}
                                           </RadioGroup>
@@ -1368,19 +1440,43 @@ export default function CreateOrder() {
                                             disabled={useSameAsShipping}
                                       className="flex flex-col space-y-2.5 sm:space-y-3"
                                           >
-                                            {addresses.map(address => (
-                                        <div className={`flex items-start space-x-2.5 sm:space-x-3 border p-3 sm:p-4 rounded-md min-w-0 ${useSameAsShipping ? 'opacity-50' : ''}`} key={address.id}>
-                                          <RadioGroupItem value={address.id} id={`billing-${address.id}`} className="mt-0.5 flex-shrink-0" />
-                                                <label 
-                                                  htmlFor={`billing-${address.id}`}
-                                            className="flex-1 cursor-pointer text-xs sm:text-sm min-w-0 break-words"
-                                          >
-                                            <div className="font-medium mb-1">{address.address_type} Address</div>
-                                            <div className="break-words">{address.address_line1}</div>
-                                            {address.address_line2 && <div className="break-words">{address.address_line2}</div>}
-                                            <div className="break-words">{address.city}, {address.state}, {address.postal_code}</div>
-                                            <div className="break-words">{address.country}</div>
-                                                </label>
+                                            {addresses.map((address: any) => (
+                                              <div className={`flex items-start justify-between border p-3 sm:p-4 rounded-md min-w-0 ${useSameAsShipping ? 'opacity-50' : ''}`} key={address.id}>
+                                                <div className="flex items-start space-x-2.5 sm:space-x-3 min-w-0 flex-1">
+                                                  <RadioGroupItem value={address.id} id={`billing-${address.id}`} className="mt-0.5 flex-shrink-0" disabled={useSameAsShipping} />
+                                                  <label 
+                                                    htmlFor={`billing-${address.id}`}
+                                                    className="flex-1 cursor-pointer text-xs sm:text-sm min-w-0 break-words"
+                                                  >
+                                                    <div className="font-medium mb-1">{address.address_type} Address</div>
+                                                    <div className="break-words">{address.address_line1}</div>
+                                                    {address.address_line2 && <div className="break-words">{address.address_line2}</div>}
+                                                    <div className="break-words">{address.city}, {address.state}, {address.postal_code}</div>
+                                                    <div className="break-words">{address.country}</div>
+                                                  </label>
+                                                </div>
+                                                {!useSameAsShipping && (
+                                                  <div className="flex flex-col gap-2 ml-2">
+                                                    <Button 
+                                                      type="button" 
+                                                      variant="ghost" 
+                                                      size="icon" 
+                                                      className="h-7 w-7" 
+                                                      onClick={(e) => { e.preventDefault(); handleEditAddress(address.id); }}
+                                                    >
+                                                      <Pencil className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                    <Button 
+                                                      type="button" 
+                                                      variant="ghost" 
+                                                      size="icon" 
+                                                      className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" 
+                                                      onClick={(e) => { e.preventDefault(); handleDeleteAddress(address.id); }}
+                                                    >
+                                                      <Trash2 className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                  </div>
+                                                )}
                                               </div>
                                             ))}
                                           </RadioGroup>

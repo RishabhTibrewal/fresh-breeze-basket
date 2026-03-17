@@ -36,6 +36,7 @@ export default function SupplierPayments() {
   const [searchParams] = useSearchParams();
   const invoiceId = searchParams.get('invoice');
   const { isAdmin, isAccounts } = useAuth();
+  const moduleBase = `/${window.location.pathname.split('/')[1]}`;
   
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -93,7 +94,7 @@ export default function SupplierPayments() {
           </p>
         </div>
         {(isAdmin || isAccounts) && (
-          <Button onClick={() => navigate('/procurement/supplier-payments/new' + (invoiceId ? `?invoice=${invoiceId}` : ''))}>
+          <Button onClick={() => navigate(`${moduleBase}/supplier-payments/new` + (invoiceId ? `?invoice=${invoiceId}` : ''))}>
             <Plus className="h-4 w-4 mr-2" />
             Record Payment
           </Button>
@@ -243,7 +244,7 @@ export default function SupplierPayments() {
                       <TableCell>
                         {payment.purchase_invoices?.invoice_number ? (
                           <button
-                            onClick={() => navigate(`/procurement/purchase-invoices/${payment.purchase_invoice_id}`)}
+                            onClick={() => navigate(`${moduleBase}/purchase-invoices/${payment.purchase_invoice_id}`)}
                             className="text-primary hover:underline"
                           >
                             {payment.purchase_invoices.invoice_number}
@@ -268,7 +269,7 @@ export default function SupplierPayments() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => navigate(`/procurement/supplier-payments/${payment.id}`)}
+                          onClick={() => navigate(`${moduleBase}/supplier-payments/${payment.id}`)}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>

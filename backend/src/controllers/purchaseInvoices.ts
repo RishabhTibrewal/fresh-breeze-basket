@@ -924,21 +924,21 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
           throw new ApiError(500, `Failed to update invoice items: ${itemsError.message}`);
         }
 
-        // Recalculate totals from items
-        const calculatedSubtotal = invoiceItems.reduce((sum: number, item: any) => sum + (item.quantity * item.unit_price), 0);
-        const calculatedTax = invoiceItems.reduce((sum: number, item: any) => sum + item.tax_amount, 0);
-        const calculatedDiscount = invoiceItems.reduce((sum: number, item: any) => sum + item.discount_amount, 0);
-        const calculatedTotal = calculatedSubtotal + calculatedTax - calculatedDiscount;
+        // Use provided totals or recalculate from items
+        const newSubtotal = subtotal !== undefined ? subtotal : invoiceItems.reduce((sum: number, item: any) => sum + (item.quantity * item.unit_price), 0);
+        const newTaxAmount = tax_amount !== undefined ? tax_amount : invoiceItems.reduce((sum: number, item: any) => sum + item.tax_amount, 0);
+        const newDiscountAmount = discount_amount !== undefined ? discount_amount : invoiceItems.reduce((sum: number, item: any) => sum + item.discount_amount, 0);
+        const newTotalAmount = total_amount !== undefined ? total_amount : (newSubtotal + newTaxAmount - newDiscountAmount);
 
         // Update invoice totals
         await adminClient
           .schema('procurement')
           .from('purchase_invoices')
           .update({
-            subtotal: calculatedSubtotal,
-            tax_amount: calculatedTax,
-            discount_amount: calculatedDiscount,
-            total_amount: calculatedTotal
+            subtotal: newSubtotal,
+            tax_amount: newTaxAmount,
+            discount_amount: newDiscountAmount,
+            total_amount: newTotalAmount
           })
           .eq('id', id)
           .eq('company_id', req.companyId);

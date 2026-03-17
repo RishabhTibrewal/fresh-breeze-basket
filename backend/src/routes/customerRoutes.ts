@@ -10,6 +10,8 @@ import {
   updateCustomer,
   deleteCustomer,
   addAddressForCustomer,
+  editAddressForCustomer,
+  deleteAddressForCustomer,
   getCustomersWithCredit
 } from '../controllers/customerController';
 import { getCustomerAddresses } from '../controllers/auth';
@@ -46,6 +48,12 @@ router.post('/:id/orders', orderController.createOrder);
 
 // Add address for a customer
 router.post('/:id/address', addAddressForCustomer);
+
+// Edit address for a customer
+router.put('/:id/address/:addressId', editAddressForCustomer);
+
+// Delete address for a customer
+router.delete('/:id/address/:addressId', deleteAddressForCustomer);
 
 // Create new customer
 router.post('/', createCustomer);
