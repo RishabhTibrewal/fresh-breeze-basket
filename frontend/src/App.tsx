@@ -75,6 +75,10 @@ const SupplierPaymentDetail = lazy(() => import("./pages/admin/SupplierPaymentDe
 const BrandList = lazy(() => import("./pages/admin/BrandList"));
 const BrandForm = lazy(() => import("./pages/admin/BrandForm"));
 const BrandDetail = lazy(() => import("./pages/admin/BrandDetail"));
+const CollectionList = lazy(() => import("./pages/admin/CollectionList"));
+const CollectionForm = lazy(() => import("./pages/admin/CollectionForm"));
+const ModifierList = lazy(() => import("./pages/admin/ModifierList"));
+const ModifierForm = lazy(() => import("./pages/admin/ModifierForm"));
 const TaxList = lazy(() => import("./pages/admin/TaxList"));
 const TaxForm = lazy(() => import("./pages/admin/TaxForm"));
 const TaxDetail = lazy(() => import("./pages/admin/TaxDetail"));
@@ -85,11 +89,14 @@ const PriceList = lazy(() => import("./pages/admin/PriceList"));
 const PriceForm = lazy(() => import("./pages/admin/PriceForm"));
 const StockAdjustment = lazy(() => import("./pages/admin/StockAdjustment"));
 const StockTransfer = lazy(() => import("./pages/admin/StockTransfer"));
+const PackagingRecipes = lazy(() => import("./pages/admin/PackagingRecipes"));
+const RepackOrders = lazy(() => import("./pages/admin/RepackOrders"));
 const StockMovements = lazy(() => import("./pages/admin/StockMovements"));
 const PlaceholderPage = lazy(() => import("./pages/admin/PlaceholderPage"));
 const SalesAnalysis = lazy(() => import("./pages/admin/SalesAnalysis"));
 const AdminCreditManagement = lazy(() => import("./pages/admin/CreditManagement"));
 const AdminCreatePOSOrder = lazy(() => import("./pages/admin/CreatePOSOrder"));
+const PartyLedger = lazy(() => import("./pages/admin/PartyLedger"));
 
 // Sales routes - lazy loaded
 const SalesDashboard = lazy(() => import("./pages/sales/Dashboard"));
@@ -219,13 +226,10 @@ const App: React.FC = () => {
                       <Route path="suppliers/new" element={<SupplierForm />} />
                       <Route path="suppliers/:id" element={<SupplierForm />} />
                       <Route path="suppliers/:id/edit" element={<SupplierForm />} />
-                      <Route path="purchase-invoices" element={<PurchaseInvoices />} />
-                      <Route path="purchase-invoices/new" element={<CreatePurchaseInvoice />} />
-                      <Route path="purchase-invoices/:id/edit" element={<CreatePurchaseInvoice />} />
-                      <Route path="purchase-invoices/:id" element={<PurchaseInvoiceDetail />} />
                       <Route path="supplier-payments" element={<SupplierPayments />} />
                       <Route path="supplier-payments/new" element={<CreateSupplierPayment />} />
                       <Route path="supplier-payments/:id" element={<SupplierPaymentDetail />} />
+                      <Route path="party/:id/ledger" element={<PartyLedger />} />
                       <Route path="procurement/reports/summary" element={<PlaceholderPage />} />
                       <Route path="procurement/reports/grn-pending" element={<PlaceholderPage />} />
                       <Route path="procurement/reports/supplier-outstanding" element={<PlaceholderPage />} />
@@ -261,12 +265,20 @@ const App: React.FC = () => {
                       <Route path="brands/new" element={<BrandForm />} />
                       <Route path="brands/:id" element={<BrandDetail />} />
                       <Route path="brands/:id/edit" element={<BrandForm />} />
+                      <Route path="collections" element={<CollectionList />} />
+                      <Route path="collections/new" element={<CollectionForm />} />
+                      <Route path="collections/:id/edit" element={<CollectionForm />} />
+                      <Route path="modifiers" element={<ModifierList />} />
+                      <Route path="modifiers/new" element={<ModifierForm />} />
+                      <Route path="modifiers/:id/edit" element={<ModifierForm />} />
                       <Route path="prices" element={<PriceList />} />
                       <Route path="prices/new" element={<PriceForm />} />
                       <Route path="warehouses" element={<Warehouses />} />
                       <Route path="warehouses/:warehouseId/inventory" element={<WarehouseInventory />} />
                       <Route path="adjust" element={<StockAdjustment />} />
                       <Route path="transfer" element={<StockTransfer />} />
+                      <Route path="packaging-recipes" element={<PackagingRecipes />} />
+                      <Route path="repack-orders" element={<RepackOrders />} />
                       <Route path="movements" element={<StockMovements />} />
                       <Route path="balance" element={<PlaceholderPage />} />
                       <Route path="warehouse-balance" element={<PlaceholderPage />} />
@@ -274,7 +286,7 @@ const App: React.FC = () => {
                     
                     {/* Sales Module */}
                     <Route path="/sales" element={<ProtectedRoute><ModuleLayout /></ProtectedRoute>}>
-                      <Route index element={<AdminHome />} />
+                      <Route index element={<SalesDashboard />} />
                       <Route path="orders" element={<Orders />} />
                       <Route path="orders/create" element={<CreateOrder />} />
                       <Route path="orders/:orderId" element={<OrderDocumentPage />} />

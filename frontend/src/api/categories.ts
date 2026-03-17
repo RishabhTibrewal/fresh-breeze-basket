@@ -7,6 +7,8 @@ export interface Category {
   slug?: string;
   image_url?: string;
   description?: string;
+  parent_id?: string | null;
+  subcategories?: Category[];
   created_at: string;
   updated_at: string;
 }
@@ -16,6 +18,7 @@ export interface CreateCategoryData {
   slug: string;
   description?: string;
   image_url?: string;
+  parent_id?: string | null;
 }
 
 export interface UpdateCategoryData extends Partial<CreateCategoryData> {}
@@ -29,6 +32,18 @@ interface ApiResponse<T> {
 export const categoriesService = {
   async getAll(): Promise<Category[]> {
     const { data: response } = await apiClient.get<ApiResponse<Category[]>>('/categories');
+    return response.data;
+  },
+
+  // Get only top-level categories (no subcategories)
+  async getTopLevel(): Promise<Category[]> {
+    const { data: response } = await apiClient.get<ApiResponse<Category[]>>('/categories?topLevel=true');
+    return response.data;
+  },
+
+  // Get subcategories of a specific category
+  async getSubcategories(categoryId: string): Promise<Category[]> {
+    const { data: response } = await apiClient.get<ApiResponse<Category[]>>(`/categories/${categoryId}/subcategories`);
     return response.data;
   },
 
@@ -55,6 +70,5 @@ export const categoriesService = {
 export const fetchCategories = async (): Promise<ProductCategory[]> => {
   const { data: response } = await apiClient.get<ApiResponse<ProductCategory[]>>('/categories');
   const { data } = response;
-  console.log("categories data", data);
   return data;
-} 
+}

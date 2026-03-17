@@ -34,7 +34,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { Plus, Search, Eye, Edit, ShoppingCart, ClipboardList, Mail, Phone, Calendar, DollarSign } from "lucide-react";
+import { Plus, Search, Eye, Edit, ShoppingCart, ClipboardList, Mail, Phone, Calendar, DollarSign, Link as LinkIcon } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -69,6 +69,12 @@ interface Customer {
     type: string;
     created_at: string;
   }[];
+  party_id?: string | null;
+  party?: {
+    id: string;
+    is_customer: boolean;
+    is_supplier: boolean;
+  } | null;
 }
 
 const customerFormSchema = z.object({
@@ -215,8 +221,31 @@ export default function Customers() {
     });
   };
 
+  const createLinkedSupplierMutation = useMutation({
+    mutationFn: async (customerId: string) => {
+      const response = await apiClient.post(`/customer/${customerId}/create-linked-supplier`);
+      return response.data;
+    },
+    onSuccess: (response: any) => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      const supplierId = response?.data?.id;
+      if (supplierId) {
+        toast.success(response?.alreadyExists ? 'Supplier counterpart already exists' : 'Supplier counterpart created');
+        navigate(`/procurement/suppliers/${supplierId}/edit`);
+      } else {
+        toast.success('Supplier counterpart is ready');
+        navigate('/procurement/suppliers');
+      }
+    },
+    onError: (error: any) => {
+      console.error('Error creating linked supplier:', error);
+      toast.error(error?.message || 'Failed to create supplier counterpart');
+    },
+  });
+
   return (
-    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
+    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 pb-20 md:pb-6 space-y-3 sm:space-y-6">
       <Card className="w-full min-w-0 overflow-hidden">
         <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 min-w-0">
@@ -388,7 +417,7 @@ export default function Customers() {
               <div className="text-center py-8 text-sm text-muted-foreground">No customers found</div>
             ) : (
               filteredCustomers.map((customer) => (
-                <Card key={customer.id} className="p-3 w-full min-w-0 overflow-hidden">
+                <Card key={customer.id} className="p-3 w-full min-w-0 overflow-hidden hover:bg-muted/50 active:scale-[0.98] transition-all">
                   <div className="space-y-2.5 min-w-0">
                     <div className="flex items-start justify-between gap-2 min-w-0">
                       <div className="flex-1 min-w-0">
@@ -426,11 +455,10 @@ export default function Customers() {
                         variant="outline" 
                         size="sm"
                         onClick={() => {
-                          // Use user_id if available, otherwise use customer id
                           const idToUse = customer.user_id || customer.id;
                           navigate(`/sales/customers/${idToUse}`);
                         }}
-                        className="text-xs h-8 flex-1 min-w-[calc(50%-0.375rem)]"
+                        className="text-xs h-9 min-h-[44px] flex-1 min-w-[calc(50%-0.375rem)]"
                       >
                         <Eye className="h-3.5 w-3.5 mr-1.5" />
                         Details
@@ -443,7 +471,7 @@ export default function Customers() {
                           setSelectedCustomer(customer);
                           navigate(`/sales/orders/create?customerId=${customer.id}`);
                         }}
-                        className="text-xs h-8 flex-1 min-w-[calc(50%-0.375rem)]"
+                        className="text-xs h-9 min-h-[44px] flex-1 min-w-[calc(50%-0.375rem)]"
                       >
                         Order
                       </Button>
@@ -455,7 +483,7 @@ export default function Customers() {
                           setSelectedCustomer(customer);
                           navigate(`/sales/customers/${customer.id}/orders`);
                         }}
-                        className="text-xs h-8 flex-1 min-w-[calc(50%-0.375rem)]"
+                        className="text-xs h-9 min-h-[44px] flex-1 min-w-[calc(50%-0.375rem)]"
                       >
                         Orders
                       </Button>
@@ -469,13 +497,13 @@ export default function Customers() {
                               setSelectedCustomer(customer);
                               setIsEditModalOpen(true);
                             }}
-                            className="text-xs h-8 flex-1 min-w-[calc(50%-0.375rem)]"
+                            className="text-xs h-9 min-h-[44px] flex-1 min-w-[calc(50%-0.375rem)]"
                           >
                             <Edit className="h-3.5 w-3.5 mr-1.5" />
                             Edit
                           </Button>
                         </DialogTrigger>
-                        <DialogContent className="w-[95%] sm:w-full max-w-md max-h-[90vh] overflow-y-auto">
+                        <DialogContent className="w-[95%] max-w-[95vw] sm:max-w-md max-h-[90vh] overflow-y-auto">
                           <DialogHeader>
                             <DialogTitle className="text-base sm:text-lg">Edit Customer</DialogTitle>
                             <DialogDescription className="text-xs sm:text-sm">
@@ -616,12 +644,13 @@ export default function Customers() {
 
           {/* Desktop Table View */}
           <div className="hidden md:block w-full min-w-0 overflow-x-auto">
-            <Table className="min-w-[700px]">
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="px-2">Name</TableHead>
                   <TableHead className="px-2">Email</TableHead>
                   <TableHead className="px-2">Phone</TableHead>
+                  <TableHead className="px-2">Trading Partner</TableHead>
                   <TableHead className="px-2">Total Orders</TableHead>
                   <TableHead className="px-2">Total Spent</TableHead>
                   <TableHead className="px-2">Last Order</TableHead>
@@ -631,11 +660,11 @@ export default function Customers() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-sm">Loading...</TableCell>
+                    <TableCell colSpan={8} className="text-center text-sm">Loading...</TableCell>
                   </TableRow>
                 ) : filteredCustomers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-sm">No customers found</TableCell>
+                    <TableCell colSpan={8} className="text-center text-sm">No customers found</TableCell>
                   </TableRow>
                 ) : (
                   filteredCustomers.map((customer) => (
@@ -648,6 +677,15 @@ export default function Customers() {
                       </TableCell>
                       <TableCell className="px-2 py-2 text-sm min-w-0">
                         <div className="truncate" title={customer.phone}>{customer.phone}</div>
+                      </TableCell>
+                      <TableCell className="px-2 py-2 text-sm min-w-0">
+                        {customer.party_id && customer.party?.is_supplier ? (
+                          <span className="text-sm text-muted-foreground truncate" title={customer.party?.name || ''}>
+                            {customer.party?.name || 'Linked Supplier'}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
                       </TableCell>
                       <TableCell className="px-2 py-2 text-sm">{customer.totalOrders || 0}</TableCell>
                       <TableCell className="px-2 py-2 text-sm font-medium">₹{(customer.totalSpent || 0).toFixed(2)}</TableCell>
@@ -695,6 +733,16 @@ export default function Customers() {
                           >
                             <ClipboardList className="h-4 w-4" />
                           </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            title={customer.party_id && customer.party?.is_supplier ? "Already has supplier role" : "Use as Supplier"}
+                            disabled={!!(customer.party_id && customer.party?.is_supplier) || createLinkedSupplierMutation.isPending}
+                            onClick={() => createLinkedSupplierMutation.mutate(customer.id)}
+                          >
+                            <LinkIcon className="h-4 w-4" />
+                          </Button>
                           
                           <Dialog>
                             <DialogTrigger asChild>
@@ -711,7 +759,7 @@ export default function Customers() {
                                 <Edit className="h-4 w-4" />
                               </Button>
                             </DialogTrigger>
-                            <DialogContent className="w-[95%] sm:w-full max-w-md max-h-[90vh] overflow-y-auto">
+                            <DialogContent className="w-[95%] max-w-[95vw] sm:max-w-md max-h-[90vh] overflow-y-auto">
                               <DialogHeader>
                                 <DialogTitle className="text-base sm:text-lg">Edit Customer</DialogTitle>
                                 <DialogDescription className="text-xs sm:text-sm">
@@ -853,6 +901,7 @@ export default function Customers() {
           </div>
         </CardContent>
       </Card>
+
     </div>
   );
 } 

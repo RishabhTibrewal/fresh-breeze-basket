@@ -6,6 +6,7 @@ import {
   getCustomerByUserId,
   createCustomer,
   createCustomerWithUser,
+  createLinkedSupplierFromCustomer,
   updateCustomer,
   deleteCustomer,
   addAddressForCustomer,
@@ -51,6 +52,9 @@ router.post('/', createCustomer);
 
 // Create new customer with user account
 router.post('/with-user', createCustomerWithUser);
+
+// Create supplier counterpart for an existing customer (same party)
+router.post('/:id/create-linked-supplier', createLinkedSupplierFromCustomer);
 
 // Update customer
 router.put('/:id', updateCustomer);

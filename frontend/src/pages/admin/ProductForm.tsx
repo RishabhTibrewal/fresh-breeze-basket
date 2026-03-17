@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { toast } from "sonner";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -33,22 +33,36 @@ import { productsService, type Product, type CreateProductInput } from "@/api/pr
 import { categoriesService, type Category } from "@/api/categories";
 import { BrandSelector } from "@/components/brands/BrandSelector";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ImageUpload } from "@/components/ui/image-upload";
 import { uploadsService } from "@/api/uploads";
+import { collectionsApi, type Collection } from "@/api/collections";
+import { modifiersService, type ModifierGroup } from "@/api/modifiers";
+import { Checkbox } from "@/components/ui/checkbox";
+
+const bundleComponentSchema = z.object({
+  component_variant_id: z.string().min(1, 'Please select a component'),
+  quantity_included: z.number().min(0.01, 'Quantity must be > 0'),
+  price_adjustment: z.number().optional().nullable(),
+});
 
 // Catalog-only product form schema
 const formSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100),
   description: z.string().optional().nullable(),
   category_id: z.string().min(1, 'Category is required'),
+  subcategory_id: z.string().optional().nullable(),
   brand_id: z.string().optional().nullable(),
   origin: z.string().optional().nullable(),
   nutritional_info: z.string().optional().nullable(),
   is_active: z.boolean().default(true),
   product_code: z.string().optional().nullable(),
   slug: z.string().optional().nullable(),
+  collection_ids: z.array(z.string()).default([]),
+  modifier_group_ids: z.array(z.string()).default([]),
+  is_bundle: z.boolean().default(false),
+  bundle_components: z.array(bundleComponentSchema).optional().nullable(),
 });
 
 type FormSchema = z.infer<typeof formSchema>;
@@ -74,29 +88,65 @@ export default function ProductForm() {
       name: "",
       description: "",
       category_id: "",
+      subcategory_id: "",
       brand_id: "",
       origin: "",
       nutritional_info: "",
       is_active: true,
       product_code: "",
       slug: "",
+      collection_ids: [],
+      modifier_group_ids: [],
+      is_bundle: false,
+      bundle_components: [],
     },
   });
+
+  const watchedCategoryId = form.watch('category_id');
 
   const { data: categories, isLoading: isCategoriesLoading } = useQuery<Category[]>({
     queryKey: ["categories"],
     queryFn: categoriesService.getAll,
   });
 
+  // Fetch subcategories for the selected category
+  const { data: subcategories } = useQuery<Category[]>({
+    queryKey: ["subcategories", watchedCategoryId],
+    queryFn: () => categoriesService.getSubcategories(watchedCategoryId!),
+    enabled: !!watchedCategoryId,
+  });
+
+  const hasSubcategories = (subcategories?.length ?? 0) > 0;
+
   const { data: products } = useQuery<Product[]>({
     queryKey: ["products"],
     queryFn: productsService.getAll,
   });
 
+  const availableVariants = useMemo(() => {
+    if (!products) return [];
+    return products.flatMap(p => 
+      p.variants?.map(v => ({
+        ...v,
+        productName: p.name
+      })) || []
+    );
+  }, [products]);
+
   const { data: product, isLoading: isProductLoading } = useQuery<Product>({
     queryKey: ["product", id],
     queryFn: () => productsService.getById(id!),
     enabled: isEditMode,
+  });
+
+  const { data: collections } = useQuery<Collection[]>({
+    queryKey: ['collections'],
+    queryFn: () => collectionsApi.getAll(),
+  });
+
+  const { data: modifierGroups } = useQuery<ModifierGroup[]>({
+    queryKey: ['modifierGroups'],
+    queryFn: modifiersService.getModifierGroups,
   });
 
   useEffect(() => {
@@ -105,15 +155,22 @@ export default function ProductForm() {
         name: product.name,
         description: product.description || "",
         category_id: product.category_id || "",
+        subcategory_id: (product as any).subcategory_id || "",
         brand_id: product.brand_id || "",
         origin: product.origin || "",
         nutritional_info: product.nutritional_info || "",
         is_active: product.is_active,
         product_code: product.product_code || "",
         slug: product.slug || "",
+        collection_ids: product.variants?.[0]?.collections?.map(c => c.id) || [],
+        modifier_group_ids: product.variants?.[0]?.modifier_groups?.map(m => m.id) || [],
+        is_bundle: product.variants?.[0]?.is_bundle || false,
+        bundle_components: product.variants?.[0]?.bundle_components?.map(c => ({
+          component_variant_id: c.component_variant_id,
+          quantity_included: c.quantity_included,
+          price_adjustment: c.price_adjustment,
+        })) || [],
       });
-      // Set product image URL if available
-      // Prioritize image_url (main product image) over additional_images
       if (product.image_url) {
         setProductImageUrl(product.image_url);
       } else if (product.additional_images && product.additional_images.length > 0) {
@@ -221,12 +278,21 @@ export default function ProductForm() {
       name: data.name,
       description: data.description || null,
       category_id: data.category_id || null,
+      subcategory_id: data.subcategory_id || null,
       brand_id: data.brand_id || null,
       origin: data.origin || null,
       nutritional_info: data.nutritional_info || null,
       is_active: Boolean(data.is_active),
       product_code: data.product_code || null,
       slug,
+      collection_ids: data.collection_ids,
+      modifier_group_ids: data.modifier_group_ids,
+      is_bundle: data.is_bundle,
+      bundle_components: data.is_bundle && data.bundle_components ? data.bundle_components.map(c => ({
+        component_variant_id: c.component_variant_id,
+        quantity_included: c.quantity_included,
+        price_adjustment: c.price_adjustment ?? null,
+      })) : [],
     };
 
     if (isEditMode && product) {
@@ -246,6 +312,8 @@ export default function ProductForm() {
       setCurrentStep(3);
     } else if (currentStep === 3) {
       setCurrentStep(4);
+    } else if (currentStep === 4) {
+      setCurrentStep(5);
     }
   };
 
@@ -286,7 +354,7 @@ export default function ProductForm() {
       {isMobile && (
         <div className="mb-6">
           <div className="flex items-center justify-between">
-            {[1, 2, 3, 4].map((step) => (
+            {[1, 2, 3, 4, 5].map((step) => (
               <div key={step} className="flex items-center flex-1">
                 <div
                   className={cn(
@@ -298,7 +366,7 @@ export default function ProductForm() {
                 >
                   {step}
                 </div>
-                {step < 4 && (
+                {step < 5 && (
                   <div
                     className={cn(
                       'flex-1 h-1 mx-2',
@@ -434,6 +502,8 @@ export default function ProductForm() {
                       <Select
                         onValueChange={(value) => {
                           field.onChange(value);
+                          // Clear subcategory when category changes
+                          form.setValue('subcategory_id', '');
                           if (isMobile && value) {
                             setTimeout(() => handleNext(), 100);
                           }
@@ -454,7 +524,7 @@ export default function ProductForm() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {categories?.map((category) => (
+                          {categories?.filter(c => !c.parent_id).map((category) => (
                             <SelectItem key={category.id} value={category.id}>
                               {category.name}
                             </SelectItem>
@@ -468,6 +538,41 @@ export default function ProductForm() {
                     </FormItem>
                   )}
                 />
+
+                {/* Subcategory — only shown if selected category has subcategories */}
+                {hasSubcategories && (
+                  <FormField
+                    control={form.control}
+                    name="subcategory_id"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Subcategory <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+                        <Select
+                          onValueChange={(value) => field.onChange(value === '__none__' ? '' : value)}
+                          value={field.value || '__none__'}
+                        >
+                          <FormControl>
+                            <SelectTrigger className={isMobile ? 'h-12 text-base' : ''}>
+                              <SelectValue placeholder="No subcategory" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="__none__">No subcategory</SelectItem>
+                            {subcategories?.map((sub) => (
+                              <SelectItem key={sub.id} value={sub.id}>
+                                {sub.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>
+                          Narrow down to a specific subcategory (optional)
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
 
                 {!isMobile && form.watch('category_id') && (
                   <Button type="button" onClick={handleNext} variant="outline">
@@ -580,6 +685,269 @@ export default function ProductForm() {
 
                 {!isMobile && (
                   <Button type="button" onClick={handleNext} variant="outline">
+                    Next: Product Groupings
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Step 4: Product Groupings & Bundles */}
+          {form.watch('category_id') && (currentStep >= 4 || !isMobile) && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Step 4: Product Groupings & Bundles</CardTitle>
+                <CardDescription>Assign collections, modifiers, and bundle settings.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div>
+                  <h3 className="mb-4 text-sm font-medium">Collections</h3>
+                  {collections && collections.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {collections.map((collection) => (
+                        <FormField
+                          key={collection.id}
+                          control={form.control}
+                          name="collection_ids"
+                          render={({ field }) => {
+                            return (
+                              <FormItem
+                                key={collection.id}
+                                className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4"
+                              >
+                                <FormControl>
+                                  <Checkbox
+                                    checked={field.value?.includes(collection.id)}
+                                    onCheckedChange={(checked) => {
+                                      return checked
+                                        ? field.onChange([...field.value, collection.id])
+                                        : field.onChange(
+                                            field.value?.filter(
+                                              (value) => value !== collection.id
+                                            )
+                                          )
+                                    }}
+                                  />
+                                </FormControl>
+                                <FormLabel className="font-normal cursor-pointer">
+                                  {collection.name}
+                                </FormLabel>
+                              </FormItem>
+                            )
+                          }}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No collections found.</p>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t">
+                  <h3 className="mb-4 text-sm font-medium">Modifier Groups</h3>
+                  {modifierGroups && modifierGroups.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {modifierGroups.map((group) => (
+                        <FormField
+                          key={group.id}
+                          control={form.control}
+                          name="modifier_group_ids"
+                          render={({ field }) => {
+                            return (
+                              <FormItem
+                                key={group.id}
+                                className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4"
+                              >
+                                <FormControl>
+                                  <Checkbox
+                                    checked={field.value?.includes(group.id)}
+                                    onCheckedChange={(checked) => {
+                                      return checked
+                                        ? field.onChange([...field.value, group.id])
+                                        : field.onChange(
+                                            field.value?.filter(
+                                              (value) => value !== group.id
+                                            )
+                                          )
+                                    }}
+                                  />
+                                </FormControl>
+                                <div className="space-y-1 leading-none">
+                                  <FormLabel className="cursor-pointer">
+                                    {group.name}
+                                  </FormLabel>
+                                  <FormDescription>
+                                    Min: {group.min_select} | Max: {group.max_select ?? 'Any'}
+                                  </FormDescription>
+                                </div>
+                              </FormItem>
+                            )
+                          }}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No modifier groups found.</p>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t">
+                  <h3 className="mb-4 text-sm font-medium">Bundle / Combo Settings</h3>
+                  <FormField
+                    control={form.control}
+                    name="is_bundle"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                        <div className="space-y-0.5">
+                          <FormLabel>Is Combo / Bundle</FormLabel>
+                          <FormDescription>
+                            Enable this if this product is made up of multiple inventory items
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+
+                  {form.watch('is_bundle') && (
+                    <div className="space-y-4 mt-4 bg-muted/20 p-4 rounded-lg border">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium text-muted-foreground">Bundle Components</h4>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const current = form.getValues('bundle_components') || [];
+                            form.setValue('bundle_components', [
+                              ...current,
+                              { component_variant_id: '', quantity_included: 1, price_adjustment: null }
+                            ]);
+                          }}
+                        >
+                          <Plus className="h-3 w-3 mr-2" />
+                          Add Component
+                        </Button>
+                      </div>
+
+                      <FormField
+                        control={form.control}
+                        name="bundle_components"
+                        render={() => (
+                          <FormItem>
+                            <div className="space-y-3">
+                              {form.watch('bundle_components')?.map((component, index) => (
+                                <div key={index} className="flex flex-col sm:flex-row gap-3 items-end p-3 bg-background border rounded-md">
+                                  <div className="flex-1 w-full">
+                                    <FormField
+                                      control={form.control}
+                                      name={`bundle_components.${index}.component_variant_id`}
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel className="text-xs">Inventory Item</FormLabel>
+                                          <Select
+                                            onValueChange={field.onChange}
+                                            value={field.value}
+                                          >
+                                            <FormControl>
+                                              <SelectTrigger className="h-9">
+                                                <SelectValue placeholder="Select component" />
+                                              </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                              {availableVariants.map(v => (
+                                                <SelectItem key={v.id} value={v.id}>
+                                                  {v.productName} - {v.name}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                          <FormMessage />
+                                        </FormItem>
+                                      )}
+                                    />
+                                  </div>
+                                  <div className="w-full sm:w-24">
+                                    <FormField
+                                      control={form.control}
+                                      name={`bundle_components.${index}.quantity_included`}
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel className="text-xs">Qty</FormLabel>
+                                          <FormControl>
+                                            <Input
+                                              type="number"
+                                              step="0.01"
+                                              min="0.01"
+                                              {...field}
+                                              value={field.value ?? ''}
+                                              onChange={e => field.onChange(parseFloat(e.target.value) || 0)}
+                                              className="h-9"
+                                            />
+                                          </FormControl>
+                                          <FormMessage />
+                                        </FormItem>
+                                      )}
+                                    />
+                                  </div>
+                                  <div className="w-full sm:w-32">
+                                    <FormField
+                                      control={form.control}
+                                      name={`bundle_components.${index}.price_adjustment`}
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel className="text-xs">Price Adj.</FormLabel>
+                                          <FormControl>
+                                            <Input
+                                              type="number"
+                                              step="0.01"
+                                              {...field}
+                                              value={field.value ?? ''}
+                                              onChange={e => field.onChange(e.target.value ? parseFloat(e.target.value) : null)}
+                                              className="h-9"
+                                              placeholder="0.00"
+                                            />
+                                          </FormControl>
+                                          <FormMessage />
+                                        </FormItem>
+                                      )}
+                                    />
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      const current = form.getValues('bundle_components') || [];
+                                      form.setValue('bundle_components', current.filter((_, i) => i !== index));
+                                    }}
+                                    className="text-destructive h-9 px-2"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ))}
+                              {(!form.watch('bundle_components') || form.watch('bundle_components')?.length === 0) && (
+                                <p className="text-xs text-muted-foreground italic text-center py-2">
+                                  No components added to this bundle yet.
+                                </p>
+                              )}
+                            </div>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {!isMobile && (
+                  <Button type="button" onClick={handleNext} variant="outline">
                     Next: Status & Review
                   </Button>
                 )}
@@ -587,11 +955,11 @@ export default function ProductForm() {
             </Card>
           )}
 
-          {/* Step 4: Status */}
-          {(currentStep >= 4 || !isMobile) && (
+          {/* Step 5: Status */}
+          {(currentStep >= 5 || !isMobile) && (
             <Card>
               <CardHeader>
-                <CardTitle>Step 4: Status</CardTitle>
+                <CardTitle>Step 5: Status</CardTitle>
               </CardHeader>
               <CardContent>
                 <FormField

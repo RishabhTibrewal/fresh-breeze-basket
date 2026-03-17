@@ -44,6 +44,8 @@ const MOVEMENT_TYPES = [
   'ADJUSTMENT_OUT',
   'TRANSFER',
   'RECEIPT',
+  'REPACK_OUT',
+  'REPACK_IN',
 ];
 
 const ITEMS_PER_PAGE = 20;
@@ -85,7 +87,7 @@ export default function StockMovements() {
   });
 
   const { data: movements = [], isLoading } = useQuery<StockMovement[]>({
-    queryKey: ['stock-movements', filters],
+    queryKey: ['stock-movements', filters, startDate, endDate],
     queryFn: () => inventoryService.getStockMovements({
       ...filters,
       start_date: startDate ? format(startDate, 'yyyy-MM-dd') : undefined,
@@ -160,10 +162,12 @@ export default function StockMovements() {
     switch (type) {
       case 'SALE':
       case 'ADJUSTMENT_OUT':
+      case 'REPACK_OUT':
       case 'TRANSFER':
         return 'destructive';
       case 'RETURN':
       case 'ADJUSTMENT_IN':
+      case 'REPACK_IN':
       case 'RECEIPT':
         return 'default';
       default:
@@ -287,12 +291,12 @@ export default function StockMovements() {
   const renderCard = (movement: StockMovement) => (
     <Card>
       <CardContent className="p-4">
-        <div className="space-y-2">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="font-medium">{movement.product?.name || 'N/A'}</div>
+        <div className="space-y-2 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium truncate">{movement.product?.name || 'N/A'}</div>
               {movement.variant && (
-                <div className="text-sm text-muted-foreground">{movement.variant.name}</div>
+                <div className="text-sm text-muted-foreground truncate">{movement.variant.name}</div>
               )}
             </div>
             <Badge variant={getMovementTypeColor(movement.movement_type) as any}>
@@ -338,11 +342,11 @@ export default function StockMovements() {
     (startDate ? 1 : 0) + (endDate ? 1 : 0);
 
   return (
-    <div className="container mx-auto py-8 px-4">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Stock Movements</h1>
-          <p className="text-muted-foreground mt-1">View stock movement history</p>
+    <div className="container mx-auto py-4 sm:py-8 px-3 sm:px-4 overflow-x-hidden pb-20 md:pb-8">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4 sm:mb-6">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold">Stock Movements</h1>
+          <p className="text-sm text-muted-foreground mt-1">View stock movement history</p>
         </div>
         <Button onClick={handleExportCSV} variant="outline">
           <Download className="h-4 w-4 mr-2" />
@@ -351,21 +355,21 @@ export default function StockMovements() {
       </div>
 
       {/* Filters */}
-      <Card className="mb-6">
-        <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-4">
-            <div className="relative flex-1">
+      <Card className="mb-4 sm:mb-6">
+        <CardContent className="p-3 sm:p-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 mb-4">
+            <div className="relative flex-1 w-full min-w-0">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search movements..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                className="pl-10 h-10 w-full"
               />
             </div>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline">
+                <Button variant="outline" className="w-full sm:w-auto min-h-[44px] sm:min-h-0">
                   <Filter className="h-4 w-4 mr-2" />
                   Filters
                   {activeFiltersCount > 0 && (
@@ -375,21 +379,21 @@ export default function StockMovements() {
                   )}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-80" align="end">
+              <PopoverContent className="w-[95vw] max-w-[95vw] sm:w-80 sm:max-w-none" align="end">
                 <div className="space-y-4">
                   <div>
                     <Label>Warehouse</Label>
                     <Select
-                      value={filters.warehouse_id || ''}
+                      value={filters.warehouse_id || 'all'}
                       onValueChange={(value) =>
-                        setFilters({ ...filters, warehouse_id: value || undefined })
+                        setFilters({ ...filters, warehouse_id: value === 'all' ? undefined : value })
                       }
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="All warehouses" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">All Warehouses</SelectItem>
+                        <SelectItem value="all">All Warehouses</SelectItem>
                         {warehouses.map((warehouse) => (
                           <SelectItem key={warehouse.id} value={warehouse.id}>
                             {warehouse.name}
@@ -402,11 +406,11 @@ export default function StockMovements() {
                   <div>
                     <Label>Product</Label>
                     <Select
-                      value={filters.product_id || ''}
+                      value={filters.product_id || 'all'}
                       onValueChange={(value) =>
                         setFilters({
                           ...filters,
-                          product_id: value || undefined,
+                          product_id: value === 'all' ? undefined : value,
                           variant_id: undefined, // Reset variant when product changes
                         })
                       }
@@ -415,7 +419,7 @@ export default function StockMovements() {
                         <SelectValue placeholder="All products" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">All Products</SelectItem>
+                        <SelectItem value="all">All Products</SelectItem>
                         {products.map((product) => (
                           <SelectItem key={product.id} value={product.id}>
                             {product.name}
@@ -429,16 +433,16 @@ export default function StockMovements() {
                     <div>
                       <Label>Variant</Label>
                       <Select
-                        value={filters.variant_id || ''}
+                        value={filters.variant_id || 'all'}
                         onValueChange={(value) =>
-                          setFilters({ ...filters, variant_id: value || undefined })
+                          setFilters({ ...filters, variant_id: value === 'all' ? undefined : value })
                         }
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="All variants" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">All Variants</SelectItem>
+                          <SelectItem value="all">All Variants</SelectItem>
                           {variants.map((variant) => (
                             <SelectItem key={variant.id} value={variant.id}>
                               {variant.name}
@@ -452,16 +456,16 @@ export default function StockMovements() {
                   <div>
                     <Label>Movement Type</Label>
                     <Select
-                      value={filters.movement_type || ''}
+                      value={filters.movement_type || 'all'}
                       onValueChange={(value) =>
-                        setFilters({ ...filters, movement_type: value || undefined })
+                        setFilters({ ...filters, movement_type: value === 'all' ? undefined : value })
                       }
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="All types" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">All Types</SelectItem>
+                        <SelectItem value="all">All Types</SelectItem>
                         {MOVEMENT_TYPES.map((type) => (
                           <SelectItem key={type} value={type}>
                             {type}
@@ -544,7 +548,7 @@ export default function StockMovements() {
           
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="mt-6 flex justify-center">
+            <div className="mt-4 sm:mt-6 flex flex-wrap justify-center gap-2">
               <Pagination>
                 <PaginationContent>
                   <PaginationItem>

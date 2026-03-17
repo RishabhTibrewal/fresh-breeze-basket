@@ -35,13 +35,15 @@ export class InventoryService {
       | 'ADJUSTMENT_IN'
       | 'ADJUSTMENT_OUT'
       | 'TRANSFER'
-      | 'RECEIPT';
+      | 'RECEIPT'
+      | 'REPACK_OUT'
+      | 'REPACK_IN';
     quantity: number; // positive for increase, negative for decrease
     referenceType?: string;
     referenceId?: string;
     notes?: string;
     createdBy?: string;
-    sourceType?: 'sales' | 'purchase' | 'return' | 'transfer' | 'adjustment' | 'receipt';
+    sourceType?: 'sales' | 'purchase' | 'return' | 'transfer' | 'adjustment' | 'receipt' | 'repack';
   }): Promise<string> {
     const {
       productId,

@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Eye, DollarSign, CheckCircle, Clock, XCircle, Edit } from "lucide-react";
+import { Plus, Search, Eye, DollarSign, CheckCircle, Clock, XCircle, Edit, Calendar, User } from "lucide-react";
 import { paymentsService, Payment } from '@/api/payments';
 import { useCanAccess } from '@/hooks/usePermissions';
 import {
@@ -170,7 +170,7 @@ export default function Payments() {
   };
 
   return (
-    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
+    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 pb-20 md:pb-6 space-y-3 sm:space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold">Payments</h1>
@@ -280,7 +280,7 @@ export default function Payments() {
         </CardContent>
       </Card>
 
-      {/* Payments Table */}
+      {/* Payments List */}
       <Card>
         <CardHeader>
           <CardTitle>Payments ({filteredPayments.length})</CardTitle>
@@ -293,7 +293,83 @@ export default function Payments() {
               {searchQuery ? 'No payments match your search criteria' : 'No payments found'}
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              {/* Mobile Card View */}
+              <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
+                {filteredPayments.map((payment: Payment & { order?: any; customer?: any }) => (
+                  <Card
+                    key={payment.id}
+                    className="p-3 w-full min-w-0 overflow-hidden cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all"
+                    onClick={() => navigate(`/sales/orders/${payment.order_id}`)}
+                  >
+                    <div className="space-y-2.5 min-w-0">
+                      <div className="flex items-start justify-between gap-2 min-w-0">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm mb-1 text-green-600">
+                            {formatCurrency(payment.amount)}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {payment.customer?.name || 'N/A'}
+                          </div>
+                        </div>
+                        <div className="flex-shrink-0">
+                          {getStatusBadge(payment.status)}
+                        </div>
+                      </div>
+                      <div className="space-y-1 text-xs min-w-0">
+                        <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                          <Calendar className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">
+                            {payment.payment_date
+                              ? format(new Date(payment.payment_date), 'MMM dd, yyyy')
+                              : format(new Date(payment.created_at), 'MMM dd, yyyy')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                          <User className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">
+                            {payment.order?.order_number ? `Order #${payment.order.order_number}` : 'N/A'}
+                          </span>
+                        </div>
+                        <div className="text-xs">
+                          Method: {getPaymentMethodLabel(payment.payment_method)}
+                        </div>
+                        {(payment.transaction_id || payment.cheque_no) && (
+                          <div className="text-xs text-muted-foreground">
+                            {payment.transaction_id && <span>TX: {payment.transaction_id}</span>}
+                            {payment.transaction_id && payment.cheque_no && ' | '}
+                            {payment.cheque_no && <span>Cheque: {payment.cheque_no}</span>}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-1.5 pt-2 border-t" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 h-9"
+                          onClick={() => navigate(`/sales/orders/${payment.order_id}`)}
+                        >
+                          <Eye className="h-3.5 w-3.5 mr-1.5" />
+                          View
+                        </Button>
+                        {canWrite && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-9"
+                            onClick={() => handleEditPayment(payment)}
+                          >
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Desktop Table */}
+              <div className="hidden md:block overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -376,13 +452,14 @@ export default function Payments() {
                 </TableBody>
               </Table>
             </div>
+            </>
           )}
         </CardContent>
       </Card>
 
       {/* Update Payment Dialog */}
       <Dialog open={!!editingPayment} onOpenChange={(open) => !open && setEditingPayment(null)}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="w-[95%] max-w-[95vw] sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>Update Payment Status</DialogTitle>
             <DialogDescription>

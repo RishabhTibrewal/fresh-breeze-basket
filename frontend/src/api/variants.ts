@@ -11,11 +11,19 @@ export interface CreateVariantInput {
   is_active?: boolean;
   unit?: number | null;
   unit_type?: string;
+  packing_type?: string | null;
+  type?: string | null;
   best_before?: string | null;
   tax_id?: string | null;
   hsn?: string | null;
   badge?: string | null;
   brand_id?: string | null;
+  is_bundle?: boolean;
+  bundle_components?: Array<{
+    component_variant_id: string;
+    quantity_included: number;
+    price_adjustment?: number | null;
+  }>;
 }
 
 export interface UpdateVariantInput extends Partial<CreateVariantInput> {}

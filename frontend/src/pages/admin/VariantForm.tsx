@@ -48,6 +48,8 @@ interface ApiResponse<T> {
 }
 
 const UNIT_TYPES = ['kg', 'g', 'lb', 'oz', 'piece', 'bunch', 'pack', 'bag'];
+const PACKING_TYPES = ['bag', 'box', 'packet', 'carton', 'bottle', 'jar'];
+const VARIANT_TYPES = ['bulk', 'retail', 'wholesale'];
 const BADGE_OPTIONS = [
   { value: 'new', label: 'New' },
   { value: 'sale', label: 'Sale' },
@@ -76,6 +78,13 @@ const priceEntrySchema = z.object({
   path: ['sale_price'],
 });
 
+const bundleComponentSchema = z.object({
+  id: z.string().optional(),
+  component_variant_id: z.string().min(1, 'Please select a component'),
+  quantity_included: z.number().min(0.01, 'Quantity must be > 0'),
+  price_adjustment: z.number().optional().nullable(),
+});
+
 const variantSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   sku: z.string().optional().nullable(),
@@ -85,6 +94,8 @@ const variantSchema = z.object({
   is_active: z.boolean().default(true),
   unit: z.number().min(0).optional().nullable(),
   unit_type: z.string().default('piece'),
+  packing_type: z.string().optional().nullable(),
+  type: z.string().optional().nullable(),
   best_before: z.string().optional().nullable(),
   tax_id: z.string().optional().nullable(),
   hsn: z.string().optional().nullable(),
@@ -92,6 +103,8 @@ const variantSchema = z.object({
   brand_id: z.string().optional().nullable(),
   warehouse_id: z.string().optional().nullable(),
   initial_stock: z.number().min(0, 'Stock must be >= 0').optional().nullable(),
+  is_bundle: z.boolean().default(false),
+  bundle_components: z.array(bundleComponentSchema).optional().nullable(),
 }).refine((data) => {
   // Ensure at least one standard price exists
   const hasStandardPrice = data.prices.some(p => p.price_type === 'standard');
@@ -145,6 +158,8 @@ export default function VariantForm() {
       is_active: true,
       unit: null,
       unit_type: 'piece',
+      packing_type: null,
+      type: null,
       best_before: null,
       tax_id: '',
       hsn: '',
@@ -152,6 +167,8 @@ export default function VariantForm() {
       brand_id: '',
       warehouse_id: '',
       initial_stock: null,
+      is_bundle: false,
+      bundle_components: [],
     },
   });
 
@@ -169,6 +186,22 @@ export default function VariantForm() {
     queryFn: () => productsService.getById(actualProductId!),
     enabled: !!actualProductId,
   });
+
+  // Fetch all products to act as a catalog for bundle components
+  const { data: allProducts } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => productsService.getAll(),
+  });
+
+  const availableVariants = useMemo(() => {
+    if (!allProducts) return [];
+    return allProducts.flatMap(p => 
+      p.variants?.map(v => ({
+        ...v,
+        productName: p.name
+      })) || []
+    );
+  }, [allProducts]);
 
   const { data: taxes = [] } = useQuery<Tax[]>({
     queryKey: ['taxes'],
@@ -249,11 +282,20 @@ export default function VariantForm() {
         is_active: variant.is_active,
         unit: variant.unit || null,
         unit_type: variant.unit_type,
+        packing_type: variant.packing_type || null,
+        type: variant.type || null,
         best_before: variant.best_before || null,
         tax_id: variant.tax_id || '',
         hsn: variant.hsn || '',
         badge: variant.badge || '',
         brand_id: variant.brand_id || '',
+        is_bundle: variant.is_bundle || false,
+        bundle_components: variant.bundle_components?.map(c => ({
+          id: c.id,
+          component_variant_id: c.component_variant_id,
+          quantity_included: c.quantity_included,
+          price_adjustment: c.price_adjustment,
+        })) || [],
       });
     } else if (variant && existingPrices.length === 0) {
       // Variant exists but no prices yet - use variant.price if available
@@ -272,11 +314,20 @@ export default function VariantForm() {
         is_active: variant.is_active,
         unit: variant.unit || null,
         unit_type: variant.unit_type,
+        packing_type: variant.packing_type || null,
+        type: variant.type || null,
         best_before: variant.best_before || null,
         tax_id: variant.tax_id || '',
         hsn: variant.hsn || '',
         badge: variant.badge || '',
         brand_id: variant.brand_id || '',
+        is_bundle: variant.is_bundle || false,
+        bundle_components: variant.bundle_components?.map(c => ({
+          id: c.id,
+          component_variant_id: c.component_variant_id,
+          quantity_included: c.quantity_included,
+          price_adjustment: c.price_adjustment,
+        })) || [],
       });
     }
   }, [variant, existingPrices, form]);
@@ -303,11 +354,19 @@ export default function VariantForm() {
         is_active: data.is_active ?? true,
         unit: data.unit || null,
         unit_type: data.unit_type || 'piece',
+        packing_type: data.packing_type && data.packing_type !== 'none' ? data.packing_type : null,
+        type: data.type && data.type !== 'none' ? data.type : null,
         best_before: data.best_before && data.best_before.trim() !== '' ? data.best_before : null,
         tax_id: data.tax_id || null,
         hsn: data.hsn || null,
         badge: data.badge || null,
         brand_id: data.brand_id || null,
+        is_bundle: data.is_bundle ?? false,
+        bundle_components: data.is_bundle && data.bundle_components ? data.bundle_components.map(c => ({
+          component_variant_id: c.component_variant_id,
+          quantity_included: c.quantity_included,
+          price_adjustment: c.price_adjustment ?? null,
+        })) : [],
       };
       const variant = await variantsService.create(productId!, createData);
       
@@ -391,6 +450,14 @@ export default function VariantForm() {
       const updateData = {
         ...data,
         best_before: data.best_before && data.best_before.trim() !== '' ? data.best_before : null,
+        packing_type: data.packing_type && data.packing_type !== 'none' ? data.packing_type : null,
+        type: data.type && data.type !== 'none' ? data.type : null,
+        is_bundle: data.is_bundle ?? false,
+        bundle_components: data.is_bundle && data.bundle_components ? data.bundle_components.map(c => ({
+          component_variant_id: c.component_variant_id,
+          quantity_included: c.quantity_included,
+          price_adjustment: c.price_adjustment ?? null,
+        })) : [],
         // Remove prices from variant update - they're handled separately
         prices: undefined,
       };
@@ -1112,6 +1179,61 @@ export default function VariantForm() {
                 />
               </div>
 
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="packing_type"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Packing Type</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || 'none'}>
+                        <FormControl>
+                          <SelectTrigger className={isMobile ? 'h-12 text-base' : ''}>
+                            <SelectValue placeholder="e.g. bag, box, packet" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {PACKING_TYPES.map((pt) => (
+                            <SelectItem key={pt} value={pt}>
+                              {pt}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>Physical packaging (bag, box, packet)</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="type"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Variant Type</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || 'none'}>
+                        <FormControl>
+                          <SelectTrigger className={isMobile ? 'h-12 text-base' : ''}>
+                            <SelectValue placeholder="bulk, retail, wholesale" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {VARIANT_TYPES.map((vt) => (
+                            <SelectItem key={vt} value={vt}>
+                              {vt}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>Role for repack (bulk=input, retail=output)</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
               <FormField
                 control={form.control}
                 name="best_before"
@@ -1229,6 +1351,168 @@ export default function VariantForm() {
                   </FormItem>
                 )}
               />
+            </CardContent>
+          </Card>
+
+          {/* Bundle Configuration */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Bundle / Combo Settings</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <FormField
+                control={form.control}
+                name="is_bundle"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel>Is Combo / Bundle</FormLabel>
+                      <FormDescription>
+                        Enable this if this variant is made up of multiple inventory items
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              {form.watch('is_bundle') && (
+                <div className="space-y-4 mt-4 border-t pt-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium">Bundle Components</h3>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const current = form.getValues('bundle_components') || [];
+                        form.setValue('bundle_components', [
+                          ...current,
+                          { component_variant_id: '', quantity_included: 1, price_adjustment: null }
+                        ]);
+                      }}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Component
+                    </Button>
+                  </div>
+
+                  <FormField
+                    control={form.control}
+                    name="bundle_components"
+                    render={() => (
+                      <FormItem>
+                        <div className="space-y-4">
+                          {form.watch('bundle_components')?.map((component, index) => (
+                            <Card key={index} className="p-4 grid grid-cols-1 md:grid-cols-12 gap-4 items-end bg-muted/30">
+                              <div className="md:col-span-6">
+                                <FormField
+                                  control={form.control}
+                                  name={`bundle_components.${index}.component_variant_id`}
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Inventory Item</FormLabel>
+                                      <Select
+                                        onValueChange={field.onChange}
+                                        value={field.value}
+                                      >
+                                        <FormControl>
+                                          <SelectTrigger className="bg-background">
+                                            <SelectValue placeholder="Select variant" />
+                                          </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                          {availableVariants.map(v => (
+                                            <SelectItem key={v.id} value={v.id}>
+                                              {v.productName} - {v.name}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+                              <div className="md:col-span-3">
+                                <FormField
+                                  control={form.control}
+                                  name={`bundle_components.${index}.quantity_included`}
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Qty</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          min="0.01"
+                                          {...field}
+                                          value={field.value ?? ''}
+                                          onChange={e => field.onChange(parseFloat(e.target.value) || 0)}
+                                          className="bg-background"
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+                              <div className="md:col-span-2">
+                                <FormField
+                                  control={form.control}
+                                  name={`bundle_components.${index}.price_adjustment`}
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Price Adj.</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          {...field}
+                                          value={field.value ?? ''}
+                                          onChange={e => field.onChange(e.target.value ? parseFloat(e.target.value) : null)}
+                                          className="bg-background text-xs"
+                                          placeholder="+/- 0"
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+                              <div className="md:col-span-1 justify-end flex">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => {
+                                    const current = form.getValues('bundle_components') || [];
+                                    form.setValue('bundle_components', current.filter((_, i) => i !== index));
+                                  }}
+                                  className="text-destructive mb-1"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </Card>
+                          ))}
+                          {form.watch('bundle_components')?.length === 0 && (
+                            <p className="text-sm text-muted-foreground text-center py-4 border rounded-md border-dashed">
+                              No components added. Click "Add Component" to build this bundle.
+                            </p>
+                          )}
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
 

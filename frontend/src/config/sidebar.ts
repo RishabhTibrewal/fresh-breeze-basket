@@ -105,6 +105,20 @@ const stockGroup: SidebarGroup = {
       roles: ['admin', 'warehouse_manager']
     },
     {
+      id: 'packaging-recipes',
+      label: 'Packaging Recipes',
+      icon: Package,
+      path: '/inventory/packaging-recipes',
+      roles: ['admin', 'warehouse_manager']
+    },
+    {
+      id: 'repack-orders',
+      label: 'Repack Orders',
+      icon: ArrowLeftRight,
+      path: '/inventory/repack-orders',
+      roles: ['admin', 'warehouse_manager']
+    },
+    {
       id: 'stock-reports',
       label: 'Reports',
       icon: FileText,

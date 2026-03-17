@@ -26,7 +26,9 @@ import {
   Hash,
   UserCog,
   Percent,
-  Plus
+  Plus,
+  LayoutList,
+  ListChecks
 } from 'lucide-react';
 
 export interface ModuleKPI {
@@ -147,9 +149,13 @@ export const modulesConfig: Record<string, ModuleConfig> = {
       { label: 'Products', route: '/inventory/products', icon: Package, permission: 'inventory.read' },
       { label: 'Categories', route: '/inventory/categories', icon: Grid, permission: 'inventory.read' },
       { label: 'Brands', route: '/inventory/brands', icon: Tag, permission: 'inventory.read' },
+      { label: 'Collections', route: '/inventory/collections', icon: LayoutList, permission: 'inventory.read' },
+      { label: 'Modifiers', route: '/inventory/modifiers', icon: ListChecks, permission: 'inventory.read' },
       { label: 'Warehouses', route: '/inventory/warehouses', icon: Warehouse, permission: 'inventory.read' },
       { label: 'Stock Adjustment', route: '/inventory/adjust', icon: ClipboardCheck, permission: 'inventory.adjust' },
       { label: 'Stock Transfer', route: '/inventory/transfer', icon: ArrowLeftRight, permission: 'inventory.transfer' },
+      { label: 'Packaging Recipes', route: '/inventory/packaging-recipes', icon: Package, permission: 'inventory.read' },
+      { label: 'Repack Orders', route: '/inventory/repack-orders', icon: ArrowLeftRight, permission: 'inventory.read' },
       { label: 'Stock Movements', route: '/inventory/movements', icon: FileText, permission: 'inventory.read' }
     ]
   },

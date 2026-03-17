@@ -1,6 +1,6 @@
 # Architecture State Document
 
-**Last Updated:** 2025-01-27  
+**Last Updated:** 2026-03-17  
 **Purpose:** Technical reference for current system architecture, routing patterns, and critical implementation details to prevent architectural mistakes. This document serves as the long-term memory and architectural blueprint for all future AI interactions.
 
 ---
@@ -367,6 +367,8 @@ fresh-breeze-basket/
 - `backend/src/config/supabase.ts` - Supabase client initialization
 - `backend/src/utils/supabaseJwt.ts` - JWT verification with JWKS (supports Cloudflare Worker proxy)
 - `backend/src/utils/r2Client.ts` - Cloudflare R2 S3-compatible client
+- `backend/src/controllers/partyController.ts` - Business partner linking and unified party ledger endpoints
+- `backend/src/routes/parties.ts` - `/api/parties` route definitions
 
 ---
 
@@ -384,9 +386,11 @@ fresh-breeze-basket/
 **Inventory Module:**
 - ✅ Warehouse Management
 - ✅ Variant-level Inventory Tracking
-- ✅ Stock Movements
+- ✅ Stock Movements (including REPACK_OUT, REPACK_IN)
 - ✅ Stock Adjustments
 - ✅ Stock Transfers
+- ✅ Packaging Recipes (bulk-to-retail conversion definitions)
+- ✅ Repack Orders (package breakdown: bulk → retail)
 
 **Sales Module:**
 - ✅ Sales Orders
@@ -432,6 +436,88 @@ fresh-breeze-basket/
 - ⚠️ Module defined in config
 - ⚠️ Basic structure in place
 - ⚠️ Full implementation pending
+
+### Recent Changes (2026-03-17)
+
+- **Product Groupings (Modifiers, Bundles, Collections):**
+  - **Modifiers**: Added `modifier_groups`, `modifiers`, and `variant_modifier_groups` tables to handle required/optional variations. Implemented CRUD APIs at `/api/modifiers`.
+  - **Bundles / Combos**: Added `is_bundle` boolean to `product_variants`. Created `bundle_components` table linking parent bundles to component variants with quantities and price adjustments. Product API handles recursive fetching of components.
+  - **Collections**: Added `collections` and `variant_collections` tables for custom product display tags. Implemented CRUD APIs at `/api/collections` and added `?collection_slug=` filtering on products API.
+  - **Frontend Integration**: Added dedicated pages for managing Collections and Modifiers. Updated `ProductForm` and `VariantForm` to support assigning these groupings and dynamically managing bundle components.
+  - **Migrations**: `20260317_product_groupings.sql`
+
+### Recent Changes (2025-03-10)
+
+- **Repack (Package Breakdown) Feature:**
+  - Added `packing_type` and `type` columns to `product_variants` (packing_type: bag/box/packet; type: bulk/retail/wholesale)
+  - Added REPACK_OUT and REPACK_IN to `stock_movements` movement types
+  - New tables: `packaging_recipes` (input/output variant, conversion_ratio), `repack_orders`, `repack_order_items`
+  - New RPC: `process_repack_order(repack_order_id)` - atomically creates REPACK_OUT/REPACK_IN movements
+  - API: `GET/POST/PUT/DELETE /api/inventory/packaging-recipes`, `GET/POST/PUT/DELETE /api/inventory/repack-orders`, `POST /api/inventory/repack-orders/:id/process`
+  - Frontend: PackagingRecipes page, RepackOrders page, VariantForm packing_type/type fields, StockMovements REPACK filter
+  - Migrations: `20250310_add_packing_type_and_type_to_product_variants.sql`, `20250310_add_repack_movement_types.sql`, `20250310_create_packaging_recipes.sql`, `20250310_create_repack_orders.sql`, `20250310_create_process_repack_order_rpc.sql`, `20260310_add_repack_to_source_type.sql`
+
+### Recent Changes (2025-03-15)
+
+- **Orders – Sales Executive link (optional):**
+  - Added optional `sales_executive_id UUID REFERENCES auth.users(id) ON DELETE SET NULL` to `public.orders` to link orders to a sales executive.
+  - Migration: `backend/src/db/migrations/20260315_add_sales_executive_id_to_orders.sql` (column + index `idx_orders_sales_executive_id`).
+  - Create order: accepts optional `sales_executive_id` in body; if omitted and current user has sales role, defaults to `req.user.id`.
+  - Sales orders list (`getSalesOrders`) enriches each order with `sales_executive: { id, first_name, last_name, email }` from `profiles`.
+  - New API: `GET /api/orders/sales-executives` (protect + requireRole admin/sales) – same payload as admin sales-executives, used by Create Order dropdown.
+  - Frontend: Create Order has optional "Sales Executive" dropdown (defaults to current user when sales); Orders list shows Sales Executive column (desktop) and "SE: …" line (mobile).
+
+### Recent Changes (2026-03-16)
+
+- **Business Partner model (Customer + Supplier unification):**
+  - Added shared party master table: `public.contact_parties`.
+  - Added `party_id` foreign key columns on `public.customers` and `public.suppliers`.
+  - Backfilled existing customers/suppliers to contact parties.
+  - Migrations:
+    - `backend/src/db/migrations/20260316_create_contact_parties.sql`
+    - `backend/src/db/migrations/20260316_update_party_ledger_with_payments.sql`
+    - `backend/src/db/migrations/20260317_add_contact_parties_rls.sql`
+
+- **Unified party ledger (`public.party_ledger`):**
+  - Includes:
+    - `sale` (receivable)
+    - `payment_in` (receivable reduction)
+    - `purchase` (payable)
+    - `payment_out` (payable reduction)
+  - Backend aggregates:
+    - `totalReceivable = sale - payment_in`
+    - `totalPayable = purchase - payment_out`
+    - `netPosition = totalReceivable - totalPayable`
+
+- **Backend API additions:**
+  - Added `/api/parties` routes:
+    - `GET /api/parties`
+    - `GET /api/parties/:id`
+    - `POST /api/parties`
+    - `PATCH /api/parties/:id/link-customer`
+    - `PATCH /api/parties/:id/link-supplier`
+    - `GET /api/parties/:id/ledger`
+  - Added role-enablement conversion routes (same-party counterpart creation):
+    - `POST /api/customer/:id/create-linked-supplier`
+    - `POST /api/suppliers/:id/create-linked-customer`
+  - Mounted in `backend/src/index.ts`.
+
+- **Creation and role-enablement behavior:**
+  - Customer/supplier creation now creates or reuses a `contact_parties` row and sets `party_id`.
+  - Current preferred flow is "enable second role" (customer -> supplier or supplier -> customer) by creating a counterpart record with the same `party_id`.
+  - API returns existing counterpart if already present (`alreadyExists=true`) to keep operations idempotent.
+  - Added DB guardrails to enforce at most one customer and one supplier per party within a company:
+    - Migration: `backend/src/db/migrations/20260316_add_party_role_uniqueness.sql`
+    - Unique indexes:
+      - `uq_customers_company_party_id` on `public.customers(company_id, party_id)` where `party_id IS NOT NULL`
+      - `uq_suppliers_company_party_id` on `public.suppliers(company_id, party_id)` where `party_id IS NOT NULL`
+
+- **Frontend updates:**
+  - New API client: `frontend/src/api/parties.ts`.
+  - New ledger page: `frontend/src/pages/admin/PartyLedger.tsx` route `/admin/party/:id/ledger`.
+  - Customers and Suppliers pages now use direct role-enablement actions ("Use as Supplier" / "Use as Customer") instead of selecting and linking another existing entity.
+  - Link action is disabled once that counterpart role already exists for the party.
+  - Trading Partner column now depends on nested party relation data from backend list APIs.
 
 ### Recent Changes (2025-01-27)
 
@@ -789,6 +875,37 @@ await paymentService.processPayment({
 - PaymentService: `backend/src/services/core/PaymentService.ts` lines 17-80
 - Order creation: `backend/src/controllers/orderController.ts` lines 511-556
 - Order update: `backend/src/controllers/orders.ts` lines 1063-1098
+
+#### 15. Business Partner (`contact_parties`) Rules
+
+**NEVER:**
+- Treat `customers` and `suppliers` as isolated identities after party assignment.
+- Link records across companies or skip `company_id` checks.
+- Assume Trading Partner badge/name will render if API does not include nested `party` relation.
+- Create duplicate role rows for the same party in the same company.
+- Prefer cross-entity "manual linking" as the default UX when role-enablement endpoints exist.
+
+**ALWAYS:**
+- Use shared `contact_parties.id` via `customers.party_id` and `suppliers.party_id` for same-party buy+sell workflows.
+- Scope party operations by tenant (`req.companyId` / `current_company_id()`).
+- Keep RLS enabled on `contact_parties` with role checks (`is_admin_or_sales(auth.uid())`).
+- Use role-enablement counterpart APIs for trading partner conversion:
+  - `POST /api/customer/:id/create-linked-supplier`
+  - `POST /api/suppliers/:id/create-linked-customer`
+- Make counterpart creation idempotent (return existing row when already present).
+- Enforce one role-row per party per company via unique partial indexes.
+- Include nested party relation in list APIs used by frontend badge/name rendering:
+  - Customers list: `party:contact_parties(id,name,is_customer,is_supplier)`
+  - Suppliers list: `party:contact_parties(id,name,is_customer,is_supplier)`
+
+**Reference files:**
+- `backend/src/db/migrations/20260316_create_contact_parties.sql`
+- `backend/src/db/migrations/20260316_update_party_ledger_with_payments.sql`
+- `backend/src/db/migrations/20260317_add_contact_parties_rls.sql`
+- `backend/src/db/migrations/20260316_add_party_role_uniqueness.sql`
+- `backend/src/controllers/partyController.ts`
+- `backend/src/controllers/customerController.ts`
+- `backend/src/controllers/suppliers.ts`
 
 ---
 

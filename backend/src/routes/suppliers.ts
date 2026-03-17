@@ -4,7 +4,8 @@ import {
   getSuppliers,
   getSupplierById,
   updateSupplier,
-  deleteSupplier
+  deleteSupplier,
+  createLinkedCustomerFromSupplier
 } from '../controllers/suppliers';
 import { protect, adminOnly } from '../middleware/auth';
 
@@ -15,6 +16,7 @@ router.use(protect);
 
 // Admin only routes
 router.post('/', adminOnly, createSupplier);
+router.post('/:id/create-linked-customer', adminOnly, createLinkedCustomerFromSupplier);
 router.get('/', getSuppliers);
 router.get('/:id', getSupplierById);
 router.put('/:id', adminOnly, updateSupplier);

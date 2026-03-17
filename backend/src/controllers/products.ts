@@ -11,7 +11,7 @@ export const getProducts = async (req: Request, res: Response) => {
     if (!req.companyId) {
       throw new ApiError(400, 'Company context is required');
     }
-    const { category, minPrice, maxPrice, inStock, sortBy, limit, page, format } = req.query;
+    const { category, minPrice, maxPrice, inStock, sortBy, limit, page, format, collection_slug } = req.query;
     
     const client = supabaseAdmin || supabase;
     
@@ -96,6 +96,51 @@ export const getProducts = async (req: Request, res: Response) => {
     if (category) {
       query = query.eq('category_id', category);
     }
+
+    // Filter by collection
+    let collectionVariantIds: string[] = [];
+    if (collection_slug) {
+      // 1. Get collection ID
+      const { data: collectionData, error: collectionError } = await client
+        .from('collections')
+        .select('id')
+        .eq('slug', collection_slug)
+        .eq('company_id', req.companyId)
+        .single();
+        
+      if (collectionError || !collectionData) {
+        // Return empty if collection doesn't exist
+        return res.status(200).json({
+          success: true,
+          count: 0,
+          data: []
+        });
+      }
+
+      // 2. Get variants in this collection
+      const { data: variantCollections, error: vcError } = await client
+        .from('variant_collections')
+        .select('variant_id, product_variants(product_id)')
+        .eq('collection_id', collectionData.id);
+
+      if (vcError) {
+        throw new ApiError(500, `Failed to filter by collection: ${vcError.message}`);
+      }
+
+      if (!variantCollections || variantCollections.length === 0) {
+        return res.status(200).json({
+          success: true,
+          count: 0,
+          data: []
+        });
+      }
+
+      // 3. Extract unique product IDs
+      const productIdsInCollection = [...new Set(variantCollections.map(vc => (vc.product_variants as any).product_id))];
+      collectionVariantIds = variantCollections.map(vc => vc.variant_id);
+      
+      query = query.in('id', productIdsInCollection);
+    }
     
     // Price filtering now applies to variant prices
     // Note: This filters products that have at least one variant matching the price range
@@ -141,7 +186,7 @@ export const getProducts = async (req: Request, res: Response) => {
     
     // Fetch all variants for these products in a separate query (more reliable than nested selects)
     const productIds = products.map((p: any) => p.id);
-    const { data: allVariants, error: variantsError } = await client
+    let variantsQuery = client
       .from('product_variants')
       .select(`
         *,
@@ -165,7 +210,14 @@ export const getProducts = async (req: Request, res: Response) => {
       .in('product_id', productIds)
       // CRITICAL: Explicit company_id filter when using admin client (RLS bypassed)
       // Include variants with matching company_id OR NULL company_id (inherit from product)
-      .or(`company_id.eq.${req.companyId},company_id.is.null`)
+      .or(`company_id.eq.${req.companyId},company_id.is.null`);
+
+    // If filtered by collection, only include variants in the collection
+    if (collectionVariantIds.length > 0) {
+      variantsQuery = variantsQuery.in('id', collectionVariantIds);
+    }
+      
+    const { data: allVariants, error: variantsError } = await variantsQuery
       .order('is_default', { ascending: false })
       .order('created_at', { ascending: true });
     
@@ -193,14 +245,48 @@ export const getProducts = async (req: Request, res: Response) => {
     });
     
     // Process products to include variants and default_variant_id
-    const processedProducts = products.map((product: any) => {
+    const processedProducts = await Promise.all(products.map(async (product: any) => {
       const variants = variantsByProductId[product.id] || [];
       const defaultVariant = variants.find((v: any) => v.is_default === true);
       
+      // Fetch bundle components for each variant if they are a bundle
+      const variantsWithBundles = await Promise.all(variants.map(async (variant: any) => {
+        let bundleComponents: any[] = [];
+        if (variant.is_bundle) {
+          const { data: components, error: componentsError } = await client
+            .from('bundle_components')
+            .select(`
+              id,
+              quantity_included,
+              price_adjustment,
+              component_variant:product_variants!component_variant_id (
+                id,
+                name,
+                sku,
+                image_url,
+                product:products (
+                  id,
+                  name
+                )
+              )
+            `)
+            .eq('bundle_variant_id', variant.id)
+            .eq('company_id', req.companyId);
+          
+          if (!componentsError && components) {
+            bundleComponents = components;
+          }
+        }
+        return {
+          ...variant,
+          bundle_components: bundleComponents
+        };
+      }));
+      
       // Filter variants by price if minPrice/maxPrice specified
-      let filteredVariants = variants;
+      let filteredVariants = variantsWithBundles;
       if (minPrice || maxPrice) {
-        filteredVariants = variants.filter((v: any) => {
+        filteredVariants = variantsWithBundles.filter((v: any) => {
           const salePrice = v.price?.sale_price || 0;
           if (minPrice && salePrice < parseFloat(minPrice as string)) return false;
           if (maxPrice && salePrice > parseFloat(maxPrice as string)) return false;
@@ -213,7 +299,10 @@ export const getProducts = async (req: Request, res: Response) => {
         variants: filteredVariants,
         default_variant_id: defaultVariant?.id || null,
       };
-    }).filter((product: any) => {
+    }));
+    
+    // Filter product after all processing is done
+    const finalProducts = processedProducts.filter((product: any) => {
       // If price filter was applied and no variants match, exclude product
       if ((minPrice || maxPrice) && product.variants.length === 0) {
         return false;
@@ -224,7 +313,7 @@ export const getProducts = async (req: Request, res: Response) => {
     res.status(200).json({
       success: true,
       count,
-      data: processedProducts
+      data: finalProducts
     });
   } catch (error) {
     if (error instanceof ApiError) {
@@ -259,7 +348,7 @@ export const getProductById = async (req: Request, res: Response) => {
       // Legacy format - return product without variants
       const { data: product, error: productError } = await client
         .from('products')
-        .select('*, categories(*)')
+        .select('*, category:categories!category_id(*), subcategory:categories!subcategory_id(*)')
         .eq('id', id)
         .eq('company_id', req.companyId)
         .single();
@@ -304,7 +393,8 @@ export const getProductById = async (req: Request, res: Response) => {
       .from('products')
       .select(`
         *,
-        categories (*),
+        category:categories!category_id (*),
+        subcategory:categories!subcategory_id (*),
         brand:brands (
           id,
           name,
@@ -384,10 +474,91 @@ export const getProductById = async (req: Request, res: Response) => {
     }
 
     // Process variants - keep variant_images in the response
-    const processedVariants = filteredVariants.map((variant: any) => ({
-      ...variant,
-      // Keep variant_images as is (don't rename to images)
-      variant_images: variant.variant_images || [],
+    const processedVariants = await Promise.all(filteredVariants.map(async (variant: any) => {
+      // Fetch bundle components if this is a bundle
+      let bundleComponents: any[] = [];
+      if (variant.is_bundle) {
+        const { data: components, error: componentsError } = await client
+          .from('bundle_components')
+          .select(`
+            id,
+            quantity_included,
+            price_adjustment,
+            component_variant:product_variants!component_variant_id (
+              id,
+              name,
+              sku,
+              image_url,
+              product:products (
+                id,
+                name
+              )
+            )
+          `)
+          .eq('bundle_variant_id', variant.id)
+          .eq('company_id', req.companyId);
+        
+        if (!componentsError && components) {
+          bundleComponents = components;
+        } else if (componentsError) {
+          console.error(`Error fetching bundle components for variant ${variant.id}:`, componentsError);
+        }
+      }
+
+      // Fetch collections for this variant
+      let collections: any[] = [];
+      const { data: variantCollections, error: vcError } = await client
+        .from('variant_collections')
+        .select(`
+          display_order,
+          collection:collections(
+            id, name, slug
+          )
+        `)
+        .eq('variant_id', variant.id);
+      
+      if (!vcError && variantCollections) {
+        collections = variantCollections.map((vc: any) => ({
+          ...vc.collection,
+          display_order: vc.display_order
+        }));
+      }
+
+      // Fetch modifier groups for this variant
+      let modifierGroups: any[] = [];
+      const { data: variantModifiers, error: vmError } = await client
+        .from('variant_modifier_groups')
+        .select(`
+          display_order,
+          modifier_group:modifier_groups(
+            id, name, description, min_select, max_select, is_active,
+            modifiers(id, name, price_adjust, is_active, display_order)
+          )
+        `)
+        .eq('variant_id', variant.id);
+        
+      if (!vmError && variantModifiers) {
+        modifierGroups = variantModifiers.map((vm: any) => ({
+          ...vm.modifier_group,
+          display_order: vm.display_order
+        })).sort((a: any, b: any) => (a.display_order || 0) - (b.display_order || 0));
+        
+        // Sort modifiers within each group
+        modifierGroups.forEach((group: any) => {
+           if (group.modifiers && Array.isArray(group.modifiers)) {
+             group.modifiers.sort((a: any, b: any) => (a.display_order || 0) - (b.display_order || 0));
+           }
+        });
+      }
+
+      return {
+        ...variant,
+        // Keep variant_images as is (don't rename to images)
+        variant_images: variant.variant_images || [],
+        bundle_components: bundleComponents,
+        collections: collections,
+        modifier_groups: modifierGroups
+      };
     }));
 
     // Find default variant
@@ -400,6 +571,7 @@ export const getProductById = async (req: Request, res: Response) => {
         name: product.name,
         description: product.description,
         category_id: product.category_id,
+        subcategory_id: product.subcategory_id,
         price: product.price,
         sale_price: product.sale_price,
         slug: product.slug,
@@ -407,7 +579,8 @@ export const getProductById = async (req: Request, res: Response) => {
         stock_count: product.stock_count,
         brand_id: product.brand_id,
         brand: product.brand,
-        category: product.categories,
+        category: product.category,
+        subcategory: product.subcategory,
         created_at: product.created_at,
         updated_at: product.updated_at,
       },
@@ -486,6 +659,7 @@ export const createProduct = async (req: Request, res: Response) => {
       price, 
       sale_price, 
       category_id,
+      subcategory_id,
       image_url,
       slug,
       is_featured,
@@ -544,6 +718,7 @@ export const createProduct = async (req: Request, res: Response) => {
         price: productPrice,
         sale_price,
         category_id,
+        subcategory_id: subcategory_id || null,
         image_url, // Deprecated: will be applied to DEFAULT variant
         slug,
         is_featured, // Deprecated: will be applied to DEFAULT variant
@@ -649,6 +824,9 @@ export const updateProduct = async (req: Request, res: Response) => {
     }
     if ('category_id' in req.body && req.body.category_id !== undefined) {
       updateData.category_id = req.body.category_id || null;
+    }
+    if ('subcategory_id' in req.body && req.body.subcategory_id !== undefined) {
+      updateData.subcategory_id = req.body.subcategory_id || null;
     }
     if ('unit_type' in req.body && req.body.unit_type !== undefined && req.body.unit_type !== null) {
       updateData.unit_type = req.body.unit_type;
@@ -1160,6 +1338,8 @@ export const createVariant = async (req: Request, res: Response) => {
       is_active,
       unit,
       unit_type,
+      packing_type,
+      type,
       best_before,
       tax_id,
       hsn,
@@ -1196,6 +1376,8 @@ export const createVariant = async (req: Request, res: Response) => {
       is_active,
       unit,
       unit_type,
+      packing_type: packing_type === '' ? null : packing_type,
+      type: type === '' ? null : type,
       best_before: best_before === '' ? null : best_before,
       tax_id: tax_id === '' ? null : tax_id,
       hsn: hsn === '' ? null : hsn,
@@ -1242,6 +1424,8 @@ export const updateVariant = async (req: Request, res: Response) => {
       is_active,
       unit,
       unit_type,
+      packing_type,
+      type,
       best_before,
       tax_id,
       hsn,
@@ -1274,6 +1458,8 @@ export const updateVariant = async (req: Request, res: Response) => {
       is_active,
       unit,
       unit_type,
+      packing_type: packing_type === '' ? null : packing_type,
+      type: type === '' ? null : type,
       best_before: best_before === '' ? null : best_before,
       tax_id: tax_id === '' ? null : tax_id,
       hsn: hsn === '' ? null : hsn,

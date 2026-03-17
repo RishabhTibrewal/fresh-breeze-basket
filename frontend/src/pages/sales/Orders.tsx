@@ -166,9 +166,17 @@ export default function Orders() {
     const date = new Date(dateString);
     return !isNaN(date.getTime());
   };
+
+  // Helper to format sales executive display name
+  const formatSalesExecutive = (order: { sales_executive?: { first_name?: string | null; last_name?: string | null; email?: string } | null }) => {
+    const se = order.sales_executive;
+    if (!se) return '—';
+    const name = [se.first_name, se.last_name].filter(Boolean).join(' ').trim();
+    return name || se.email || '—';
+  };
   
   return (
-    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
+    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 pb-20 md:pb-6 space-y-3 sm:space-y-6">
       <Card className="w-full min-w-0 overflow-hidden">
         <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 min-w-0">
@@ -259,7 +267,7 @@ export default function Orders() {
               <div className="text-center py-8 text-muted-foreground text-sm">No orders found</div>
             ) : (
               filteredOrders.map((order) => (
-                <Card key={order.id} className="p-3 w-full min-w-0 overflow-hidden cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => navigate(`/sales/orders/${order.id}`)}>
+                <Card key={order.id} className="p-3 w-full min-w-0 overflow-hidden cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all" onClick={() => navigate(`/sales/orders/${order.id}`)}>
                   <div className="space-y-2.5 min-w-0">
                     <div className="flex items-start justify-between gap-2 min-w-0">
                       <div className="flex-1 min-w-0">
@@ -284,6 +292,9 @@ export default function Orders() {
                       <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
                         <Calendar className="h-3 w-3 flex-shrink-0" />
                         <span className="truncate">{formatDate(order.created_at)}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                        <span className="text-xs">SE: {formatSalesExecutive(order)}</span>
                       </div>
                       {order.payment_method && (
                         <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
@@ -322,7 +333,7 @@ export default function Orders() {
                           e.stopPropagation();
                           navigate(`/sales/orders/${order.id}`);
                         }}
-                        className="flex-1 text-xs h-8"
+                        className="flex-1 text-xs h-9 min-h-[44px]"
                       >
                         <Eye className="h-3.5 w-3.5 mr-1.5" />
                         View
@@ -334,7 +345,7 @@ export default function Orders() {
                           e.stopPropagation();
                           navigate(`/sales/orders/${order.id}/edit`);
                         }}
-                        className="flex-1 text-xs h-8"
+                        className="flex-1 text-xs h-9 min-h-[44px]"
                       >
                         <Edit className="h-3.5 w-3.5 mr-1.5" />
                         Update
@@ -353,6 +364,7 @@ export default function Orders() {
                 <TableRow>
                   <TableHead className="px-2">Order #</TableHead>
                   <TableHead className="px-2">Customer</TableHead>
+                  <TableHead className="px-2">Sales Executive</TableHead>
                   <TableHead className="px-2">Date</TableHead>
                   <TableHead className="px-2">Total</TableHead>
                   <TableHead className="px-2">Status</TableHead>
@@ -364,17 +376,18 @@ export default function Orders() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-sm">Loading...</TableCell>
+                    <TableCell colSpan={9} className="text-center text-sm">Loading...</TableCell>
                   </TableRow>
                 ) : filteredOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-sm">No orders found</TableCell>
+                    <TableCell colSpan={9} className="text-center text-sm">No orders found</TableCell>
                   </TableRow>
                 ) : (
                   filteredOrders.map((order) => (
                     <TableRow key={order.id}>
                       <TableCell className="px-2 py-2 font-medium text-sm">{order.order_number}</TableCell>
                       <TableCell className="px-2 py-2 text-sm">{order.customer?.name || 'N/A'}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm">{formatSalesExecutive(order)}</TableCell>
                       <TableCell className="px-2 py-2 text-sm">{formatDate(order.created_at)}</TableCell>
                       <TableCell className="px-2 py-2 text-sm font-medium">${parseFloat(order.total_amount).toFixed(2)}</TableCell>
                       <TableCell className="px-2 py-2">{getStatusBadge(order.status)}</TableCell>

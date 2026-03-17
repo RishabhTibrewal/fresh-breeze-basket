@@ -14,6 +14,8 @@ export const sidebarRoutes: Record<string, string> = {
   warehouses: '/inventory/warehouses',
   'stock-adjustment': '/inventory/adjust',
   'stock-transfer': '/inventory/transfer',
+  'packaging-recipes': '/inventory/packaging-recipes',
+  'repack-orders': '/inventory/repack-orders',
   'stock-ledger': '/inventory/movements',
   'stock-balance': '/inventory/balance',
   'warehouse-stock-balance': '/inventory/warehouse-balance',

@@ -247,7 +247,7 @@ export default function WarehouseInventory() {
                 variant="outline"
                 size="sm"
                 onClick={() => navigate(`/inventory/adjust?warehouse_id=${warehouseId}&product_id=${item.product_id}&variant_id=${item.variant_id}`)}
-                className="flex-1"
+                className="flex-1 min-h-[44px]"
               >
                 <Scale className="h-4 w-4 mr-1" />
                 Adjust Stock
@@ -260,7 +260,7 @@ export default function WarehouseInventory() {
   );
 
   return (
-    <div className="container mx-auto py-8 px-4">
+    <div className="container mx-auto py-4 sm:py-8 px-3 sm:px-4 overflow-x-hidden pb-20 md:pb-8">
       <div className="flex items-center gap-4 mb-6">
         <Button
           variant="ghost"
@@ -269,38 +269,42 @@ export default function WarehouseInventory() {
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <div>
-          <h1 className="text-3xl font-bold">Warehouse Inventory</h1>
-          <p className="text-muted-foreground mt-1">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold truncate">Warehouse Inventory</h1>
+          <p className="text-sm text-muted-foreground mt-1 truncate">
             {warehouse ? `${warehouse.code} - ${warehouse.name}` : 'Loading...'}
           </p>
         </div>
       </div>
 
       {/* Actions */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        <div className="relative flex-1">
+      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-4 sm:mb-6">
+        <div className="relative flex-1 w-full min-w-0">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search products or variants..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
+            className="pl-10 h-10 sm:h-10"
           />
         </div>
-        <Button
-          onClick={() => navigate(`/inventory/transfer?source_warehouse_id=${warehouseId}`)}
-          variant="outline"
-        >
-          <ArrowRightLeft className="h-4 w-4 mr-2" />
-          Transfer Stock
-        </Button>
-        <Button
-          onClick={() => navigate(`/inventory/adjust?warehouse_id=${warehouseId}`)}
-        >
-          <Scale className="h-4 w-4 mr-2" />
-          Adjust Stock
-        </Button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <Button
+            onClick={() => navigate(`/inventory/transfer?source_warehouse_id=${warehouseId}`)}
+            variant="outline"
+            className="flex-1 sm:flex-none min-h-[44px] sm:min-h-0"
+          >
+            <ArrowRightLeft className="h-4 w-4 mr-2" />
+            Transfer Stock
+          </Button>
+          <Button
+            onClick={() => navigate(`/inventory/adjust?warehouse_id=${warehouseId}`)}
+            className="flex-1 sm:flex-none min-h-[44px] sm:min-h-0"
+          >
+            <Scale className="h-4 w-4 mr-2" />
+            Adjust Stock
+          </Button>
+        </div>
       </div>
 
       {/* Inventory List */}

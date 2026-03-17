@@ -1,0 +1,42 @@
+# Workspace Core Rules
+These rules are aggregated from the `@rules` directory (`.cursor/rules`) to ensure strict adherence to the new Multi-Tenant ERP architecture.
+
+---
+
+## 1. Architectural Source of Truth (`arch-state.mdc`)
+- **ALWAYS** read the `ARCH_STATE.md` file in the root directory before proposing code, debugging, or adding new dependencies.
+- Treat `ARCH_STATE.md` as the absolute, overriding source of truth for all infrastructure, routing, database, and state management decisions.
+- Do not hallucinate API routes, databases, or libraries. Check the "Anti-Hallucination Ledger" in `ARCH_STATE.md`.
+- Ensure strict separation between the Vercel frontend and DigitalOcean backend (Node.js/Express) as defined in `ARCH_STATE.md` (despite any legacy integration rules suggesting a frontend-only Supabase approach).
+- **Mandatory Updates:** If significant changes occur to schemas, routing, proxies, or environment vars, prompt to update `ARCH_STATE.md`.
+
+---
+
+## 2. Backend Rules (`backend-rules.mdc`)
+- **Multi-Tenancy:** ALWAYS include `company_id` in tenant-scoped tables. ALWAYS add RLS policies to enforce company isolation.
+- **RBAC:** Use `module.action` format for permissions (e.g., `sales.read`). Role and module enablement dual-check is required.
+- **Database:** Postgres 15+ via Supabase. UUIDs for primary keys, `created_at`/`updated_at`, TEXT instead of VARCHAR.
+- **RPC Functions:** Prefix with domain, return TABLE types, use SECURITY DEFINER for system functions.
+- **RLS:** Use `auth.uid()` and join `user_roles` to enforce company boundaries. Service role bypasses RLS.
+- **NEVER:** Allow cross-company data access, or forget `company_id` in WHERE clauses.
+
+---
+
+## 3. Frontend Rules (`frontend-rules.mdc`)
+- **Tech Stack:** React 18+ / TypeScript / Vite / Tailwind CSS v3 / React Router v6.
+- **Navigation Architecture:** Three Levels: Landing -> Dashboard -> Module Pages (with context-aware sidebars).
+- **Module Config:** `src/config/modules.config.tsx` is the SINGLE SOURCE OF TRUTH. NEVER hardcode module lists in components.
+- **Permissions:** Always apply double-check: "Company has module" AND "User has permission". Use hooks like `useCanAccess`.
+- **TypeScript:** NEVER use `any`. Always type props, state, API responses.
+- **Tailwind:** Use utility classes, mobile-first approach, `cn()` for conditional classes.
+- **Multi-Tenant Context:** Extract `company_id` via subdomain and pass via context headers.
+
+---
+
+## 4. Integration Rules (`integration-rules.mdc`)
+- **Auth Flow:** Login -> Detect Subdomain -> Fetch Permissions -> Fetch Company Modules.
+- **Dual Permission Checking:** Permissions must be checked BOTH on the UI frontend and via Database RLS policies.
+- **Data Fetching:** Standardize on React Query / custom hooks. ALWAYS query with `.eq('company_id', companyId)`.
+- **Optimistic Updates:** Update the UI immediately, then revert gracefully if backend mutations fail.
+- **File Uploads:** Scopes must be company-prefixed (`{companyId}/...`). Used Cloudflare R2 per `ARCH_STATE.md`.
+- **Error Handling:** Unified API Error class mapping Postgres codes (e.g., `23505` to Duplicates, `23503` to Constraints).

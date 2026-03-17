@@ -2,6 +2,13 @@ import apiClient from '@/lib/apiClient';
 
 export interface Supplier {
   id: string;
+  party_id?: string | null;
+  party?: {
+    id: string;
+    name: string;
+    is_customer: boolean;
+    is_supplier: boolean;
+  } | null;
   supplier_code?: string;
   name: string;
   contact_name?: string;

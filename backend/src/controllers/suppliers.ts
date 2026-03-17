@@ -81,8 +81,10 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
     // Auto-generate supplier code if not provided
     const finalSupplierCode = supplier_code || await generateSupplierCode(req.companyId);
 
+    const db = supabaseAdmin || supabase;
+
     // Create supplier
-    const { data: supplier, error: supplierError } = await (supabaseAdmin || supabase)
+    const { data: supplier, error: supplierError } = await db
       .from('suppliers')
       .insert({
         supplier_code: finalSupplierCode,
@@ -117,6 +119,71 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
       throw new ApiError(500, `Failed to create supplier: ${supplierError.message}`);
     }
 
+    // Ensure supplier has a contact_party (business partner)
+    try {
+      if (req.companyId && supplier) {
+        // Try to reuse existing party by (company_id, name) to avoid duplicates
+        const { data: existingParty, error: partyLookupError } = await db
+          .from('contact_parties')
+          .select('*')
+          .eq('company_id', req.companyId)
+          .eq('name', name)
+          .maybeSingle();
+
+        if (partyLookupError) {
+          console.error('Error looking up existing contact_party for supplier:', partyLookupError);
+        }
+
+        let partyId = existingParty?.id;
+
+        if (!partyId) {
+          const { data: newParty, error: partyError } = await db
+            .from('contact_parties')
+            .insert({
+              company_id: req.companyId,
+              name,
+              email,
+              phone,
+              is_supplier: true
+            })
+            .select('*')
+            .single();
+
+          if (partyError) {
+            console.error('Error creating contact_party for supplier:', partyError);
+          } else {
+            partyId = newParty.id;
+          }
+        } else if (!existingParty.is_supplier) {
+          const { error: flagError } = await db
+            .from('contact_parties')
+            .update({ is_supplier: true })
+            .eq('id', partyId)
+            .eq('company_id', req.companyId);
+
+          if (flagError) {
+            console.error('Error updating contact_party is_supplier flag:', flagError);
+          }
+        }
+
+        if (partyId) {
+          const { error: linkError } = await db
+            .from('suppliers')
+            .update({ party_id: partyId })
+            .eq('id', supplier.id)
+            .eq('company_id', req.companyId);
+
+          if (linkError) {
+            console.error('Error linking supplier to contact_party:', linkError);
+          } else {
+            (supplier as any).party_id = partyId;
+          }
+        }
+      }
+    } catch (partyError) {
+      console.error('Non-fatal error ensuring supplier contact_party:', partyError);
+    }
+
     // Add bank accounts if provided
     if (bank_accounts && Array.isArray(bank_accounts) && bank_accounts.length > 0) {
       const bankAccountsData = bank_accounts.map((account: any) => ({
@@ -135,7 +202,7 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
         company_id: req.companyId
       }));
 
-      const { error: bankError } = await (supabaseAdmin || supabase)
+      const { error: bankError } = await db
         .from('supplier_bank_accounts')
         .insert(bankAccountsData);
 
@@ -170,6 +237,115 @@ export const createSupplier = async (req: Request, res: Response, next: NextFunc
 };
 
 /**
+ * Create a customer from an existing supplier using the same contact_party
+ */
+export const createLinkedCustomerFromSupplier = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    const db = supabaseAdmin || supabase;
+    const currentUserId = req.user?.id || null;
+
+    const { data: supplier, error: supplierError } = await db
+      .from('suppliers')
+      .select('*')
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .single();
+
+    if (supplierError || !supplier) {
+      throw new ApiError(404, 'Supplier not found');
+    }
+
+    let partyId: string | null = supplier.party_id || null;
+
+    // Ensure party exists for this supplier
+    if (!partyId) {
+      const { data: party, error: partyError } = await db
+        .from('contact_parties')
+        .insert({
+          company_id: req.companyId,
+          name: supplier.name,
+          email: supplier.email,
+          phone: supplier.phone,
+          is_supplier: true
+        })
+        .select('*')
+        .single();
+
+      if (partyError || !party) {
+        throw new ApiError(500, `Failed to create contact party: ${partyError?.message || 'Unknown error'}`);
+      }
+
+      partyId = party.id;
+
+      await db
+        .from('suppliers')
+        .update({ party_id: partyId })
+        .eq('id', id)
+        .eq('company_id', req.companyId);
+    }
+
+    // Already has customer counterpart?
+    const { data: existingCustomer } = await db
+      .from('customers')
+      .select('*')
+      .eq('company_id', req.companyId)
+      .eq('party_id', partyId)
+      .maybeSingle();
+
+    if (existingCustomer) {
+      return res.status(200).json({
+        success: true,
+        alreadyExists: true,
+        data: existingCustomer
+      });
+    }
+
+    const { data: newCustomer, error: customerError } = await db
+      .from('customers')
+      .insert({
+        name: supplier.name,
+        email: supplier.email,
+        phone: supplier.phone,
+        trn_number: supplier.gst_no,
+        credit_period_days: 0,
+        credit_limit: 0,
+        current_credit: 0,
+        sales_executive_id: currentUserId,
+        user_id: null,
+        company_id: req.companyId,
+        party_id: partyId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select('*')
+      .single();
+
+    if (customerError || !newCustomer) {
+      throw new ApiError(500, `Failed to create customer: ${customerError?.message || 'Unknown error'}`);
+    }
+
+    await db
+      .from('contact_parties')
+      .update({ is_customer: true })
+      .eq('id', partyId)
+      .eq('company_id', req.companyId);
+
+    return res.status(201).json({
+      success: true,
+      data: newCustomer
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Get all suppliers with optional filters
  */
 export const getSuppliers = async (req: Request, res: Response, next: NextFunction) => {
@@ -184,7 +360,13 @@ export const getSuppliers = async (req: Request, res: Response, next: NextFuncti
       .from('suppliers')
       .select(`
         *,
-        supplier_bank_accounts (*)
+        supplier_bank_accounts (*),
+        party:contact_parties(
+          id,
+          name,
+          is_customer,
+          is_supplier
+        )
       `)
       .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });

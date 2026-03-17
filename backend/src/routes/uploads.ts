@@ -505,28 +505,28 @@ router.post('/product/:productId', protect, adminOnly, handleProductUpload, asyn
       }
 
       try {
-        // Compress image
+      // Compress image
         console.log('[Product Upload] Compressing image...');
-        const compressedBuffer = await compressProductImage(file.buffer);
+      const compressedBuffer = await compressProductImage(file.buffer);
         console.log('[Product Upload] Image compressed, size:', compressedBuffer.length);
 
-        // Generate unique filename
-        const fileExtension = 'jpg';
-        const fileName = `products/${productId}-${Date.now()}-${i}.${fileExtension}`;
+      // Generate unique filename
+      const fileExtension = 'jpg';
+      const fileName = `products/${productId}-${Date.now()}-${i}.${fileExtension}`;
         console.log('[Product Upload] Uploading to R2:', fileName);
 
-        // Upload to Cloudflare R2
-        const parallelUploads3 = new Upload({
-          client: r2Client,
-          params: {
-            Bucket: process.env.R2_BUCKET_NAME || '',
-            Key: fileName,
-            Body: compressedBuffer,
-            ContentType: 'image/jpeg',
-          },
-        });
+      // Upload to Cloudflare R2
+      const parallelUploads3 = new Upload({
+        client: r2Client,
+        params: {
+          Bucket: process.env.R2_BUCKET_NAME || '',
+          Key: fileName,
+          Body: compressedBuffer,
+          ContentType: 'image/jpeg',
+        },
+      });
 
-        await parallelUploads3.done();
+      await parallelUploads3.done();
         console.log('[Product Upload] R2 upload completed');
 
       // Construct public URL

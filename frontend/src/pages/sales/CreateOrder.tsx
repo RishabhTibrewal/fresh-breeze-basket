@@ -41,7 +41,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { toast } from "sonner";
 import { customerService } from '@/api/customer';
+import { ordersService } from '@/api/orders';
 import apiClient from '@/lib/apiClient';
+import { useAuth } from '@/contexts/AuthContext';
 import { addressApi } from '@/api/addresses';
 import { warehousesService } from '@/api/warehouses';
 import { productsService } from '@/api/products';
@@ -91,6 +93,7 @@ const orderFormSchema = z.object({
   transaction_id: z.string().optional(),
   cheque_no: z.string().optional(),
   payment_date: z.string().optional(),
+  sales_executive_id: z.union([z.string().uuid(), z.literal('__none__')]).optional(),
 });
 
 // Custom type with context for form submission
@@ -115,6 +118,7 @@ export default function CreateOrder() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const customerId = searchParams.get('customerId');
+  const { user, isSales } = useAuth();
   
   // Active tab state (products or checkout)
   const [activeTab, setActiveTab] = useState("products");
@@ -201,6 +205,13 @@ export default function CreateOrder() {
     queryKey: ['warehouses'],
     queryFn: () => warehousesService.getAll(true), // Only get active warehouses
   });
+
+  // Get sales executives for optional Sales Executive dropdown
+  const { data: salesExecutivesData } = useQuery({
+    queryKey: ['orders-sales-executives'],
+    queryFn: () => ordersService.getSalesExecutives(),
+  });
+  const salesExecutives = salesExecutivesData?.data ?? [];
   
   const form = useForm<OrderFormValues>({
     resolver: zodResolver(orderFormSchema),
@@ -217,6 +228,7 @@ export default function CreateOrder() {
       transaction_id: "",
       cheque_no: "",
       payment_date: "",
+      sales_executive_id: "__none__",
     },
   });
   
@@ -301,6 +313,16 @@ export default function CreateOrder() {
     }
   }, [selectedCustomer, paymentStatus, form]);
   
+  // Default sales_executive_id to current user when they are a sales executive (only when field is still "none")
+  useEffect(() => {
+    if (isSales && user?.id) {
+      const current = form.getValues('sales_executive_id');
+      if (!current || current === '__none__') {
+        form.setValue('sales_executive_id', user.id);
+      }
+    }
+  }, [isSales, user?.id, form]);
+
   // Set default address if available
   useEffect(() => {
     if (addresses.length > 0) {
@@ -608,6 +630,10 @@ export default function CreateOrder() {
         items,
         total_amount: totalAmount
       };
+      // Radix Select cannot use empty string; we use __none__ for "None" – omit from payload when submitting
+      if (orderData.sales_executive_id === '__none__' || orderData.sales_executive_id === '') {
+        delete orderData.sales_executive_id;
+      }
       
       // Add credit period if needed
       if (data.payment_status === 'full_credit' || data.payment_status === 'partial_payment') {
@@ -859,6 +885,35 @@ export default function CreateOrder() {
                           )}
                         </FormDescription>
                       )}
+                      <FormMessage className="text-xs" />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="sales_executive_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs sm:text-sm">Sales Executive (optional)</FormLabel>
+                      <Select
+                        value={!field.value || field.value === '' ? '__none__' : field.value}
+                        onValueChange={(v) => field.onChange(v)}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
+                            <SelectValue placeholder="None" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="__none__" className="text-sm">None</SelectItem>
+                          {salesExecutives.map((se) => (
+                            <SelectItem key={se.id} value={se.id} className="text-sm">
+                              {[se.first_name, se.last_name].filter(Boolean).join(' ') || se.email || se.id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage className="text-xs" />
                     </FormItem>
                   )}

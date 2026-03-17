@@ -252,7 +252,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     // First, get all products for the company
     const { data: allProducts, error: productsError } = await db
       .from('products')
-      .select('id, name, category_id, categories(name)')
+      .select('id, name, category_id, categories!category_id(name)')
       .eq('company_id', req.companyId);
     
     if (productsError) {

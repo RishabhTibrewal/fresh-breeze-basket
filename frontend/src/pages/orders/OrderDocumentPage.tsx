@@ -201,6 +201,19 @@ export default function OrderDocumentPage() {
     order?.user_id || 
     "Guest / POS";
 
+  const salesExecutiveName = (order as any)?.sales_executive
+    ? ([
+        (order as any).sales_executive.first_name,
+        (order as any).sales_executive.last_name,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .trim() ||
+      (order as any).sales_executive.email)
+    : (order as any)?.sales_executive_id
+    ? `ID: ${String((order as any).sales_executive_id).slice(0, 8)}…`
+    : "—";
+
   const queryClient = useQueryClient();
 
   // Dialog states
@@ -351,6 +364,10 @@ export default function OrderDocumentPage() {
             label: "Customer",
             value: customerName,
           },
+          {
+            label: "Sales Executive",
+            value: salesExecutiveName,
+          },
         ]}
         actions={
           <div className="flex flex-wrap gap-2">
@@ -387,7 +404,7 @@ export default function OrderDocumentPage() {
                       Return Order
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-md">
+                  <DialogContent className="max-w-md" aria-describedby={undefined}>
                     <DialogHeader>
                       <DialogTitle>Create Return Order</DialogTitle>
                       <DialogDescription>
@@ -482,7 +499,7 @@ export default function OrderDocumentPage() {
                     Cancel Order
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent aria-describedby={undefined}>
                   <DialogHeader>
                     <DialogTitle>Cancel Order</DialogTitle>
                     <DialogDescription>
@@ -597,6 +614,10 @@ export default function OrderDocumentPage() {
               <p>
                 <span className="text-muted-foreground">Fulfillment: </span>
                 {order.fulfillment_type || "delivery"}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Sales Executive: </span>
+                {salesExecutiveName}
               </p>
               {order.notes && (
                 <p>

@@ -121,6 +121,8 @@ export interface ProductVariant {
   is_active: boolean;
   unit: number | null;
   unit_type: string;
+  packing_type: string | null;
+  type: string | null;
   best_before: string | null;
   tax_id: string | null;
   hsn: string | null;
@@ -185,6 +187,7 @@ export interface Order {
   created_at: string;
   updated_at: string;
   inventory_updated?: boolean;
+  sales_executive_id?: string | null;
 }
 
 export interface OrderItem {

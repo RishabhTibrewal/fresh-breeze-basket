@@ -94,7 +94,7 @@ export default function Warehouses() {
   );
 
   return (
-    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
+    <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 pb-20 md:pb-6 space-y-3 sm:space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold break-words">Warehouse Management</h1>
@@ -135,7 +135,78 @@ export default function Warehouses() {
               No warehouses found. Create your first warehouse to get started.
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              {/* Mobile Card View */}
+              <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
+                {filteredWarehouses.map((warehouse) => (
+                  <Card
+                    key={warehouse.id}
+                    className="p-3 w-full min-w-0 overflow-hidden cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all"
+                    onClick={() => navigate(`/inventory/warehouses/${warehouse.id}/inventory`)}
+                  >
+                    <div className="space-y-2.5 min-w-0">
+                      <div className="flex items-start justify-between gap-2 min-w-0">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Building2 className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                            <span className="font-semibold text-sm break-words">{warehouse.name}</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5 font-mono">
+                            {warehouse.code}
+                          </div>
+                        </div>
+                        <Badge variant={warehouse.is_active ? "default" : "secondary"} className="flex-shrink-0">
+                          {warehouse.is_active ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </div>
+                      {(warehouse.city || warehouse.country) && (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+                          <MapPin className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">
+                            {[warehouse.city, warehouse.country].filter(Boolean).join(', ') || '-'}
+                          </span>
+                        </div>
+                      )}
+                      {warehouse.contact_phone && (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+                          <Phone className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">{warehouse.contact_phone}</span>
+                        </div>
+                      )}
+                      <div className="flex gap-1.5 pt-2 border-t" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 h-9 min-h-[44px]"
+                          onClick={() => navigate(`/inventory/warehouses/${warehouse.id}/inventory`)}
+                        >
+                          <Package className="h-3.5 w-3.5 mr-1.5" />
+                          Inventory
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 min-h-[44px] min-w-[44px]"
+                          onClick={() => handleEdit(warehouse)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 min-h-[44px] min-w-[44px] text-destructive"
+                          onClick={() => handleDelete(warehouse)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Desktop Table */}
+              <div className="hidden md:block overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -220,6 +291,7 @@ export default function Warehouses() {
                 </TableBody>
               </Table>
             </div>
+            </>
           )}
         </CardContent>
       </Card>

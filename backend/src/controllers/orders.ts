@@ -55,32 +55,7 @@ export const getOrders = async (req: Request, res: Response) => {
       throw new ApiError(400, 'Company context is required');
     }
     
-    // Get customer user IDs if user is sales (not admin)
-    let customerUserIds: string[] | null = null;
-    if (isSales && !isAdmin) {
-      const { data: customers } = await (supabaseAdmin || supabase)
-        .from('customers')
-        .select('user_id')
-        .eq('sales_executive_id', userId)
-        .eq('company_id', req.companyId);
-      
-      customerUserIds = customers?.map(c => c.user_id).filter(Boolean) || [];
-      
-      if (customerUserIds.length === 0) {
-        // No customers, return empty result
-        return res.json({
-          data: [],
-          pagination: {
-            total: 0,
-            page: parseInt(page as string) || 1,
-            limit: parseInt(limit as string) || 10,
-            totalPages: 0
-          }
-        });
-      }
-    }
-    
-    // First get the total count (filtered by company_id and sales_executive if needed)
+    // First get the total count (filtered by company_id)
     let countQuery = (supabaseAdmin || supabase)
       .from('orders')
       .select('*', { count: 'exact', head: true })
@@ -97,10 +72,6 @@ export const getOrders = async (req: Request, res: Response) => {
     }
     if (original_order_id) {
       countQuery = countQuery.eq('original_order_id', original_order_id);
-    }
-    
-    if (customerUserIds) {
-      countQuery = countQuery.in('user_id', customerUserIds);
     }
     
     const { count: totalCount } = await countQuery;
@@ -134,11 +105,6 @@ export const getOrders = async (req: Request, res: Response) => {
         )
       `)
       .eq('company_id', req.companyId);
-    
-    // Filter by customer user IDs if user is sales (not admin)
-    if (customerUserIds) {
-      query = query.in('user_id', customerUserIds);
-    }
     
     // Apply filters
     if (status) {
@@ -352,22 +318,8 @@ export const getOrderById = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Order not found' });
     }
     
-    // Check access permission - admins can see all, sales executives can see their customers' orders
-    let hasAccess = isAdmin;
-    
-    if (!hasAccess && isSales) {
-      // For sales, check if this order belongs to their customer
-      const { data: customer } = await (supabaseAdmin || supabase)
-        .from('customers')
-        .select('id, sales_executive_id')
-        .eq('user_id', order.user_id)
-        .eq('company_id', req.companyId)
-        .single();
-        
-      if (customer && customer.sales_executive_id === userId) {
-        hasAccess = true;
-      }
-    }
+    // Check access permission - admins and sales can see all company orders; owner can see own
+    let hasAccess = isAdmin || isSales;
     
     // Allow the order owner to view their own order
     if (!hasAccess && order.user_id === userId) {
@@ -466,6 +418,18 @@ export const getOrderById = async (req: Request, res: Response) => {
       
     if (!customerError && customer) {
       order.customer = customer;
+    }
+
+    // Enrich with sales executive profile when sales_executive_id is set
+    if (order.sales_executive_id) {
+      const { data: seProfile } = await (supabaseAdmin || supabase)
+        .from('profiles')
+        .select('id, first_name, last_name, email')
+        .eq('id', order.sales_executive_id)
+        .single();
+      if (seProfile) {
+        order.sales_executive = seProfile;
+      }
     }
     
     res.json(order);
@@ -813,22 +777,8 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       throw new ApiError(404, 'Order not found');
     }
     
-    // Check if the sales executive has permission to update this order
-    let hasAccess = isAdmin; // Admins always have access
-    
-    if (!hasAccess && isSales) {
-      // Check if this order belongs to a customer assigned to this sales exec
-      const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
-        .from('customers')
-        .select('sales_executive_id')
-        .eq('user_id', currentOrder.user_id)
-        .eq('company_id', req.companyId)
-        .single();
-        
-      if (!customerError && customer && customer.sales_executive_id === userId) {
-        hasAccess = true;
-      }
-    }
+    // Admins and sales can update any company order
+    const hasAccess = isAdmin || isSales;
     
     if (!hasAccess) {
       return res.status(403).json({
@@ -1298,17 +1248,10 @@ export const cancelOrder = async (req: Request, res: Response) => {
     if (effectiveRoleForCancellation === 'admin') {
       hasPermission = true;
       console.log(`Admin ${userId} has permission to cancel order ${id}`);
-    } else if (effectiveRoleForCancellation === 'sales') { // This means sales exec acting on OTHERS' orders
-      const { data: customer } = await (supabaseAdmin || supabase)
-        .from('customers')
-        .select('sales_executive_id')
-        .eq('user_id', order.user_id)
-        .eq('company_id', req.companyId)
-        .single();
-      if (customer && customer.sales_executive_id === userId) {
-        hasPermission = true;
-        console.log(`Sales executive ${userId} has permission to cancel order ${id} for customer ${order.user_id}`);
-      }
+    } else if (effectiveRoleForCancellation === 'sales') {
+      // Sales can cancel any company order (others' orders)
+      hasPermission = true;
+      console.log(`Sales executive ${userId} has permission to cancel order ${id}`);
     } else if ((effectiveRoleForCancellation === 'user' || effectiveRoleForCancellation === 'authenticated')) {
       // This now also covers sales exec acting on their own order if order.user_id === userId
       console.log(`User/Authenticated/Sales (own order) role attempting self-cancel: Comparing OrderOwnerID (${order.user_id}) with LoggedInUserID (${userId})`);
@@ -1458,17 +1401,11 @@ export const getSalesOrders = async (req: Request, res: Response) => {
     
     console.log('Fetching orders for user:', userId, 'isAdmin:', isAdmin, 'isSales:', isSales);
 
-    // Get all customers - filter by sales_executive_id only if user is sales (not admin)
-    let customerQuery = (supabaseAdmin || supabase)
+    // Get all company customers (sales and admins see all)
+    const { data: customers, error: customersError } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('id, user_id, name, sales_executive_id')
       .eq('company_id', req.companyId);
-    
-    if (isSales && !isAdmin) {
-      customerQuery = customerQuery.eq('sales_executive_id', userId);
-    }
-    
-    const { data: customers, error: customersError } = await customerQuery;
 
     if (customersError) {
       console.error('Error fetching customers:', customersError);
@@ -1478,7 +1415,7 @@ export const getSalesOrders = async (req: Request, res: Response) => {
     console.log('Found customers:', customers?.length || 0);
 
     if (!customers || customers.length === 0) {
-      console.log('No customers found for sales executive');
+      console.log('No customers found for company');
       return res.json([]); // Return empty array if no customers
     }
 
@@ -1558,8 +1495,38 @@ export const getSalesOrders = async (req: Request, res: Response) => {
       };
     });
 
+    // Enrich with sales executive profiles (for orders that have sales_executive_id)
+    const salesExecutiveIds = [...new Set(
+      ordersWithCustomer
+        .map(o => (o as { sales_executive_id?: string | null }).sales_executive_id)
+        .filter((id): id is string => !!id)
+    )];
+    let salesExecutiveProfiles: Record<string, { id: string; first_name: string | null; last_name: string | null; email: string }> = {};
+    if (salesExecutiveIds.length > 0) {
+      const { data: profiles } = await (supabaseAdmin || supabase)
+        .from('profiles')
+        .select('id, first_name, last_name, email')
+        .in('id', salesExecutiveIds);
+      if (profiles) {
+        salesExecutiveProfiles = Object.fromEntries(profiles.map(p => [p.id, p]));
+      }
+    }
+    const ordersWithSalesExecutive = ordersWithCustomer.map(order => {
+      const o = order as typeof order & { sales_executive_id?: string | null };
+      const profile = o.sales_executive_id ? salesExecutiveProfiles[o.sales_executive_id] : null;
+      return {
+        ...order,
+        sales_executive: profile ? {
+          id: profile.id,
+          first_name: profile.first_name,
+          last_name: profile.last_name,
+          email: profile.email
+        } : null
+      };
+    });
+
     console.log('Returning orders with customer info and credit details');
-    res.json(ordersWithCustomer);
+    res.json(ordersWithSalesExecutive);
   } catch (error: any) {
     console.error('Error in getSalesOrders:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch orders' });
@@ -1582,17 +1549,11 @@ export const getSalesDashboardStats = async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Admin or Sales access required' });
     }
     
-    // Get all customers - filter by sales_executive_id only if user is sales (not admin)
-    let customerQuery = (supabaseAdmin || supabase)
+    // Get all company customers (sales and admins see all)
+    const { data: customers, error: customersError } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('id, user_id, name, current_credit')
       .eq('company_id', req.companyId);
-    
-    if (isSales && !isAdmin) {
-      customerQuery = customerQuery.eq('sales_executive_id', userId);
-    }
-    
-    const { data: customers, error: customersError } = await customerQuery;
     if (customersError) {
       console.error('Error fetching customers:', customersError);
       return res.status(500).json({ error: 'Failed to fetch customers' });
@@ -1663,17 +1624,11 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get all customers - filter by sales_executive_id only if user is sales (not admin)
-    let customerQuery = (supabaseAdmin || supabase)
+    // Get all company customers (sales and admins see all)
+    const { data: customers, error: customersError } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('id, user_id, name, current_credit, credit_limit')
       .eq('company_id', req.companyId);
-    
-    if (isSales && !isAdmin) {
-      customerQuery = customerQuery.eq('sales_executive_id', userId);
-    }
-    
-    const { data: customers, error: customersError } = await customerQuery;
 
     if (customersError) {
       console.error('Error fetching customers:', customersError);

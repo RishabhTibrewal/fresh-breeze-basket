@@ -21,7 +21,6 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
     }
     const { id } = req.params;
     const { status, tracking_number, estimated_delivery, notes } = req.body;
-    const userId = req.user.id;
 
     if (!req.companyId) {
       return res.status(400).json({ error: 'Company context is required' });
@@ -43,22 +42,8 @@ export const updateOrderStatus = async (req: AuthenticatedRequest, res: Response
       return res.status(404).json({ error: 'Order not found' });
     }
     
-    // Check permissions - admins can update any order
-    let hasAccess = isAdmin;
-    
-    // For sales, check if this is their customer's order
-    if (!hasAccess && isSales) {
-      const { data: customer } = await (supabaseAdmin || supabase)
-        .from('customers')
-        .select('sales_executive_id')
-        .eq('user_id', order.user_id)
-        .eq('company_id', req.companyId)
-        .single();
-        
-      if (customer && customer.sales_executive_id === userId) {
-        hasAccess = true;
-      }
-    }
+    // Admins and sales can update any company order
+    const hasAccess = isAdmin || isSales;
     
     if (!hasAccess) {
       return res.status(403).json({ error: 'You do not have permission to update this order' });

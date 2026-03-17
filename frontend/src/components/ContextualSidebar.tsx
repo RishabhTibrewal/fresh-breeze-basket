@@ -102,22 +102,22 @@ const ContextualSidebar: React.FC<ContextualSidebarProps> = ({ onToggle }) => {
         </div>
       </div>
 
-      {/* Mobile Bottom Navigation */}
+      {/* Mobile Bottom Navigation - scrollable to show all items */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t z-50">
-        <nav className="flex justify-around px-2 py-2">
-          {filteredSidebarItems.slice(0, 5).map((item) => {
+        <nav className="flex flex-nowrap gap-1 overflow-x-auto px-2 py-2">
+          {filteredSidebarItems.map((item) => {
             const isActive = location.pathname === item.route;
 
             return (
               <Link
                 key={item.route}
                 to={item.route}
-                className={`flex flex-col items-center px-2 py-1 rounded-md ${
-                  isActive ? 'text-primary' : 'text-gray-600'
+                className={`flex shrink-0 flex-col items-center justify-center min-w-[64px] px-2 py-1 rounded-md touch-manipulation ${
+                  isActive ? 'text-primary bg-primary/10' : 'text-gray-600'
                 }`}
               >
                 <item.icon className="h-5 w-5" />
-                <span className="text-xs mt-0.5">{item.label}</span>
+                <span className="text-[10px] mt-0.5 text-center leading-tight max-w-[64px] truncate">{item.label}</span>
               </Link>
             );
           })}

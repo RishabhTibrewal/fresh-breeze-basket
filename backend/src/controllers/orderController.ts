@@ -39,23 +39,36 @@ export const orderController = {
         total_amount,
         transaction_id,
         cheque_no,
-        payment_date
+        payment_date,
+        sales_executive_id: bodySalesExecutiveId
       } = req.body;
 
       // Log the received payment_status from frontend
       console.log('Payment status from frontend:', payment_status);
 
-      const sales_executive_id = req.user?.id;
-      console.log('Sales executive ID:', sales_executive_id);
+      const userId = req.user?.id;
+      console.log('User ID:', userId);
       console.log('Customer ID:', customer_id);
 
       if (!req.companyId) {
         return res.status(400).json({ error: 'Company context is required' });
       }
 
-      if (!sales_executive_id) {
+      if (!userId) {
         return res.status(401).json({ error: 'User authentication required' });
       }
+
+      // Resolve sales_executive_id for order: from body, or default to current user if they have sales role
+      let orderSalesExecutiveId: string | null = null;
+      if (bodySalesExecutiveId && typeof bodySalesExecutiveId === 'string' && bodySalesExecutiveId.trim() !== '') {
+        orderSalesExecutiveId = bodySalesExecutiveId.trim();
+      } else {
+        const userIsSales = await hasAnyRole(userId, req.companyId!, ['sales']);
+        if (userIsSales) {
+          orderSalesExecutiveId = userId;
+        }
+      }
+      console.log('Order sales_executive_id:', orderSalesExecutiveId);
 
       // Verify the customer belongs to this sales executive
       const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
@@ -71,23 +84,6 @@ export const orderController = {
       }
 
       console.log('Customer found:', customer);
-      
-      // Check if user is admin - admins can create orders for any customer
-      const isAdmin = await hasAnyRole(sales_executive_id, req.companyId, ['admin']);
-      
-      // Check if the customer belongs to this sales executive (skip for admins)
-      if (!isAdmin && customer.sales_executive_id !== sales_executive_id) {
-        console.error(`Customer ${customer_id} does not belong to sales executive ${sales_executive_id}`);
-        return res.status(403).json({ 
-          error: 'Access denied. This customer is not assigned to your account.',
-          customer_sales_executive: customer.sales_executive_id,
-          current_user: sales_executive_id
-        });
-      }
-      
-      if (isAdmin) {
-        console.log(`Admin user ${sales_executive_id} creating order for customer ${customer_id}`);
-      }
 
       // Calculate order total amount using variant pricing
       console.log('Calculating order total for items:', items);
@@ -221,7 +217,8 @@ export const orderController = {
         payment_status: orderPaymentStatus,
         order_type: 'sales',
         order_source: 'sales',
-        fulfillment_type: fulfillmentType
+        fulfillment_type: fulfillmentType,
+        ...(orderSalesExecutiveId != null && { sales_executive_id: orderSalesExecutiveId })
       };
       
       console.log('Order data being inserted:', JSON.stringify(orderData, null, 2));
@@ -764,7 +761,7 @@ export const orderController = {
         }
       }
 
-      // Verify the order belongs to a customer of this sales executive
+      // Get customer info for the order (sales and admins can view any company order)
       const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('id, name, sales_executive_id')
@@ -775,10 +772,6 @@ export const orderController = {
       if (customerError) {
         console.error('Error fetching customer:', customerError);
         return res.status(404).json({ error: 'Customer for this order not found' });
-      }
-
-      if (customer.sales_executive_id !== sales_executive_id) {
-        return res.status(403).json({ error: 'Access denied' });
       }
 
       // Add customer info to the order
@@ -805,25 +798,15 @@ export const orderController = {
         return res.status(400).json({ error: 'Company context is required' });
       }
 
-      // Verify the order belongs to a customer of this sales executive
-      const { data: order, error: orderError } = await (supabaseAdmin || supabase)
+      // Verify order exists and belongs to company (sales and admins can update any company order)
+      const { error: orderError } = await (supabaseAdmin || supabase)
         .from('orders')
-        .select(`
-          id,
-          customer:customers!orders_user_id_fkey (
-            sales_executive_id
-          )
-        `)
+        .select('id')
         .eq('id', order_id)
         .eq('company_id', req.companyId)
         .single();
 
       if (orderError) throw orderError;
-
-      const customer = (order as unknown as { customer: { sales_executive_id: string } }).customer;
-      if (customer.sales_executive_id !== sales_executive_id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
 
       const { data: updatedOrder, error: updateError } = await (supabaseAdmin || supabase)
         .from('orders')
@@ -848,13 +831,10 @@ export const orderController = {
         return res.status(400).json({ error: 'Company context is required' });
       }
       
-      const sales_executive_id = req.user?.id;
-
-      // Get all customers for this sales executive (filtered by company_id)
+      // Get all company customers (sales and admins see all)
       const { data: customers, error: customersError } = await (supabaseAdmin || supabase)
         .from('customers')
         .select('id, user_id, name')
-        .eq('sales_executive_id', sales_executive_id)
         .eq('company_id', req.companyId);
 
       if (customersError) {

@@ -651,25 +651,6 @@ export const createPaymentRecord = async (req: Request, res: Response) => {
       throw new ApiError(404, 'Order not found');
     }
 
-    // Verify authorization: For sales executives, check if order belongs to their customers
-    if (!isAdmin && isSales) {
-      const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
-        .from('customers')
-        .select('sales_executive_id')
-        .eq('user_id', order.user_id)
-        .eq('company_id', req.companyId)
-        .single();
-
-      if (customerError) {
-        console.error('Error fetching customer for authorization:', customerError);
-        throw new ApiError(404, 'Customer not found for this order');
-      }
-
-      if (!customer || customer.sales_executive_id !== userId) {
-        throw new ApiError(403, 'Not authorized to create payment for this order');
-      }
-    }
-
     // Validate amount doesn't exceed order total (allow partial payments)
     const orderAmount = parseFloat(order.total_amount.toString());
     const paymentAmount = parseFloat(amount.toString());
@@ -1068,53 +1049,12 @@ export const getAllPayments = async (req: Request, res: Response) => {
       throw new ApiError(403, 'Admin or Sales access required');
     }
 
-    // Get customer user IDs if user is sales (not admin)
-    let customerUserIds: string[] | null = null;
-    if (isSales && !isAdmin) {
-      const { data: customers } = await (supabaseAdmin || supabase)
-        .from('customers')
-        .select('user_id')
-        .eq('sales_executive_id', userId)
-        .eq('company_id', req.companyId);
-
-      customerUserIds = customers?.map(c => c.user_id).filter(Boolean) || [];
-
-      if (customerUserIds.length === 0) {
-        // No customers, return empty result
-        return res.json({
-          success: true,
-          data: []
-        });
-      }
-    }
-
-    // Build query for payments
+    // Build query for payments (sales and admins see all company payments)
     let query = (supabaseAdmin || supabase)
       .from('payments')
       .select('*')
       .eq('company_id', req.companyId)
       .order('created_at', { ascending: false });
-
-    // If sales executive, filter by their customers' orders
-    if (customerUserIds) {
-      // Get order IDs for their customers
-      const { data: orders } = await (supabaseAdmin || supabase)
-        .from('orders')
-        .select('id')
-        .in('user_id', customerUserIds)
-        .eq('company_id', req.companyId);
-
-      const orderIds = orders?.map(o => o.id).filter(Boolean) || [];
-
-      if (orderIds.length === 0) {
-        return res.json({
-          success: true,
-          data: []
-        });
-      }
-
-      query = query.in('order_id', orderIds);
-    }
 
     // Apply filters
     if (order_id) {

@@ -80,6 +80,72 @@ interface ApiResponse<T> {
   count?: number;
 }
 
+export interface PackagingRecipe {
+  id: string;
+  company_id: string;
+  input_product_id: string;
+  input_variant_id: string;
+  output_product_id: string;
+  output_variant_id: string;
+  conversion_ratio: number;
+  created_at: string;
+  input_products?: { id: string; name: string };
+  input_product_variants?: { id: string; name: string; unit: number | null; unit_type: string };
+  output_products?: { id: string; name: string };
+  output_product_variants?: { id: string; name: string; unit: number | null; unit_type: string };
+}
+
+export interface CreatePackagingRecipeInput {
+  input_product_id: string;
+  input_variant_id: string;
+  output_product_id: string;
+  output_variant_id: string;
+  conversion_ratio: number;
+}
+
+export interface RepackOrderItem {
+  id: string;
+  repack_order_id: string;
+  input_product_id: string;
+  input_variant_id: string;
+  input_quantity: number;
+  output_product_id: string;
+  output_variant_id: string;
+  output_quantity: number;
+  input_products?: { id: string; name: string };
+  input_product_variants?: { id: string; name: string; unit: number | null; unit_type: string };
+  output_products?: { id: string; name: string };
+  output_product_variants?: { id: string; name: string; unit: number | null; unit_type: string };
+}
+
+export interface RepackOrder {
+  id: string;
+  company_id: string;
+  warehouse_id: string;
+  status: string;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  warehouses?: { id: string; name: string; code: string };
+}
+
+export interface RepackOrderWithItems extends RepackOrder {
+  items?: RepackOrderItem[];
+}
+
+export interface CreateRepackOrderInput {
+  warehouse_id: string;
+  notes?: string;
+  items: Array<{
+    input_product_id: string;
+    input_variant_id: string;
+    input_quantity: number;
+    output_product_id: string;
+    output_variant_id: string;
+    output_quantity: number;
+  }>;
+}
+
 export interface ProductWarehouseStock {
   id: string;
   warehouse_id: string;
@@ -129,6 +195,52 @@ export const inventoryService = {
       params: filters,
     });
     return response.data;
+  },
+
+  /**
+   * Packaging recipes CRUD
+   */
+  async getPackagingRecipes(): Promise<PackagingRecipe[]> {
+    const { data: response } = await apiClient.get<ApiResponse<PackagingRecipe[]>>('/inventory/packaging-recipes');
+    return response.data;
+  },
+  async createPackagingRecipe(recipe: CreatePackagingRecipeInput): Promise<PackagingRecipe> {
+    const { data: response } = await apiClient.post<ApiResponse<PackagingRecipe>>('/inventory/packaging-recipes', recipe);
+    return response.data;
+  },
+  async updatePackagingRecipe(id: string, recipe: Partial<CreatePackagingRecipeInput>): Promise<PackagingRecipe> {
+    const { data: response } = await apiClient.put<ApiResponse<PackagingRecipe>>(`/inventory/packaging-recipes/${id}`, recipe);
+    return response.data;
+  },
+  async deletePackagingRecipe(id: string): Promise<void> {
+    await apiClient.delete(`/inventory/packaging-recipes/${id}`);
+  },
+
+  /**
+   * Repack orders CRUD
+   */
+  async getRepackOrders(filters?: { warehouse_id?: string; status?: string }): Promise<RepackOrder[]> {
+    const { data: response } = await apiClient.get<ApiResponse<RepackOrder[]>>('/inventory/repack-orders', { params: filters });
+    return response.data;
+  },
+  async getRepackOrderById(id: string): Promise<RepackOrderWithItems> {
+    const { data: response } = await apiClient.get<ApiResponse<RepackOrderWithItems>>(`/inventory/repack-orders/${id}`);
+    return response.data;
+  },
+  async createRepackOrder(order: CreateRepackOrderInput): Promise<RepackOrderWithItems> {
+    const { data: response } = await apiClient.post<ApiResponse<RepackOrderWithItems>>('/inventory/repack-orders', order);
+    return response.data;
+  },
+  async updateRepackOrder(id: string, order: Partial<CreateRepackOrderInput>): Promise<RepackOrderWithItems> {
+    const { data: response } = await apiClient.put<ApiResponse<RepackOrderWithItems>>(`/inventory/repack-orders/${id}`, order);
+    return response.data;
+  },
+  async processRepackOrder(id: string): Promise<{ success: boolean; data: { success: boolean; repack_order_id: string; status: string } }> {
+    const { data } = await apiClient.post<ApiResponse<{ success: boolean; repack_order_id: string; status: string }>>(`/inventory/repack-orders/${id}/process`);
+    return data;
+  },
+  async deleteRepackOrder(id: string): Promise<void> {
+    await apiClient.delete(`/inventory/repack-orders/${id}`);
   },
 
   /**

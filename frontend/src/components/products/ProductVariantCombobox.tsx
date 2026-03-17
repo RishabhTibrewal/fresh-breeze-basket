@@ -31,6 +31,8 @@ interface ProductVariantComboboxProps {
   selectedVariantId?: string | null;
   onSelect: (productId: string, variantId: string) => void;
   filterActive?: boolean;
+  /** Use a simple list instead of Command/Popover when inside a Dialog to avoid focus-trap blocking selection */
+  useListInModal?: boolean;
   className?: string;
 }
 
@@ -39,6 +41,7 @@ export const ProductVariantCombobox: React.FC<ProductVariantComboboxProps> = ({
   selectedVariantId,
   onSelect,
   filterActive = true,
+  useListInModal = false,
   className,
 }) => {
   const [open, setOpen] = useState(false);
@@ -49,12 +52,12 @@ export const ProductVariantCombobox: React.FC<ProductVariantComboboxProps> = ({
     queryFn: () => productsService.getAll(),
   });
 
-  // Build options from products and variants
+  // Build options from products and variants (when filterActive is false, include all variants)
   const options: ProductVariantOption[] = products
     .filter(p => !filterActive || p.is_active)
     .flatMap(product =>
       (product.variants || [])
-        .filter(v => v.is_active)
+        .filter(v => !filterActive || v.is_active !== false)
         .map(variant => ({
           product_id: product.id,
           variant_id: variant.id,
@@ -75,8 +78,59 @@ export const ProductVariantCombobox: React.FC<ProductVariantComboboxProps> = ({
     o => o.product_id === selectedProductId && o.variant_id === selectedVariantId
   );
 
+  const handleSelectOption = (option: ProductVariantOption) => {
+    onSelect(option.product_id, option.variant_id);
+    setOpen(false);
+    setSearchQuery('');
+  };
+
+  // Simple list mode: no Popover/Command, works reliably inside Radix Dialog (avoids focus trap)
+  if (useListInModal) {
+    const listOptions = filteredOptions;
+    return (
+      <div className={cn('space-y-1', className)}>
+        <input
+          type="text"
+          placeholder="Search products/variants..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        <div className="border rounded-md max-h-[200px] overflow-y-auto">
+          {isLoading ? (
+            <div className="py-4 text-center text-sm text-muted-foreground">Loading...</div>
+          ) : listOptions.length === 0 ? (
+            <div className="py-4 text-center text-sm text-muted-foreground">No product/variant found.</div>
+          ) : (
+            listOptions.map((option) => {
+              const isSelected = selectedProductId === option.product_id && selectedVariantId === option.variant_id;
+              return (
+                <button
+                  key={`${option.product_id}-${option.variant_id}`}
+                  type="button"
+                  onClick={() => onSelect(option.product_id, option.variant_id)}
+                  className={cn(
+                    'w-full flex items-center gap-2 px-3 py-2 text-left text-sm rounded-none border-b border-border last:border-b-0 hover:bg-accent',
+                    isSelected && 'bg-primary/10 text-primary font-medium'
+                  )}
+                >
+                  <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{option.label}</span>
+                  {isSelected && <Check className="h-4 w-4 shrink-0 ml-auto text-primary" />}
+                </button>
+              );
+            })
+          )}
+        </div>
+        {selectedOption && (
+          <p className="text-xs text-muted-foreground">Selected: {selectedOption.label}</p>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} modal={false}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -92,8 +146,8 @@ export const ProductVariantCombobox: React.FC<ProductVariantComboboxProps> = ({
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[400px] p-0" align="start">
-        <Command>
+      <PopoverContent className="w-[400px] p-0 z-[100]" align="start">
+        <Command shouldFilter={false}>
           <CommandInput 
             placeholder="Search products/variants..." 
             value={searchQuery}
@@ -107,11 +161,11 @@ export const ProductVariantCombobox: React.FC<ProductVariantComboboxProps> = ({
               {filteredOptions.map((option) => (
                 <CommandItem
                   key={`${option.product_id}-${option.variant_id}`}
-                  value={option.label}
-                  onSelect={() => {
-                    onSelect(option.product_id, option.variant_id);
-                    setOpen(false);
-                    setSearchQuery('');
+                  value={`${option.product_id}|${option.variant_id}`}
+                  onSelect={() => handleSelectOption(option)}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    handleSelectOption(option);
                   }}
                 >
                   <Check

@@ -127,7 +127,7 @@ export const WarehouseSelector: React.FC<WarehouseSelectorProps> = ({
       </Button>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-full h-full max-h-screen m-0 rounded-none sm:rounded-lg">
+        <DialogContent className="max-w-full h-full max-h-screen m-0 rounded-none sm:rounded-lg" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Select Warehouse</DialogTitle>
           </DialogHeader>

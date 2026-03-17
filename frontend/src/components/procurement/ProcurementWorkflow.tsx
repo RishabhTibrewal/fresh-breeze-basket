@@ -54,7 +54,7 @@ export function ProcurementWorkflow({
       status: po?.status,
       entityId: po?.id,
       entityType: 'po',
-      route: po?.id ? `/admin/purchase-orders/${po.id}` : undefined,
+      route: po?.id ? `/procurement/purchase-orders/${po.id}` : undefined,
     },
     {
       id: 'grn',
@@ -62,7 +62,7 @@ export function ProcurementWorkflow({
       status: grn?.status,
       entityId: grn?.id,
       entityType: 'grn',
-      route: grn?.id ? `/admin/goods-receipts/${grn.id}` : undefined,
+      route: grn?.id ? `/procurement/goods-receipts/${grn.id}` : undefined,
     },
     {
       id: 'invoice',
@@ -70,7 +70,7 @@ export function ProcurementWorkflow({
       status: invoice?.status,
       entityId: invoice?.id,
       entityType: 'invoice',
-      route: invoice?.id ? `/admin/purchase-invoices/${invoice.id}` : undefined,
+      route: invoice?.id ? `/procurement/purchase-invoices/${invoice.id}` : undefined,
     },
     {
       id: 'payment',
@@ -78,7 +78,7 @@ export function ProcurementWorkflow({
       status: payments.length > 0 ? payments[0].status : undefined,
       entityId: payments.length > 0 ? payments[0].id : undefined,
       entityType: 'payment',
-      route: payments.length > 0 ? `/admin/supplier-payments/${payments[0].id}` : undefined,
+      route: payments.length > 0 ? `/procurement/supplier-payments/${payments[0].id}` : undefined,
     },
   ];
 

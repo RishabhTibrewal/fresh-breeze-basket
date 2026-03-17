@@ -68,6 +68,7 @@ import leadsRouter from './routes/leadsRoutes';
 import warehousesRouter from './routes/warehouses';
 import uploadsRouter from './routes/uploads';
 import suppliersRouter from './routes/suppliers';
+import partiesRouter from './routes/parties';
 import purchaseOrdersRouter from './routes/purchaseOrders';
 import goodsReceiptsRouter from './routes/goodsReceipts';
 import purchaseInvoicesRouter from './routes/purchaseInvoices';
@@ -78,6 +79,8 @@ import warehouseManagersRouter from './routes/warehouseManagers';
 import pricesRouter from './routes/prices';
 import taxesRouter from './routes/taxes';
 import kpiRouter from './routes/kpi';
+import modifiersRouter from './routes/modifiers';
+import collectionsRouter from './routes/collections';
 
 // Initialize Express app
 export const app = express();
@@ -222,6 +225,7 @@ app.use('/api/leads', leadsRouter);
 app.use('/api/warehouses', warehousesRouter);
 app.use('/api/uploads', uploadsRouter);
 app.use('/api/suppliers', suppliersRouter);
+app.use('/api/parties', partiesRouter);
 app.use('/api/purchase-orders', purchaseOrdersRouter);
 app.use('/api/goods-receipts', goodsReceiptsRouter);
 app.use('/api/purchase-invoices', purchaseInvoicesRouter);
@@ -232,6 +236,8 @@ app.use('/api/warehouse-managers', warehouseManagersRouter);
 app.use('/api/prices', pricesRouter);
 app.use('/api/taxes', taxesRouter);
 app.use('/api/kpis', kpiRouter);
+app.use('/api/modifiers', modifiersRouter);
+app.use('/api/collections', collectionsRouter);
 
 // 404 handler for unmatched routes (ensures CORS headers are present)
 app.use((req: express.Request, res: express.Response) => {

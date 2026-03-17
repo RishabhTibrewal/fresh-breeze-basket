@@ -117,7 +117,19 @@ export interface OrdersResponse {
   count: number;
 }
 
+export interface SalesExecutiveProfile {
+  id: string;
+  email?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+}
+
 export const ordersService = {
+  async getSalesExecutives(): Promise<{ success: boolean; data: SalesExecutiveProfile[] }> {
+    const response = await apiClient.get<{ success: boolean; data: SalesExecutiveProfile[] }>('/orders/sales-executives');
+    return response.data;
+  },
+
   async getAll(params?: {
     page?: number;
     limit?: number;

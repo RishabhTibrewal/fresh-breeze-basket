@@ -1,4 +1,6 @@
 import apiClient from '@/lib/apiClient';
+import { Collection } from './collections';
+import { ModifierGroup } from './modifiers';
 
 export interface ProductImage {
   id: string;
@@ -8,6 +10,24 @@ export interface ProductImage {
   is_primary: boolean;
   display_order: number;
   created_at: string;
+}
+
+export interface BundleComponent {
+  id?: string;
+  bundle_variant_id?: string;
+  component_variant_id: string;
+  quantity_included: number;
+  price_adjustment?: number | null;
+  component_variant?: {
+    id: string;
+    name: string;
+    sku: string | null;
+    image_url: string | null;
+    product: {
+      id: string;
+      name: string;
+    }
+  }
 }
 
 export interface Brand {
@@ -61,6 +81,8 @@ export interface ProductVariant {
   is_active: boolean;
   unit: number | null;
   unit_type: string;
+  packing_type?: string | null;
+  type?: string | null;
   best_before: string | null;
   tax_id: string | null;
   hsn: string | null;
@@ -69,11 +91,15 @@ export interface ProductVariant {
   company_id: string;
   created_at: string;
   updated_at: string;
+  is_bundle?: boolean;
   // Nested relations (from API responses)
   price?: ProductPrice;
   brand?: Brand;
   tax?: Tax;
   variant_images?: ProductImage[];
+  bundle_components?: BundleComponent[];
+  collections?: Collection[];
+  modifier_groups?: ModifierGroup[];
 }
 
 interface APIProduct {
@@ -106,6 +132,7 @@ export interface Product {
   name: string;                        // varchar(255)
   description: string | null;          // text
   category_id: string | null;          // uuid
+  subcategory_id?: string | null;      // uuid
   slug: string;                        // varchar(255)
   is_active: boolean;                  // boolean (product-level activation control)
   nutritional_info: string | null;     // text
@@ -147,12 +174,21 @@ export interface CreateProductInput {
   name: string;
   description: string | null;
   category_id: string | null;
+  subcategory_id?: string | null;
   brand_id?: string | null;
   origin: string | null;
   nutritional_info: string | null;
   is_active?: boolean;
   slug?: string;
   product_code?: string | null;
+  is_bundle?: boolean;
+  bundle_components?: Array<{
+    component_variant_id: string;
+    quantity_included: number;
+    price_adjustment?: number | null;
+  }>;
+  collection_ids?: string[];
+  modifier_group_ids?: string[];
   // Optional: variants array for creating product with variants
   variants?: Array<{
     name: string;
@@ -169,6 +205,12 @@ export interface CreateProductInput {
     hsn?: string | null;
     badge?: string | null;
     brand_id?: string | null;
+    is_bundle?: boolean;
+    bundle_components?: Array<{
+      component_variant_id: string;
+      quantity_included: number;
+      price_adjustment?: number | null;
+    }>;
   }>;
   // Legacy fields (deprecated, kept for backward compatibility)
   /** @deprecated Use variants array instead */
@@ -219,6 +261,7 @@ export const productsService = {
       name: apiProduct.name,
       description: apiProduct.description || null,
       category_id: apiProduct.category_id,
+      subcategory_id: apiProduct.subcategory_id || null,
       slug: apiProduct.slug,
       is_active: apiProduct.is_active,
       nutritional_info: apiProduct.nutritional_info || null,
@@ -267,6 +310,7 @@ export const productsService = {
       name: apiProduct.name,
       description: apiProduct.description || null,
       category_id: apiProduct.category_id,
+      subcategory_id: apiProduct.subcategory_id || null,
       slug: apiProduct.slug,
       is_active: apiProduct.is_active,
       nutritional_info: apiProduct.nutritional_info || null,
@@ -312,6 +356,9 @@ export const productsService = {
     // Add optional fields if provided
     if (productData.brand_id !== undefined) {
       payload.brand_id = productData.brand_id;
+    }
+    if (productData.subcategory_id !== undefined) {
+      payload.subcategory_id = productData.subcategory_id || null;
     }
     if (productData.slug) {
       payload.slug = productData.slug;
@@ -359,6 +406,9 @@ export const productsService = {
     }
     if (productData.category_id !== undefined) {
       formattedData.category_id = productData.category_id;
+    }
+    if (productData.subcategory_id !== undefined) {
+      formattedData.subcategory_id = productData.subcategory_id || null;
     }
     if (productData.brand_id !== undefined) {
       formattedData.brand_id = productData.brand_id;

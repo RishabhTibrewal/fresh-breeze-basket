@@ -25,27 +25,23 @@ interface Customer {
 // Get all customers
 export const getCustomers = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
-    const userRoles = req.user?.roles || [];
-
     if (!req.companyId) {
       throw new AppError('Company context is required', 400);
     }
 
-    // Build query - filter by company_id and sales_executive_id if user is a sales executive
-    let query = (supabaseAdmin || supabase)
+    // Build query - filter by company_id (sales and admins see all company customers)
+    const query = (supabaseAdmin || supabase)
       .from('customers')
-      .select('*')
+      .select(`
+        *,
+        party:contact_parties(
+          id,
+          name,
+          is_customer,
+          is_supplier
+        )
+      `)
       .eq('company_id', req.companyId);
-
-    // If user is a sales executive (and not admin), only show their customers
-    const isSales = userRoles.includes('sales');
-    const isAdmin = userRoles.includes('admin');
-    
-    if (isSales && !isAdmin && userId) {
-      query = query.eq('sales_executive_id', userId);
-    }
-    // Admins can see all customers for their company
 
     const { data: customers, error } = await query;
 
@@ -84,6 +80,8 @@ export const getCustomers = async (req: Request, res: Response) => {
       return {
         id: customer.id,
         user_id: customer.user_id, // Include user_id for navigation to customer details
+        party_id: (customer as any).party_id || null,
+        party: (customer as any).party || null,
         name: customer.name,
         email: customer.email,
         phone: customer.phone,
@@ -116,7 +114,15 @@ export const getCustomerById = async (req: Request, res: Response) => {
     // First, get the customer details
     const { data: customer, error } = await (supabaseAdmin || supabase)
       .from('customers')
-      .select('*')
+      .select(`
+        *,
+        party:contact_parties(
+          id,
+          name,
+          is_customer,
+          is_supplier
+        )
+      `)
       .eq('id', id)
       .eq('company_id', req.companyId)
       .single();
@@ -177,6 +183,8 @@ export const getCustomerById = async (req: Request, res: Response) => {
     const transformedCustomer = {
       id: customer.id,
       user_id: customer.user_id,
+      party_id: (customer as any).party_id || null,
+      party: (customer as any).party || null,
       name: customer.name,
       email: customer.email,
       phone: customer.phone,
@@ -200,7 +208,7 @@ export const getCustomerById = async (req: Request, res: Response) => {
   }
 };
 
-// Get customer by user_id (for admin to view customer details from user profile)
+// Get customer by user_id (for admin/sales to view customer details from user profile)
 export const getCustomerByUserId = async (req: Request, res: Response) => {
   try {
     if (!req.companyId) {
@@ -217,50 +225,41 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       });
     }
 
-    // First, get the profile information (this should always exist)
-    const { data: profile, error: profileError } = await adminClient
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (profileError || !profile) {
-      return res.status(404).json({
-        success: false,
-        message: 'User profile not found'
-      });
-    }
-
-    // Verify the user belongs to the current company using memberships
-    let hasCompanyAccess = false;
-    const { data: membership, error: membershipError } = await adminClient
-      .from('company_memberships')
-      .select('company_id, is_active')
+    // First, check if a customer record exists for this user in the company (B2B customers)
+    // This allows lookup even when profile is missing (e.g. user created via create customer)
+    const { data: customer, error: customerError } = await adminClient
+      .from('customers')
+      .select(`
+        *,
+        party:contact_parties(
+          id,
+          name,
+          is_customer,
+          is_supplier
+        )
+      `)
       .eq('user_id', userId)
       .eq('company_id', req.companyId)
-      .eq('is_active', true)
-      .maybeSingle();
+      .single();
 
-    if (membershipError) {
-      console.error('Error checking customer membership:', membershipError);
-    }
+    // If customer doesn't exist, check for retail customer (profile + orders in company)
+    if (customerError || !customer) {
+      // PGRST116 = not found - expected for retail; other errors are unexpected
+      if (customerError && customerError.code !== 'PGRST116') {
+        console.error('Error fetching customer (unexpected):', customerError);
+        return res.status(404).json({
+          success: false,
+          message: 'Customer not found in this company'
+        });
+      }
 
-    hasCompanyAccess = !!membership;
-
-    // Fallback: allow access if the user has a customer record in this company
-    if (!hasCompanyAccess) {
-      const { data: customerAccess } = await adminClient
-        .from('customers')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('company_id', req.companyId)
+      // Verify company access: must have profile AND (membership OR orders)
+      const { data: profile } = await adminClient
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
         .maybeSingle();
 
-      hasCompanyAccess = !!customerAccess;
-    }
-
-    // Fallback: allow access if the user has orders in this company (retail users)
-    if (!hasCompanyAccess) {
       const { data: orderAccess } = await adminClient
         .from('orders')
         .select('id')
@@ -269,82 +268,62 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
         .limit(1)
         .maybeSingle();
 
-      hasCompanyAccess = !!orderAccess;
-    }
+      const { data: membership } = await adminClient
+        .from('company_memberships')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('company_id', req.companyId)
+        .eq('is_active', true)
+        .maybeSingle();
 
-    if (!hasCompanyAccess) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found in this company'
-      });
-    }
-
-    // Then, try to get the customer details by user_id (may not exist)
-    const { data: customer, error: customerError } = await adminClient
-      .from('customers')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('company_id', req.companyId)
-      .single();
-
-    // If customer doesn't exist, this is a retail customer (profile only, no customer record)
-    // Retail customers can still have orders, so fetch them
-    if (customerError || !customer) {
-      // PGRST116 is the "not found" error code - this is expected for retail customers
-      if (customerError && customerError.code !== 'PGRST116') {
-        console.error('Error fetching customer (unexpected):', customerError);
-      } else {
-        console.log(`Retail customer (profile only) - user ${userId}, fetching orders...`);
+      const hasCompanyAccess = !!orderAccess || !!membership;
+      if (!profile || !hasCompanyAccess) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found in this company'
+        });
       }
-      
-      // For retail customers, fetch their orders using user_id (filtered by company_id)
-      const { data: retailOrders, error: retailOrdersError } = await adminClient
+
+      // Retail customer - return profile + orders
+      const { data: retailOrders } = await adminClient
         .from('orders')
         .select('id, total_amount, status, created_at, payment_status')
         .eq('user_id', userId)
         .eq('company_id', req.companyId)
         .order('created_at', { ascending: false });
-      
-      if (retailOrdersError) {
-        console.error('Error fetching retail customer orders:', retailOrdersError);
-      }
-      
-      // Calculate order metrics for retail customer
-      const filteredRetailOrders = retailOrders?.filter(order => order.status !== 'cancelled') || [];
-      const retailTotalOrders = filteredRetailOrders.length;
-      const retailTotalSpent = filteredRetailOrders.reduce((sum, order) => sum + parseFloat(order.total_amount.toString()), 0) || 0;
-      
-      // Get last order date
+
+      const filteredRetailOrders = retailOrders?.filter(o => o.status !== 'cancelled') || [];
+      const retailTotalSpent = filteredRetailOrders.reduce((sum, o) => sum + parseFloat(o.total_amount.toString()), 0) || 0;
       let lastRetailOrder = null;
       if (filteredRetailOrders.length > 0) {
-        const orderDates = filteredRetailOrders.map(order => new Date(order.created_at).getTime());
-        const lastOrderDate = new Date(Math.max(...orderDates));
-        lastRetailOrder = lastOrderDate.toISOString().split('T')[0];
+        const orderDates = filteredRetailOrders.map(o => new Date(o.created_at).getTime());
+        lastRetailOrder = new Date(Math.max(...orderDates)).toISOString().split('T')[0];
       }
-      
-      // Return profile data with order information for retail customers
+
       return res.json({
         id: null,
         user_id: userId,
-        name: profile.first_name || profile.last_name 
-          ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() 
+        party_id: null,
+        party: null,
+        name: profile.first_name || profile.last_name
+          ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim()
           : profile.email || 'Unknown',
         email: profile.email,
         phone: profile.phone || null,
         trn_number: null,
-        totalOrders: retailTotalOrders,
+        totalOrders: filteredRetailOrders.length,
         totalSpent: retailTotalSpent,
         lastOrder: lastRetailOrder,
         credit_limit: 0,
         current_credit: 0,
         credit_period_days: 0,
         credit_periods: [],
-        orders: filteredRetailOrders || [], // Include orders for retail customers
-        profile: profile,
+        orders: filteredRetailOrders,
+        profile,
         sales_executive_id: null,
         created_at: profile.created_at,
         updated_at: profile.updated_at,
-        isCustomerRecord: false // Flag to indicate retail customer (no customer record)
+        isCustomerRecord: false
       });
     }
 
@@ -404,9 +383,22 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       lastOrderDate = lastOrder.toISOString().split('T')[0];
     }
 
+    // Fetch profile — createCustomer always creates one, so include it when present
+    let b2bProfile = null;
+    if (customer.user_id) {
+      const { data: profileData } = await adminClient
+        .from('profiles')
+        .select('*')
+        .eq('id', customer.user_id)
+        .maybeSingle();
+      b2bProfile = profileData || null;
+    }
+
     const transformedCustomer = {
       id: customer.id,
       user_id: customer.user_id,
+      party_id: (customer as any).party_id || null,
+      party: (customer as any).party || null,
       name: customer.name,
       email: customer.email,
       phone: customer.phone,
@@ -418,13 +410,13 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       current_credit: customer.current_credit,
       credit_period_days: customer.credit_period_days,
       credit_periods: creditPeriods || [],
-      orders: filteredOrders || [], // Include orders for wholesale customers too
-      payments: payments || [], // Include payments for customer's orders
-      profile: profile || null,
+      orders: filteredOrders || [],
+      payments: payments || [],
+      profile: b2bProfile,
       sales_executive_id: customer.sales_executive_id,
       created_at: customer.created_at,
       updated_at: customer.updated_at,
-      isCustomerRecord: true // Flag to indicate wholesale customer (has customer record)
+      isCustomerRecord: true
     };
 
     res.json(transformedCustomer);
@@ -538,7 +530,11 @@ export const createCustomer = async (req: Request, res: Response) => {
       }
     }
 
-    const adminClient = supabaseAdmin || supabase;
+    if (!supabaseAdmin) {
+      throw new AppError('Service role key not configured. Cannot create customer.', 500);
+    }
+
+    const adminClient = supabaseAdmin;
 
     if (!resolvedEmail) {
       throw new AppError('Email is required to create a customer profile', 400);
@@ -617,7 +613,7 @@ export const createCustomer = async (req: Request, res: Response) => {
     console.log('Customer payload:', customerPayload);
     
     // Create customer directly with the user_id
-    const { data: customer, error } = await (supabaseAdmin || supabase)
+    const { data: customer, error } = await adminClient
       .from('customers')
       .insert(customerPayload)
       .select()
@@ -636,6 +632,134 @@ export const createCustomer = async (req: Request, res: Response) => {
       throw error;
     }
     throw new AppError('Failed to create customer', 500);
+  }
+};
+
+// Create a supplier from an existing customer using the same contact_party
+export const createLinkedSupplierFromCustomer = async (req: Request, res: Response) => {
+  try {
+    if (!req.companyId) {
+      throw new AppError('Company context is required', 400);
+    }
+
+    const { id } = req.params;
+    const adminClient = supabaseAdmin || supabase;
+    const currentUserId = req.user?.id;
+
+    const { data: customer, error: customerError } = await adminClient
+      .from('customers')
+      .select('*')
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .single();
+
+    if (customerError || !customer) {
+      throw new AppError('Customer not found', 404);
+    }
+
+    let partyId: string | null = (customer as any).party_id || null;
+
+    // Ensure a party exists for this customer
+    if (!partyId) {
+      const { data: party, error: partyError } = await adminClient
+        .from('contact_parties')
+        .insert({
+          company_id: req.companyId,
+          name: customer.name,
+          email: customer.email,
+          phone: customer.phone,
+          is_customer: true,
+        })
+        .select('*')
+        .single();
+
+      if (partyError || !party) {
+        throw new AppError(`Failed to create contact party: ${partyError?.message || 'Unknown error'}`, 500);
+      }
+
+      partyId = party.id;
+
+      await adminClient
+        .from('customers')
+        .update({ party_id: partyId })
+        .eq('id', id)
+        .eq('company_id', req.companyId);
+    }
+
+    // Already has supplier counterpart?
+    const { data: existingSupplier } = await adminClient
+      .from('suppliers')
+      .select('*')
+      .eq('company_id', req.companyId)
+      .eq('party_id', partyId)
+      .maybeSingle();
+
+    if (existingSupplier) {
+      return res.status(200).json({
+        success: true,
+        alreadyExists: true,
+        data: existingSupplier,
+      });
+    }
+
+    // Generate supplier code
+    const year = new Date().getFullYear();
+    const { data: latestSupplier } = await adminClient
+      .from('suppliers')
+      .select('supplier_code')
+      .eq('company_id', req.companyId)
+      .ilike('supplier_code', `SUP-${year}-%`)
+      .order('supplier_code', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let sequence = 1;
+    if (latestSupplier?.supplier_code) {
+      const parts = latestSupplier.supplier_code.split('-');
+      if (parts.length === 3) {
+        const parsed = parseInt(parts[2], 10);
+        if (!isNaN(parsed) && parsed > 0) sequence = parsed + 1;
+      }
+    }
+    const supplierCode = `SUP-${year}-${sequence.toString().padStart(3, '0')}`;
+
+    const { data: newSupplier, error: supplierError } = await adminClient
+      .from('suppliers')
+      .insert({
+        supplier_code: supplierCode,
+        name: customer.name,
+        contact_name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+        gst_no: customer.trn_number,
+        created_by: currentUserId || null,
+        is_active: true,
+        company_id: req.companyId,
+        party_id: partyId,
+        opening_balance: 0,
+        closing_balance: 0,
+      })
+      .select('*')
+      .single();
+
+    if (supplierError || !newSupplier) {
+      throw new AppError(`Failed to create supplier: ${supplierError?.message || 'Unknown error'}`, 500);
+    }
+
+    await adminClient
+      .from('contact_parties')
+      .update({ is_supplier: true })
+      .eq('id', partyId)
+      .eq('company_id', req.companyId);
+
+    return res.status(201).json({
+      success: true,
+      data: newSupplier,
+    });
+  } catch (error) {
+    console.error('Error creating linked supplier from customer:', error);
+    if (error instanceof AppError) throw error;
+    throw new AppError('Failed to create linked supplier', 500);
   }
 };
 
@@ -721,18 +845,13 @@ async function addCreditPeriod(req: Request, res: Response) {
       return res.status(403).json({ error: 'Admin or Sales access required' });
     }
 
-    // Verify the customer exists and load credit info
-    let customerQuery = (supabaseAdmin || supabase)
+    // Verify the customer exists and belongs to company
+    const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('id, credit_limit, current_credit, sales_executive_id')
-      .eq('id', customer_id);
-    
-    // Filter by sales_executive_id only if user is sales (not admin)
-    if (isSales && !isAdmin) {
-      customerQuery = customerQuery.eq('sales_executive_id', userId);
-    }
-    
-    const { data: customer, error: customerError } = await customerQuery.single();
+      .eq('id', customer_id)
+      .eq('company_id', req.companyId!)
+      .single();
 
     if (customerError || !customer) {
       throw customerError || new Error('Customer not found');
@@ -792,8 +911,10 @@ async function addCreditPeriod(req: Request, res: Response) {
 // Get customer's credit status
 async function getCustomerCreditStatus(req: Request, res: Response) {
   try {
+    if (!req.companyId) {
+      return res.status(400).json({ error: 'Company context is required' });
+    }
     const { id } = req.params;
-    const userId = req.user?.id;
     const userRoles = req.user?.roles || [];
     const isAdmin = userRoles.includes('admin');
     const isSales = userRoles.includes('sales');
@@ -802,7 +923,7 @@ async function getCustomerCreditStatus(req: Request, res: Response) {
       return res.status(403).json({ error: 'Admin or Sales access required' });
     }
 
-    let query = (supabaseAdmin || supabase)
+    const { data: creditStatus, error } = await (supabaseAdmin || supabase)
       .from('customers')
       .select(`
         id,
@@ -821,14 +942,9 @@ async function getCustomerCreditStatus(req: Request, res: Response) {
           created_at
         )
       `)
-      .eq('id', id);
-    
-    // Filter by sales_executive_id only if user is sales (not admin)
-    if (isSales && !isAdmin) {
-      query = query.eq('sales_executive_id', userId);
-    }
-    
-    const { data: creditStatus, error } = await query.single();
+      .eq('id', id)
+      .eq('company_id', req.companyId!)
+      .single();
 
     if (error) throw error;
 
@@ -841,16 +957,17 @@ async function getCustomerCreditStatus(req: Request, res: Response) {
 // Add address for a customer
 async function addCustomerAddress(req: Request, res: Response) {
   try {
+    if (!req.companyId) {
+      return res.status(400).json({ error: 'Company context is required' });
+    }
     const { customer_id } = req.params;
     const { address_type, address_line1, address_line2, city, state, postal_code, country } = req.body;
-    const sales_executive_id = req.user?.id;
-
-    // Verify the customer belongs to this sales executive
+    // Verify the customer exists and belongs to company
     const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
       .from('customers')
       .select('id')
       .eq('id', customer_id)
-      .eq('sales_executive_id', sales_executive_id)
+      .eq('company_id', req.companyId!)
       .single();
 
     if (customerError) throw customerError;
@@ -971,7 +1088,7 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
       console.log('User created successfully with ID:', userId);
     }
 
-    const adminClient = supabaseAdmin || supabase;
+    const adminClient = supabaseAdmin;
 
     // Create or update profile (scoped to company)
     const { data: existingProfile, error: profileCheckError } = await adminClient
@@ -1011,7 +1128,7 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
       }
     }
 
-    const membershipClient = supabaseAdmin || supabase;
+    const membershipClient = supabaseAdmin;
     const { error: membershipError } = await membershipClient
       .from('company_memberships')
       .upsert({
@@ -1090,6 +1207,72 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
       }
 
       customer = newCustomer;
+    }
+
+    // Ensure customer has a contact_party (business partner)
+    try {
+      if (req.companyId && customer) {
+        // Try to find an existing party first to reduce duplicates
+        const { data: existingParty, error: partyLookupError } = await adminClient
+          .from('contact_parties')
+          .select('*')
+          .eq('company_id', req.companyId)
+          .eq('name', name)
+          .maybeSingle();
+
+        if (partyLookupError) {
+          console.error('Error looking up existing contact_party for customer:', partyLookupError);
+        }
+
+        let partyId = existingParty?.id;
+
+        if (!partyId) {
+          const { data: newParty, error: partyError } = await adminClient
+            .from('contact_parties')
+            .insert({
+              company_id: req.companyId,
+              name,
+              email,
+              phone,
+              is_customer: true
+            })
+            .select('*')
+            .single();
+
+          if (partyError) {
+            console.error('Error creating contact_party for customer:', partyError);
+          } else {
+            partyId = newParty.id;
+          }
+        } else if (!existingParty.is_customer) {
+          // Mark existing party as customer if not already
+          const { error: flagError } = await adminClient
+            .from('contact_parties')
+            .update({ is_customer: true })
+            .eq('id', partyId)
+            .eq('company_id', req.companyId);
+
+          if (flagError) {
+            console.error('Error updating contact_party is_customer flag:', flagError);
+          }
+        }
+
+        if (partyId) {
+          const { error: linkError } = await adminClient
+            .from('customers')
+            .update({ party_id: partyId })
+            .eq('id', customer.id)
+            .eq('company_id', req.companyId);
+
+          if (linkError) {
+            console.error('Error linking customer to contact_party:', linkError);
+          } else {
+            customer.party_id = partyId;
+          }
+        }
+      }
+    } catch (partyError) {
+      console.error('Non-fatal error ensuring customer contact_party:', partyError);
     }
 
     console.log('Customer with user created successfully:', customer);
@@ -1207,7 +1390,6 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
       throw new AppError('Company context is required', 400);
     }
     
-    const userId = req.user?.id;
     const userRoles = req.user?.roles || [];
     const isAdmin = userRoles.includes('admin');
     const isSales = userRoles.includes('sales');
@@ -1217,7 +1399,7 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
     }
 
     // Get all customers with their credit information (filtered by company_id)
-    let query = (supabaseAdmin || supabase)
+    const { data: customers, error } = await (supabaseAdmin || supabase)
       .from('customers')
       .select(`
         id,
@@ -1228,16 +1410,8 @@ export const getCustomersWithCredit = async (req: Request, res: Response) => {
         current_credit,
         credit_period_days
       `)
-      .eq('company_id', req.companyId);
-    
-    // Filter by sales_executive_id only if user is sales (not admin)
-    if (isSales && !isAdmin) {
-      query = query.eq('sales_executive_id', userId);
-    }
-    
-    query = query.order('name');
-    
-    const { data: customers, error } = await query;
+      .eq('company_id', req.companyId)
+      .order('name');
 
     if (error) {
       throw new AppError(`Error fetching customers: ${error.message}`, 500);

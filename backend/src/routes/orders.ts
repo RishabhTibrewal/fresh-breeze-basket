@@ -11,7 +11,7 @@ import {
   getSalesDashboardStats,
   getSalesAnalytics
 } from '../controllers';
-import { getCurrentSalesTarget } from '../controllers/admin';
+import { getCurrentSalesTarget, getSalesExecutives } from '../controllers/admin';
 import { protect, requireRole } from '../middleware/auth';
 
 const router = express.Router();
@@ -24,6 +24,7 @@ router.get('/sales', protect, getSalesOrders);
 router.get('/sales/dashboard-stats', protect, getSalesDashboardStats);
 router.get('/sales/analytics', protect, getSalesAnalytics);
 router.get('/sales/current-target', protect, getCurrentSalesTarget);
+router.get('/sales-executives', protect, requireRole(['admin', 'sales']), getSalesExecutives);
 
 // Return orders route - must be before /:id route to avoid route conflicts
 router.post('/returns', protect, createReturnOrder);

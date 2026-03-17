@@ -37,10 +37,12 @@ import {
   ArrowLeft,
   Clock,
   ShoppingCart,
-  Receipt
+  Receipt,
+  Link as LinkIcon
 } from 'lucide-react';
 import { customerService } from '@/api/customer';
 import { ErrorMessage } from '@/components/ui/error-message';
+import { partiesService } from '@/api/parties';
 
 export default function AdminCustomerDetails() {
   const { id: customerOrUserId } = useParams<{ id: string }>();
@@ -81,6 +83,12 @@ export default function AdminCustomerDetails() {
       }
     },
     enabled: !!customerOrUserId
+  });
+
+  const { data: partyLedger } = useQuery({
+    queryKey: ['customer-party-ledger', customer?.party_id],
+    queryFn: () => partiesService.getPartyLedger(customer!.party_id!),
+    enabled: !!customer?.party_id,
   });
 
   if (isLoading) {
@@ -151,15 +159,19 @@ export default function AdminCustomerDetails() {
       </div>
       
       <Tabs defaultValue="details" className="w-full min-w-0">
-        <TabsList className="mb-3 sm:mb-4 w-full sm:w-auto grid grid-cols-2 sm:inline-flex">
+        <TabsList className="mb-3 sm:mb-4 w-full sm:w-auto grid grid-cols-3 sm:inline-flex">
           <TabsTrigger value="details" className="text-xs sm:text-sm">Customer Details</TabsTrigger>
           <TabsTrigger value="ledger" className="text-xs sm:text-sm">Complete Ledger</TabsTrigger>
+          {customer.party_id && (
+            <TabsTrigger value="party-ledger" className="text-xs sm:text-sm">Party Ledger</TabsTrigger>
+          )}
         </TabsList>
         
         {/* Customer Details Tab */}
         <TabsContent value="details" className="w-full min-w-0">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-6">
-            {/* Profile Table Data */}
+            {/* Profile Table Data — only shown for retail customers who have a linked profile */}
+            {customer.profile && (
             <Card className="w-full min-w-0 overflow-hidden">
               <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
                 <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
@@ -170,8 +182,6 @@ export default function AdminCustomerDetails() {
               </CardHeader>
               <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
                 <div className="space-y-3 sm:space-y-4">
-                  {customer.profile ? (
-                    <>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                         <div className="min-w-0">
                           <p className="text-xs sm:text-sm text-muted-foreground">First Name</p>
@@ -228,15 +238,11 @@ export default function AdminCustomerDetails() {
                         <p className="text-xs sm:text-sm text-muted-foreground">User ID</p>
                         <p className="font-medium font-mono text-xs break-all">{customer.profile.id}</p>
                       </div>
-                    </>
-                  ) : (
-                    <div className="text-center py-4 text-muted-foreground">
-                      <p>No profile data found</p>
-                    </div>
-                  )}
                 </div>
               </CardContent>
             </Card>
+            )}
+
             
             {/* Customer Table Data */}
             <Card className="w-full min-w-0 overflow-hidden">
@@ -829,6 +835,121 @@ export default function AdminCustomerDetails() {
             </Card>
           </div>
         </TabsContent>
+
+        {/* Party Ledger Tab */}
+        {customer.party_id && (
+          <TabsContent value="party-ledger" className="w-full min-w-0">
+            <Card className="w-full min-w-0 overflow-hidden">
+              <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
+                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                  <LinkIcon className="h-4 w-4 sm:h-5 sm:w-5" />
+                  Trading Partner Ledger
+                </CardTitle>
+                <CardDescription className="text-xs sm:text-sm">
+                  Combined receivables and payables for this business partner
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+                {partyLedger ? (
+                  <div className="space-y-4">
+                    {/* Summary badges */}
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <span className="font-medium text-sm">{partyLedger.party.name}</span>
+                      {partyLedger.party.is_customer && <Badge variant="outline">Customer</Badge>}
+                      {partyLedger.party.is_supplier && <Badge variant="outline">Supplier</Badge>}
+                    </div>
+
+                    {/* Totals */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="rounded-lg border p-3">
+                        <p className="text-xs text-muted-foreground">Total Receivable</p>
+                        <p className="text-base font-semibold text-orange-600">₹ {partyLedger.totals.totalReceivable.toFixed(2)}</p>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <p className="text-xs text-muted-foreground">Total Payable</p>
+                        <p className="text-base font-semibold text-blue-600">₹ {partyLedger.totals.totalPayable.toFixed(2)}</p>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <p className="text-xs text-muted-foreground">Net Position</p>
+                        <p className={`text-base font-semibold ${
+                          partyLedger.totals.netPosition > 0 ? 'text-green-600' :
+                          partyLedger.totals.netPosition < 0 ? 'text-red-600' : 'text-muted-foreground'
+                        }`}>
+                          ₹ {partyLedger.totals.netPosition.toFixed(2)}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {partyLedger.totals.netPosition > 0 ? 'They owe us' :
+                           partyLedger.totals.netPosition < 0 ? 'We owe them' : 'Balanced'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Ledger entries table */}
+                    <div className="w-full overflow-x-auto">
+                      <Table className="min-w-[550px]">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="px-2">Date</TableHead>
+                            <TableHead className="px-2">Type</TableHead>
+                            <TableHead className="px-2">Side</TableHead>
+                            <TableHead className="px-2">Amount</TableHead>
+                            <TableHead className="px-2">Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {partyLedger.entries.map((entry) => (
+                            <TableRow key={entry.doc_id}>
+                              <TableCell className="px-2 py-2 text-xs sm:text-sm">
+                                {entry.doc_date ? format(new Date(entry.doc_date), 'MMM d, yyyy') : 'N/A'}
+                              </TableCell>
+                              <TableCell className="px-2 py-2">
+                                <Badge variant="outline" className="text-xs capitalize">
+                                  {entry.doc_type.replace('_', ' ')}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="px-2 py-2">
+                                <Badge className={`text-xs ${
+                                  entry.ledger_side === 'receivable'
+                                    ? 'bg-orange-100 text-orange-800'
+                                    : 'bg-blue-100 text-blue-800'
+                                }`}>
+                                  {entry.ledger_side}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="px-2 py-2">
+                                <span className={`font-medium text-xs sm:text-sm ${
+                                  entry.ledger_side === 'receivable' ? 'text-orange-600' : 'text-blue-600'
+                                }`}>
+                                  ₹ {Number(entry.amount).toFixed(2)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="px-2 py-2">
+                                <Badge variant="outline" className="text-xs capitalize">{entry.status}</Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate(`/admin/party/${partyLedger.party.id}/ledger`)}
+                    >
+                      View Full Party Ledger Page
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <LinkIcon className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                    <p className="text-sm">No trading partner data available.</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

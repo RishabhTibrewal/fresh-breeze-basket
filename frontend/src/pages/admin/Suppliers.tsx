@@ -18,9 +18,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Eye, Edit, Trash2 } from "lucide-react";
+import { Plus, Search, Eye, Edit, Trash2, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { suppliersService } from '@/api/suppliers';
+import apiClient from '@/lib/apiClient';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -74,6 +75,27 @@ export default function Suppliers() {
       deleteMutation.mutate(selectedSupplier);
     }
   };
+
+  const createLinkedCustomerMutation = useMutation({
+    mutationFn: async (supplierId: string) => {
+      const response = await apiClient.post(`/suppliers/${supplierId}/create-linked-customer`);
+      return response.data;
+    },
+    onSuccess: (response: any) => {
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      if (response?.data?.id) {
+        toast.success(response?.alreadyExists ? 'Customer counterpart already exists' : 'Customer counterpart created');
+      } else {
+        toast.success('Customer counterpart is ready');
+      }
+      navigate('/sales/customers');
+    },
+    onError: (error: any) => {
+      console.error('Error creating linked customer:', error);
+      toast.error(error?.response?.data?.error || error?.message || 'Failed to create customer counterpart');
+    },
+  });
 
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
@@ -138,12 +160,13 @@ export default function Suppliers() {
                     <TableHead>Contact</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Phone</TableHead>
+                    <TableHead>Trading Partner</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {suppliers.map((supplier) => (
+                  {suppliers.map((supplier: any) => (
                     <TableRow key={supplier.id}>
                       <TableCell className="font-medium">
                         {supplier.supplier_code || '-'}
@@ -152,6 +175,15 @@ export default function Suppliers() {
                       <TableCell>{supplier.contact_name || '-'}</TableCell>
                       <TableCell>{supplier.email || '-'}</TableCell>
                       <TableCell>{supplier.phone || '-'}</TableCell>
+                      <TableCell>
+                        {supplier.party_id && supplier.party?.is_customer ? (
+                          <span className="text-sm text-muted-foreground truncate" title={supplier.party?.name || ''}>
+                            {supplier.party?.name || 'Linked Customer'}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Badge variant={supplier.is_active ? 'default' : 'secondary'}>
                           {supplier.is_active ? 'Active' : 'Inactive'}
@@ -172,6 +204,15 @@ export default function Suppliers() {
                             onClick={() => navigate(`/procurement/suppliers/${supplier.id}/edit`)}
                           >
                             <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            disabled={!!(supplier.party_id && supplier.party?.is_customer) || createLinkedCustomerMutation.isPending}
+                            onClick={() => createLinkedCustomerMutation.mutate(supplier.id)}
+                            title={supplier.party_id && supplier.party?.is_customer ? "Already has customer role" : "Use as Customer"}
+                          >
+                            <LinkIcon className="h-4 w-4" />
                           </Button>
                           <AlertDialog open={deleteDialogOpen && selectedSupplier === supplier.id} onOpenChange={(open) => {
                             if (!open) {
@@ -213,6 +254,7 @@ export default function Suppliers() {
           )}
         </CardContent>
       </Card>
+
     </div>
   );
 }

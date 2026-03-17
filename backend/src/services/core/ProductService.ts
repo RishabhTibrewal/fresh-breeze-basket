@@ -40,6 +40,7 @@ export class ProductService {
       description?: string | null;
       sale_price?: number | null;
       category_id?: string | null;
+      subcategory_id?: string | null;
       image_url?: string | null; // Deprecated: use variant-level image_url
       slug?: string | null;
       is_featured?: boolean; // Deprecated: use variant-level is_featured
@@ -70,6 +71,8 @@ export class ProductService {
       hsn?: string | null;
       badge?: string | null;
       brand_id?: string | null;
+      is_bundle?: boolean;
+      bundle_components?: Array<{ component_variant_id: string; quantity_included: number; price_adjustment?: number | null }>;
     }>,
     initialWarehouseId?: string | null,
     initialStock: number = 0
@@ -113,6 +116,7 @@ export class ProductService {
         price: productPrice,
         sale_price: productData.sale_price || null,
         category_id: productData.category_id || null,
+        subcategory_id: productData.subcategory_id || null,
         image_url: productData.image_url || null,
         slug,
         is_featured: productData.is_featured || false,
@@ -151,6 +155,7 @@ export class ProductService {
       hsn: productData.hsn_code || null,
       badge: productData.badge || null,
       brand_id: null, // Default variant doesn't have brand_id from product level
+      is_bundle: false, // Default variant is not a bundle by default unless explicitly created via createVariant
     };
     const defaultVariant = await this.ensureDefaultVariant(
       product.id, 
@@ -183,6 +188,8 @@ export class ProductService {
           hsn: variantData.hsn,
           badge: variantData.badge,
           brand_id: variantData.brand_id,
+          is_bundle: variantData.is_bundle,
+          bundle_components: variantData.bundle_components,
         });
         createdVariants.push(variant);
       }
@@ -248,6 +255,7 @@ export class ProductService {
       hsn?: string | null;
       badge?: string | null;
       brand_id?: string | null;
+      is_bundle?: boolean;
     }
   ): Promise<any> {
     // Check if default variant already exists
@@ -351,6 +359,7 @@ export class ProductService {
         hsn: variantFields?.hsn || null,
         badge: variantFields?.badge || null,
         brand_id: variantFields?.brand_id || null,
+        is_bundle: variantFields?.is_bundle || false,
         price_id: standardPrice.id, // Set price_id immediately
         company_id: this.companyId,
       })
@@ -500,11 +509,15 @@ export class ProductService {
       is_active?: boolean;
       unit?: number | null;
       unit_type?: string;
+      packing_type?: string | null;
+      type?: string | null;
       best_before?: string | null;
       tax_id?: string | null;
       hsn?: string | null;
       badge?: string | null;
       brand_id?: string | null;
+      is_bundle?: boolean;
+      bundle_components?: Array<{ component_variant_id: string; quantity_included: number; price_adjustment?: number | null }>;
     }
   ): Promise<any> {
     if (!variantData.name) {
@@ -563,11 +576,14 @@ export class ProductService {
         is_active: variantActiveStatus,
         unit: variantData.unit || null,
         unit_type: variantData.unit_type || 'piece',
+        packing_type: variantData.packing_type || null,
+        type: variantData.type || null,
         best_before: variantData.best_before || null,
         tax_id: variantData.tax_id || null,
         hsn: variantData.hsn || null,
         badge: variantData.badge || null,
         brand_id: variantData.brand_id || null,
+        is_bundle: variantData.is_bundle || false,
         price_id: standardPrice.id, // Set price_id immediately
         company_id: this.companyId,
       })
@@ -700,11 +716,15 @@ export class ProductService {
       is_active?: boolean;
       unit?: number | null;
       unit_type?: string;
+      packing_type?: string | null;
+      type?: string | null;
       best_before?: string | null;
       tax_id?: string | null;
       hsn?: string | null;
       badge?: string | null;
       brand_id?: string | null;
+      is_bundle?: boolean;
+      bundle_components?: Array<{ component_variant_id: string; quantity_included: number; price_adjustment?: number | null }>;
     }
   ): Promise<any> {
     // Get existing variant with product info
@@ -762,6 +782,12 @@ export class ProductService {
     if (variantData.unit_type !== undefined) {
       updateData.unit_type = variantData.unit_type;
     }
+    if (variantData.packing_type !== undefined) {
+      updateData.packing_type = variantData.packing_type;
+    }
+    if (variantData.type !== undefined) {
+      updateData.type = variantData.type;
+    }
     if (variantData.best_before !== undefined) {
       updateData.best_before = variantData.best_before;
     }
@@ -779,8 +805,12 @@ export class ProductService {
       // Convert empty string to null for UUID fields
       updateData.brand_id = variantData.brand_id === '' || variantData.brand_id === null ? null : variantData.brand_id;
     }
+    if (variantData.is_bundle !== undefined) {
+      updateData.is_bundle = variantData.is_bundle;
+    }
 
     // Update variant
+
     const { data: updatedVariant, error: updateError } = await supabaseAdmin
       .from('product_variants')
       .update(updateData)
@@ -853,6 +883,19 @@ export class ProductService {
           await supabaseAdmin.from('product_prices').delete().eq('id', standardPrice.id);
           throw new ApiError(500, `Failed to link price to variant: ${linkError.message}`);
         }
+      }
+    }
+
+    // Manage bundle components if provided (even if is_bundle status didn't change, components might have)
+    if (variantData.bundle_components !== undefined) {
+      // If it's a bundle now, or it was already a bundle and components were provided, update them.
+      // If it's no longer a bundle, we clear the components.
+      const isBundleNow = variantData.is_bundle !== undefined ? variantData.is_bundle : existingVariant.is_bundle;
+      if (isBundleNow) {
+        await this.manageBundleComponents(variantId, variantData.bundle_components);
+      } else {
+        // Clear components if it's no longer a bundle
+        await supabaseAdmin.from('bundle_components').delete().eq('bundle_variant_id', variantId).eq('company_id', this.companyId);
       }
     }
 
@@ -940,6 +983,59 @@ export class ProductService {
     if (deleteError) {
       console.error('Error deleting variant:', deleteError);
       throw new ApiError(500, `Failed to delete variant: ${deleteError.message}`);
+    }
+  }
+
+  /**
+   * Manage bundle components for a bundle variant
+   * 
+   * @param bundleVariantId The parent bundle variant
+   * @param components Array of components and their quantities
+   */
+  private async manageBundleComponents(
+    bundleVariantId: string,
+    components: Array<{ component_variant_id: string; quantity_included: number; price_adjustment?: number | null }>
+  ): Promise<void> {
+    // 1. Delete existing components
+    const { error: deleteError } = await supabaseAdmin
+      .from('bundle_components')
+      .delete()
+      .eq('bundle_variant_id', bundleVariantId)
+      .eq('company_id', this.companyId);
+
+    if (deleteError) {
+      console.error('Error deleting existing bundle components:', deleteError);
+      throw new ApiError(500, `Failed to update bundle components: ${deleteError.message}`);
+    }
+
+    if (!components || components.length === 0) return;
+
+    // 2. Validate components
+    for (const comp of components) {
+      if (comp.component_variant_id === bundleVariantId) {
+        throw new ApiError(400, "A bundle cannot contain itself as a component");
+      }
+      if (comp.quantity_included <= 0) {
+        throw new ApiError(400, "Component quantity must be greater than 0");
+      }
+    }
+
+    // 3. Insert new components
+    const insertData = components.map(comp => ({
+      company_id: this.companyId,
+      bundle_variant_id: bundleVariantId,
+      component_variant_id: comp.component_variant_id,
+      quantity_included: comp.quantity_included,
+      price_adjustment: comp.price_adjustment || 0
+    }));
+
+    const { error: insertError } = await supabaseAdmin
+      .from('bundle_components')
+      .insert(insertData);
+
+    if (insertError) {
+      console.error('Error inserting bundle components:', insertError);
+      throw new ApiError(500, `Failed to save bundle components: ${insertError.message}`);
     }
   }
 }
