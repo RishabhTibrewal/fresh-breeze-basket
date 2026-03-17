@@ -567,7 +567,7 @@ export const orderController = {
               preserveOrderPaymentStatus: true, // Preserve the order's payment_status (partial/paid) set during creation
               paymentGatewayResponse: {
                 source: 'order_creation',
-                created_by: sales_executive_id,
+                created_by: orderSalesExecutiveId,
                 created_at: new Date().toISOString(),
                 payment_type: payment_status === 'full_payment' ? 'full_payment' : 'partial_payment',
               },
