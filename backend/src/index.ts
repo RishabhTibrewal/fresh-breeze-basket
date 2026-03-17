@@ -81,6 +81,9 @@ import taxesRouter from './routes/taxes';
 import kpiRouter from './routes/kpi';
 import modifiersRouter from './routes/modifiers';
 import collectionsRouter from './routes/collections';
+import reportsRouter from './routes/reports';
+import { initMVRefreshScheduler } from './utils/refreshMaterialisedViews';
+import { exportRateLimiter } from './middleware/exportRateLimiter';
 
 // Initialize Express app
 export const app = express();
@@ -238,6 +241,8 @@ app.use('/api/taxes', taxesRouter);
 app.use('/api/kpis', kpiRouter);
 app.use('/api/modifiers', modifiersRouter);
 app.use('/api/collections', collectionsRouter);
+// Reports — apply export rate limiter before the router
+app.use('/api/reports', exportRateLimiter, reportsRouter);
 
 // 404 handler for unmatched routes (ensures CORS headers are present)
 app.use((req: express.Request, res: express.Response) => {
@@ -278,6 +283,11 @@ if (process.env.NODE_ENV !== 'test') {
     // Initialize the invoice scheduler
     initInvoiceScheduler().catch(err => {
       console.error('Failed to initialize invoice scheduler:', err);
+    });
+
+    // Initialize the nightly materialized-view refresh scheduler
+    initMVRefreshScheduler().catch(err => {
+      console.error('Failed to initialize MV refresh scheduler:', err);
     });
   });
   

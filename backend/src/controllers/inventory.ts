@@ -942,7 +942,7 @@ export const createRepackOrder = async (req: Request, res: Response) => {
             console.error('Error creating repack order:', orderError);
             return res.status(500).json({ success: false, error: orderError.message });
         }
-        const itemRows = items.map((it: { input_product_id: string; input_variant_id: string; input_quantity: number; output_product_id: string; output_variant_id: string; output_quantity: number }) => ({
+        const itemRows = items.map((it: { input_product_id: string; input_variant_id: string; input_quantity: number; output_product_id: string; output_variant_id: string; output_quantity: number; wastage_quantity?: number; additional_cost_per_unit?: number }) => ({
             repack_order_id: order.id,
             input_product_id: it.input_product_id,
             input_variant_id: it.input_variant_id,
@@ -950,6 +950,8 @@ export const createRepackOrder = async (req: Request, res: Response) => {
             output_product_id: it.output_product_id,
             output_variant_id: it.output_variant_id,
             output_quantity: it.output_quantity,
+            wastage_quantity: it.wastage_quantity ?? 0,
+            additional_cost_per_unit: it.additional_cost_per_unit ?? 0,
         }));
         const { error: itemsError } = await client
             .from('repack_order_items')
@@ -998,7 +1000,7 @@ export const updateRepackOrder = async (req: Request, res: Response) => {
         if (items && Array.isArray(items)) {
             await client.from('repack_order_items').delete().eq('repack_order_id', id);
             if (items.length > 0) {
-                const itemRows = items.map((it: { input_product_id: string; input_variant_id: string; input_quantity: number; output_product_id: string; output_variant_id: string; output_quantity: number }) => ({
+                const itemRows = items.map((it: { input_product_id: string; input_variant_id: string; input_quantity: number; output_product_id: string; output_variant_id: string; output_quantity: number; wastage_quantity?: number; additional_cost_per_unit?: number }) => ({
                     repack_order_id: id,
                     input_product_id: it.input_product_id,
                     input_variant_id: it.input_variant_id,
@@ -1006,6 +1008,8 @@ export const updateRepackOrder = async (req: Request, res: Response) => {
                     output_product_id: it.output_product_id,
                     output_variant_id: it.output_variant_id,
                     output_quantity: it.output_quantity,
+                    wastage_quantity: it.wastage_quantity ?? 0,
+                    additional_cost_per_unit: it.additional_cost_per_unit ?? 0,
                 }));
                 await client.from('repack_order_items').insert(itemRows);
             }

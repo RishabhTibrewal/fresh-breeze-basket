@@ -47,12 +47,47 @@ export const sidebarRoutes: Record<string, string> = {
   'grn-pending': '/admin/procurement/reports/grn-pending',
   'supplier-outstanding': '/admin/procurement/reports/supplier-outstanding',
 
-  // Reports
-  'profit-loss': '/admin/reports/profit-loss',
-  'inventory-valuation': '/admin/reports/inventory-valuation',
-  'tax-gst-reports': '/admin/reports/tax-gst',
-  'aging-reports': '/admin/reports/aging',
-  'custom-reports': '/admin/reports/custom',
+  // Reports — Sales
+  'reports-sales':              '/reports/sales',
+  'report-sales-dashboard':     '/reports/sales',
+  'report-order-summary':       '/reports/sales/order-summary',
+  'report-salesperson':         '/reports/sales/salesperson-performance',
+  'report-customer-wise':       '/reports/sales/customer-wise',
+  'report-product-wise':        '/reports/sales/product-wise',
+  'report-target-vs-achievement': '/reports/sales/target-vs-achievement',
+
+  // Reports — Inventory
+  'reports-inventory':          '/reports/inventory',
+  'report-inventory-dashboard': '/reports/inventory',
+  'report-stock-ledger':        '/reports/inventory/stock-ledger',
+  'report-current-stock':       '/reports/inventory/current-stock',
+  'report-repack-summary':      '/reports/inventory/repack-summary',
+  'report-wastage':             '/reports/inventory/wastage',
+
+  // Reports — Procurement
+  'reports-procurement':        '/reports/procurement',
+  'report-procurement-dashboard': '/reports/procurement',
+  'report-invoice-register':    '/reports/procurement/invoice-register',
+  'report-grn':                 '/reports/procurement/grn-report',
+  'report-vendor-wise':         '/reports/procurement/vendor-wise',
+  'report-supplier-payments':   '/reports/procurement/payment-register',
+
+  // Reports — Accounting
+  'reports-accounting':         '/reports/accounting',
+  'report-accounting-dashboard': '/reports/accounting',
+  'report-revenue-expense':     '/reports/accounting/revenue-expense',
+  'report-payment-collections': '/reports/accounting/payment-collections',
+  'report-tax-collection':      '/reports/accounting/tax-collection',
+  'report-cash-flow':           '/reports/accounting/cash-flow',
+
+  // Reports — Master & Audit
+  'reports-master':             '/reports/master',
+  'report-master-dashboard':    '/reports/master',
+  'report-product-master':      '/reports/master/products',
+  'report-customer-master':     '/reports/master/customers',
+  'report-supplier-master':     '/reports/master/suppliers',
+  'report-user-master':         '/reports/master/users',
+  'report-activity-log':        '/reports/master/activity',
 
   // Settings
   'company-profile': '/admin/settings/company',

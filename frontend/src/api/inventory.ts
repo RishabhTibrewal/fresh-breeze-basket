@@ -88,6 +88,8 @@ export interface PackagingRecipe {
   output_product_id: string;
   output_variant_id: string;
   conversion_ratio: number;
+  wastage_per_input: number;
+  additional_cost_per_unit: number;
   created_at: string;
   input_products?: { id: string; name: string };
   input_product_variants?: { id: string; name: string; unit: number | null; unit_type: string };
@@ -112,6 +114,9 @@ export interface RepackOrderItem {
   output_product_id: string;
   output_variant_id: string;
   output_quantity: number;
+  wastage_quantity: number;
+  unit_cost: number;
+  additional_cost_per_unit: number;
   input_products?: { id: string; name: string };
   input_product_variants?: { id: string; name: string; unit: number | null; unit_type: string };
   output_products?: { id: string; name: string };
@@ -143,6 +148,8 @@ export interface CreateRepackOrderInput {
     output_product_id: string;
     output_variant_id: string;
     output_quantity: number;
+    wastage_quantity?: number;
+    additional_cost_per_unit?: number;
   }>;
 }
 
@@ -235,8 +242,33 @@ export const inventoryService = {
     const { data: response } = await apiClient.put<ApiResponse<RepackOrderWithItems>>(`/inventory/repack-orders/${id}`, order);
     return response.data;
   },
-  async processRepackOrder(id: string): Promise<{ success: boolean; data: { success: boolean; repack_order_id: string; status: string } }> {
-    const { data } = await apiClient.post<ApiResponse<{ success: boolean; repack_order_id: string; status: string }>>(`/inventory/repack-orders/${id}/process`);
+  async processRepackOrder(id: string): Promise<{
+    success: boolean;
+    data: {
+      success: boolean;
+      repack_order_id: string;
+      status: string;
+      items?: Array<{
+        item_id: string;
+        input_quantity: number;
+        output_quantity: number;
+        wastage_quantity: number;
+        final_unit_cost: number;
+      }>;
+    };
+  }> {
+    const { data } = await apiClient.post<ApiResponse<{
+      success: boolean;
+      repack_order_id: string;
+      status: string;
+      items?: Array<{
+        item_id: string;
+        input_quantity: number;
+        output_quantity: number;
+        wastage_quantity: number;
+        final_unit_cost: number;
+      }>;
+    }>>(`/inventory/repack-orders/${id}/process`);
     return data;
   },
   async deleteRepackOrder(id: string): Promise<void> {

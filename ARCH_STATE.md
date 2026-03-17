@@ -1,6 +1,6 @@
 # Architecture State Document
 
-**Last Updated:** 2026-03-17  
+**Last Updated:** 2026-03-18 (01:10 IST)
 **Purpose:** Technical reference for current system architecture, routing patterns, and critical implementation details to prevent architectural mistakes. This document serves as the long-term memory and architectural blueprint for all future AI interactions.
 
 ---
@@ -57,10 +57,11 @@
    - Number series management
 
 7. **Reports & Analytics**
-   - Sales reports
-   - Inventory valuation
-   - Financial reports
-   - Custom report builder
+   - 5 major groups: Sales, Inventory, Procurement, Accounting, Master
+   - Dedicated materialized views for fast aggregated lookups
+   - Export logic (CSV streaming, Excel)
+   - Multi-currency support and real-time exchange rates
+   - IP-based rate limiting on report generation
 
 8. **E-commerce** (Module defined, implementation status varies)
    - Online store product catalog
@@ -389,8 +390,11 @@ fresh-breeze-basket/
 - ✅ Stock Movements (including REPACK_OUT, REPACK_IN)
 - ✅ Stock Adjustments
 - ✅ Stock Transfers
-- ✅ Packaging Recipes (bulk-to-retail conversion definitions)
-- ✅ Repack Orders (package breakdown: bulk → retail)
+- ✅ Packaging Recipes (bulk-to-retail conversion definitions, with `wastage_per_input` & `additional_cost_per_unit`)
+- ✅ Repack Orders (package breakdown: bulk → retail) — **upgraded 2026-03-17:**
+  - `repack_order_items` tracks `wastage_quantity`, `unit_cost`, `additional_cost_per_unit`
+  - `process_repack_order` RPC computes unit cost + does weighted-average `product_prices` update
+  - Frontend: tabbed New Order (live price preview) + Order History (wastage/cost columns, date filters)
 
 **Sales Module:**
 - ✅ Sales Orders
@@ -419,6 +423,13 @@ fresh-breeze-basket/
 - ✅ Company Settings
 - ✅ User & Role Management
 
+**Reports Module:**
+- ✅ 5 primary groups (Sales, Inventory, Procurement, Accounting, Master)
+- ✅ Fast aggregation via PostgreSQL Materialized Views (e.g., `mv_sales_daily`)
+- ✅ Endpoints with pagination, multi-param filtering, and streaming CSV export
+- ✅ UI: Dynamic nested 'Reports' sidebar integrated inside *each* core module
+- ✅ Rate-limiting built-in to prevent DoS on heavy DB queries
+
 ### In Development / Partial Implementation
 
 **E-commerce Module:**
@@ -427,19 +438,64 @@ fresh-breeze-basket/
 - ⚠️ Checkout flow implemented
 - ⚠️ Online store catalog (partial)
 
-**Reports Module:**
-- ⚠️ Module defined in config
-- ⚠️ KPI endpoints implemented
-- ⚠️ Report pages (partial)
 
 **Accounting Module:**
 - ⚠️ Module defined in config
 - ⚠️ Basic structure in place
 - ⚠️ Full implementation pending
 
-### Recent Changes (2026-03-17)
+### Recent Changes (2026-03-18) — Comprehensive Reports Module
 
-- **Product Groupings (Modifiers, Bundles, Collections):**
+- **Materialized Views for Aggregation**:
+  - Implemented `mv_sales_daily`, `mv_inventory_valuation`, `mv_procurement_monthly` to precalculate heavy metrics.
+  - Added PostgreSQL RPC `refresh_materialized_views` to concurrently refresh views (called nightly or post-batch).
+  - Migration: `backend/src/db/migrations/20260317_003_mv_sales_daily.sql`
+
+- **Multi-Currency & Exchange Rates**:
+  - Added `exchange_rates` table and `get_exchange_rate(from_currency, to_currency, target_date)` function.
+  - Frontend report filters incorporate currency selectors. Financial aggregations apply currency conversions dynamically.
+  - Migration: `backend/src/db/migrations/20260317_002_exchange_rates.sql`
+
+- **API Rate Limiting**:
+  - Implemented `express-rate-limit` in `backend/src/middleware/rateLimiter.ts`.
+  - Rate limits applied to computationally expensive `/api/reports/*` endpoints by IP.
+  - Default: 50 requests / 15 mins for standard users.
+
+- **Frontend Navigation & Module Sidebars**:
+  - Modified `ContextualSidebar.tsx` to support collapsible, nested Sub-module group interfaces.
+  - Injected the identical "Reports" Sub-module (`reports.read`) dynamically into the respective sidebars of Ecommerce, Sales, Inventory, Procurement, Accounting, and Admin Settings modules, streamlining user navigation without leaving the context.
+
+- **Memory-efficient Export Pipeline**:
+  - Replaced bulk-loading array exports with `json2csv` stream pipelines connected directly to the Express `res` object.
+  - Reports gracefully handle `.csv` extensions by streaming directly, preventing backend memory exhaustion on large datasets.
+
+### Recent Changes (2026-03-17) — Repacking Module Upgrade
+
+- **Schema: New cost & wastage columns (applied to Supabase Gluf-fresh-v2):**
+  - `repack_order_items` → `wastage_quantity NUMERIC DEFAULT 0`, `unit_cost NUMERIC DEFAULT 0`, `additional_cost_per_unit NUMERIC DEFAULT 0`
+  - `packaging_recipes` → `wastage_per_input NUMERIC DEFAULT 0`, `additional_cost_per_unit NUMERIC DEFAULT 0`
+  - Migration: `backend/src/db/migrations/20260317_add_repack_cost_fields.sql`
+
+- **Upgraded `process_repack_order` RPC (same name, fully backward-compatible):**
+  - Pricing formula: `final_unit_cost = (input_qty × sale_price / output_qty) + additional_cost_per_unit`
+  - Writes computed `unit_cost` back to each `repack_order_items` row after execution
+  - Weighted-average update to `product_prices.sale_price` on execute: `new_price = (existing_stock × old_price + output_qty × unit_cost) / total_stock`
+  - Returns per-item JSONB summary: `{ item_id, input_quantity, output_quantity, wastage_quantity, final_unit_cost }`
+  - Migration: `backend/src/db/migrations/20260317_upgrade_process_repack_order_rpc.sql`
+
+- **Backend controller (`inventory.ts`):** `createRepackOrder` and `updateRepackOrder` now persist `wastage_quantity` and `additional_cost_per_unit` per item row.
+
+- **Frontend API types (`frontend/src/api/inventory.ts`):**
+  - `PackagingRecipe` + `RepackOrderItem` + `CreateRepackOrderInput` updated with new fields
+  - `processRepackOrder()` return type exposes `items[]` array with per-item computed values
+
+- **Frontend page (`RepackOrders.tsx`) — full redesign:**
+  - Tab 1 **"New Order":** input/output pickers (shows live stock), qty + target size + wastage + additional cost inputs, live price preview panel (pure `computeRepackPreview()`) — single **Execute Repack** atomically creates + processes, auto-switches to history on success; auto-fills from matching `packaging_recipes` row
+  - Tab 2 **"Order History":** warehouse / status / date-range filters; columns: Date | Warehouse | Input | Output | Bags In | Bags Out | Wastage | Unit Cost | Status; inline execute/delete for drafts
+  - Post-execution toast includes: output count, final unit cost, wastage (from RPC items summary)
+
+### Recent Changes (2026-03-17) — Product Groupings
+
   - **Modifiers**: Added `modifier_groups`, `modifiers`, and `variant_modifier_groups` tables to handle required/optional variations. Implemented CRUD APIs at `/api/modifiers`.
   - **Bundles / Combos**: Added `is_bundle` boolean to `product_variants`. Created `bundle_components` table linking parent bundles to component variants with quantities and price adjustments. Product API handles recursive fetching of components.
   - **Collections**: Added `collections` and `variant_collections` tables for custom product display tags. Implemented CRUD APIs at `/api/collections` and added `?collection_slug=` filtering on products API.

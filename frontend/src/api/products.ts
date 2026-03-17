@@ -369,6 +369,18 @@ export const productsService = {
     if (productData.variants && productData.variants.length > 0) {
       payload.variants = productData.variants;
     }
+    if (productData.collection_ids !== undefined) {
+      payload.collection_ids = productData.collection_ids;
+    }
+    if (productData.modifier_group_ids !== undefined) {
+      payload.modifier_group_ids = productData.modifier_group_ids;
+    }
+    if (productData.is_bundle !== undefined) {
+      payload.is_bundle = productData.is_bundle;
+    }
+    if (productData.bundle_components !== undefined) {
+      payload.bundle_components = productData.bundle_components;
+    }
 
     // Legacy fields (for backward compatibility during migration)
     if (productData.price) payload.price = productData.price;
@@ -429,6 +441,18 @@ export const productsService = {
     }
     if (productData.product_code !== undefined) {
       formattedData.product_code = (productData.product_code === '' || productData.product_code === null) ? null : productData.product_code;
+    }
+    if (productData.collection_ids !== undefined) {
+      formattedData.collection_ids = productData.collection_ids;
+    }
+    if (productData.modifier_group_ids !== undefined) {
+      formattedData.modifier_group_ids = productData.modifier_group_ids;
+    }
+    if (productData.is_bundle !== undefined) {
+      formattedData.is_bundle = productData.is_bundle;
+    }
+    if (productData.bundle_components !== undefined) {
+      formattedData.bundle_components = productData.bundle_components;
     }
 
     // Legacy fields (for backward compatibility during migration)

@@ -5,6 +5,46 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import { ProductService } from '../services/core/ProductService';
 
+/**
+ * Helper to sync variant collections and modifier groups
+ */
+async function syncVariantAssociations(
+  client: any,
+  companyId: string,
+  variantId: string,
+  collectionIds?: string[],
+  modifierGroupIds?: string[]
+) {
+  console.log(`[syncVariantAssociations] variantId: ${variantId}, collections:`, collectionIds, 'modifiers:', modifierGroupIds);
+  if (collectionIds !== undefined) {
+    await client.from('variant_collections').delete().eq('variant_id', variantId);
+    if (collectionIds && collectionIds.length > 0) {
+      const inserts = collectionIds.map((cId: string, idx: number) => ({
+        variant_id: variantId,
+        collection_id: cId,
+        display_order: idx
+      }));
+      console.log(`[syncVariantAssociations] Inserting ${inserts.length} collections`);
+      const { error } = await client.from('variant_collections').insert(inserts);
+      if (error) console.error('Error syncing variant collections:', error);
+    }
+  }
+
+  if (modifierGroupIds !== undefined) {
+    await client.from('variant_modifier_groups').delete().eq('variant_id', variantId);
+    if (modifierGroupIds && modifierGroupIds.length > 0) {
+      const inserts = modifierGroupIds.map((mId: string, idx: number) => ({
+        variant_id: variantId,
+        modifier_group_id: mId,
+        display_order: idx
+      }));
+      console.log(`[syncVariantAssociations] Inserting ${inserts.length} modifiers`);
+      const { error } = await client.from('variant_modifier_groups').insert(inserts);
+      if (error) console.error('Error syncing variant modifier groups:', error);
+    }
+  }
+}
+
 // Get all products with optional filtering
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -676,7 +716,11 @@ export const createProduct = async (req: Request, res: Response) => {
       hsn_code,
       tax,
       brand_id, // Product-level brand
-      variants // Optional: array of variant objects with variant-level fields
+      variants, // Optional: array of variant objects with variant-level fields
+      collection_ids,
+      modifier_group_ids,
+      is_bundle,
+      bundle_components
     } = req.body;
     
     if (!req.companyId) {
@@ -739,6 +783,32 @@ export const createProduct = async (req: Request, res: Response) => {
       initialStock
     );
 
+    const adminClient = supabaseAdmin || supabase;
+
+    // Sync collections and modifier groups for the default variant
+    await syncVariantAssociations(
+      adminClient,
+      req.companyId,
+      result.defaultVariant.id,
+      collection_ids,
+      modifier_group_ids
+    );
+
+    // Apply bundle info to default variant if explicitly provided
+    if (is_bundle !== undefined) {
+      await productService.updateVariant(result.defaultVariant.id, {
+        is_bundle,
+        bundle_components
+      });
+      // Refresh default variant data to return
+      const { data: updatedVariant } = await adminClient
+        .from('product_variants')
+        .select('*')
+        .eq('id', result.defaultVariant.id)
+        .single();
+      if (updatedVariant) result.defaultVariant = updatedVariant;
+    }
+
     res.status(201).json({
       success: true,
       data: {
@@ -759,6 +829,7 @@ export const createProduct = async (req: Request, res: Response) => {
 export const updateProduct = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const { collection_ids, modifier_group_ids, is_bundle, bundle_components } = req.body;
     console.log('Updating product with ID:', id);
     console.log('Request body:', req.body);
     
@@ -936,7 +1007,24 @@ export const updateProduct = async (req: Request, res: Response) => {
     const productService = new ProductService(req.companyId);
     try {
       const productPrice = updatedProduct.price || 0;
-      await productService.ensureDefaultVariant(id, productPrice);
+      const defaultVariant = await productService.ensureDefaultVariant(id, productPrice);
+      
+      // Also update default variant's bundle info if provided
+      if (is_bundle !== undefined) {
+        await productService.updateVariant(defaultVariant.id, {
+          is_bundle,
+          bundle_components: bundle_components
+        });
+      }
+
+      // Sync collections and modifiers
+      await syncVariantAssociations(
+        supabaseAdmin || supabase,
+        req.companyId,
+        defaultVariant.id,
+        collection_ids,
+        modifier_group_ids
+      );
     } catch (variantError) {
       // Log but don't fail the update if variant creation fails
       console.error('Error ensuring default variant after product update:', variantError);
@@ -1345,7 +1433,11 @@ export const createVariant = async (req: Request, res: Response) => {
       hsn,
       badge,
       brand_id,
+      is_bundle,
+      bundle_components,
     } = req.body;
+
+    console.log(`[updateVariant API] Request for variant ${req.params.variantId} with bundle:`, is_bundle, 'components:', bundle_components);
 
     if (!req.companyId) {
       throw new ApiError(400, 'Company context is required');
@@ -1383,6 +1475,8 @@ export const createVariant = async (req: Request, res: Response) => {
       hsn: hsn === '' ? null : hsn,
       badge: badge === '' ? null : badge,
       brand_id: brand_id === '' ? null : brand_id,
+      is_bundle,
+      bundle_components,
     });
 
     res.status(201).json({
@@ -1431,6 +1525,8 @@ export const updateVariant = async (req: Request, res: Response) => {
       hsn,
       badge,
       brand_id,
+      is_bundle,
+      bundle_components,
     } = req.body;
 
     if (!req.companyId) {
@@ -1465,6 +1561,8 @@ export const updateVariant = async (req: Request, res: Response) => {
       hsn: hsn === '' ? null : hsn,
       badge: badge === '' ? null : badge,
       brand_id: brand_id === '' ? null : brand_id,
+      is_bundle,
+      bundle_components,
     });
 
     res.status(200).json({

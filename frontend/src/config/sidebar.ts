@@ -27,7 +27,12 @@ import {
   Hash,
   Shield,
   Wallet,
-  UserCog
+  UserCog,
+  Activity,
+  Truck,
+  BookOpen,
+  LineChart,
+  Layers
 } from 'lucide-react';
 
 export interface SidebarMenuItem {
@@ -374,47 +379,251 @@ const procurementGroup: SidebarGroup = {
   ]
 };
 
-// Reports Group (cross-functional)
+// Reports Group (cross-functional — all 5 modules)
 const reportsGroup: SidebarGroup = {
   id: 'reports',
   label: 'Reports',
   collapsible: true,
   roles: ['admin', 'sales', 'accounts', 'warehouse_manager', 'procurement'],
   items: [
+    // ── Sales Reports ──────────────────────────────────────────────────────
     {
-      id: 'profit-loss',
-      label: 'Profit & Loss',
+      id: 'reports-sales',
+      label: 'Sales Reports',
       icon: TrendingUp,
-      path: '/admin/reports/profit-loss',
-      roles: ['admin', 'accounts']
+      path: '/reports/sales',
+      roles: ['admin', 'sales', 'accounts'],
+      children: [
+        {
+          id: 'report-sales-dashboard',
+          label: 'Dashboard',
+          icon: BarChart3,
+          path: '/reports/sales',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-order-summary',
+          label: 'Order Summary',
+          icon: ShoppingCart,
+          path: '/reports/sales/order-summary',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-salesperson',
+          label: 'Salesperson Performance',
+          icon: Users,
+          path: '/reports/sales/salesperson-performance',
+          roles: ['admin', 'sales']
+        },
+        {
+          id: 'report-customer-wise',
+          label: 'Customer-wise Sales',
+          icon: Users,
+          path: '/reports/sales/customer-wise',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-product-wise',
+          label: 'Product-wise Sales',
+          icon: Package,
+          path: '/reports/sales/product-wise',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-target-vs-achievement',
+          label: 'Target vs Achievement',
+          icon: Target,
+          path: '/reports/sales/target-vs-achievement',
+          roles: ['admin', 'sales']
+        }
+      ]
     },
+    // ── Inventory Reports ──────────────────────────────────────────────────
     {
-      id: 'inventory-valuation',
-      label: 'Inventory Valuation',
+      id: 'reports-inventory',
+      label: 'Inventory Reports',
       icon: Package,
-      path: '/admin/reports/inventory-valuation',
-      roles: ['admin', 'warehouse_manager', 'accounts']
+      path: '/reports/inventory',
+      roles: ['admin', 'warehouse_manager', 'accounts'],
+      children: [
+        {
+          id: 'report-inventory-dashboard',
+          label: 'Dashboard',
+          icon: BarChart3,
+          path: '/reports/inventory',
+          roles: ['admin', 'warehouse_manager', 'accounts']
+        },
+        {
+          id: 'report-stock-ledger',
+          label: 'Stock Ledger',
+          icon: FileText,
+          path: '/reports/inventory/stock-ledger',
+          roles: ['admin', 'warehouse_manager']
+        },
+        {
+          id: 'report-current-stock',
+          label: 'Current Stock',
+          icon: Warehouse,
+          path: '/reports/inventory/current-stock',
+          roles: ['admin', 'warehouse_manager']
+        },
+        {
+          id: 'report-repack-summary',
+          label: 'Repack Summary',
+          icon: ArrowLeftRight,
+          path: '/reports/inventory/repack-summary',
+          roles: ['admin', 'warehouse_manager']
+        },
+        {
+          id: 'report-wastage',
+          label: 'Wastage Report',
+          icon: Layers,
+          path: '/reports/inventory/wastage',
+          roles: ['admin', 'warehouse_manager']
+        }
+      ]
     },
+    // ── Procurement Reports ────────────────────────────────────────────────
     {
-      id: 'tax-gst-reports',
-      label: 'Tax / GST Reports',
-      icon: Percent,
-      path: '/admin/reports/tax-gst',
-      roles: ['admin', 'accounts']
+      id: 'reports-procurement',
+      label: 'Procurement Reports',
+      icon: Truck,
+      path: '/reports/procurement',
+      roles: ['admin', 'procurement', 'accounts'],
+      children: [
+        {
+          id: 'report-procurement-dashboard',
+          label: 'Dashboard',
+          icon: BarChart3,
+          path: '/reports/procurement',
+          roles: ['admin', 'procurement', 'accounts']
+        },
+        {
+          id: 'report-invoice-register',
+          label: 'Invoice Register',
+          icon: ReceiptText,
+          path: '/reports/procurement/invoice-register',
+          roles: ['admin', 'procurement', 'accounts']
+        },
+        {
+          id: 'report-grn',
+          label: 'GRN Report',
+          icon: ClipboardCheck,
+          path: '/reports/procurement/grn-report',
+          roles: ['admin', 'procurement', 'warehouse_manager']
+        },
+        {
+          id: 'report-vendor-wise',
+          label: 'Vendor-wise Purchase',
+          icon: Building2,
+          path: '/reports/procurement/vendor-wise',
+          roles: ['admin', 'procurement', 'accounts']
+        },
+        {
+          id: 'report-supplier-payments',
+          label: 'Supplier Payments',
+          icon: CreditCard,
+          path: '/reports/procurement/payment-register',
+          roles: ['admin', 'procurement', 'accounts']
+        }
+      ]
     },
+    // ── Accounting Reports ─────────────────────────────────────────────────
     {
-      id: 'aging-reports',
-      label: 'Aging Reports',
-      icon: Calendar,
-      path: '/admin/reports/aging',
-      roles: ['admin', 'accounts', 'sales']
+      id: 'reports-accounting',
+      label: 'Accounting Reports',
+      icon: DollarSign,
+      path: '/reports/accounting',
+      roles: ['admin', 'accounts'],
+      children: [
+        {
+          id: 'report-accounting-dashboard',
+          label: 'Dashboard',
+          icon: BarChart3,
+          path: '/reports/accounting',
+          roles: ['admin', 'accounts']
+        },
+        {
+          id: 'report-revenue-expense',
+          label: 'Revenue vs Expense',
+          icon: LineChart,
+          path: '/reports/accounting/revenue-expense',
+          roles: ['admin', 'accounts']
+        },
+        {
+          id: 'report-payment-collections',
+          label: 'Payment Collections',
+          icon: CreditCard,
+          path: '/reports/accounting/payment-collections',
+          roles: ['admin', 'accounts']
+        },
+        {
+          id: 'report-tax-collection',
+          label: 'Tax Collection',
+          icon: Percent,
+          path: '/reports/accounting/tax-collection',
+          roles: ['admin', 'accounts']
+        },
+        {
+          id: 'report-cash-flow',
+          label: 'Cash Flow Summary',
+          icon: TrendingUp,
+          path: '/reports/accounting/cash-flow',
+          roles: ['admin', 'accounts']
+        }
+      ]
     },
+    // ── Master & Audit Reports ─────────────────────────────────────────────
     {
-      id: 'custom-reports',
-      label: 'Custom Reports',
-      icon: FileSearch,
-      path: '/admin/reports/custom',
-      roles: ['admin', 'accounts']
+      id: 'reports-master',
+      label: 'Master & Audit',
+      icon: BookOpen,
+      path: '/reports/master',
+      roles: ['admin'],
+      children: [
+        {
+          id: 'report-master-dashboard',
+          label: 'Dashboard',
+          icon: BarChart3,
+          path: '/reports/master',
+          roles: ['admin']
+        },
+        {
+          id: 'report-product-master',
+          label: 'Product Master',
+          icon: Package,
+          path: '/reports/master/products',
+          roles: ['admin']
+        },
+        {
+          id: 'report-customer-master',
+          label: 'Customer Master',
+          icon: Users,
+          path: '/reports/master/customers',
+          roles: ['admin']
+        },
+        {
+          id: 'report-supplier-master',
+          label: 'Supplier Master',
+          icon: Truck,
+          path: '/reports/master/suppliers',
+          roles: ['admin']
+        },
+        {
+          id: 'report-user-master',
+          label: 'User Master',
+          icon: UserCog,
+          path: '/reports/master/users',
+          roles: ['admin']
+        },
+        {
+          id: 'report-activity-log',
+          label: 'Activity Log',
+          icon: Activity,
+          path: '/reports/master/activity',
+          roles: ['admin']
+        }
+      ]
     }
   ]
 };

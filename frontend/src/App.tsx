@@ -98,6 +98,43 @@ const AdminCreditManagement = lazy(() => import("./pages/admin/CreditManagement"
 const AdminCreatePOSOrder = lazy(() => import("./pages/admin/CreatePOSOrder"));
 const PartyLedger = lazy(() => import("./pages/admin/PartyLedger"));
 
+// Sales Reports pages - lazy loaded
+const SalesReportsDashboard = lazy(() => import("./pages/admin/reports/sales/SalesReportsDashboard"));
+const SalesOrderSummary = lazy(() => import("./pages/admin/reports/sales/SalesOrderSummary"));
+const SalespersonPerformance = lazy(() => import("./pages/admin/reports/sales/SalespersonPerformance"));
+const CustomerWiseSales = lazy(() => import("./pages/admin/reports/sales/CustomerWiseSales"));
+const ProductWiseSales = lazy(() => import("./pages/admin/reports/sales/ProductWiseSales"));
+const TargetVsAchievement = lazy(() => import("./pages/admin/reports/sales/TargetVsAchievement"));
+
+// Inventory Reports pages - lazy loaded
+const InventoryReportsDashboard = lazy(() => import("./pages/admin/reports/inventory/InventoryReportsDashboard"));
+const StockLedger = lazy(() => import("./pages/admin/reports/inventory/StockLedger"));
+const CurrentStock = lazy(() => import("./pages/admin/reports/inventory/CurrentStock"));
+const RepackSummary = lazy(() => import("./pages/admin/reports/inventory/RepackSummary"));
+const WastageReport = lazy(() => import("./pages/admin/reports/inventory/WastageReport"));
+
+// Procurement Reports pages - lazy loaded
+const ProcurementReportsDashboard = lazy(() => import("./pages/admin/reports/procurement/ProcurementReportsDashboard"));
+const InvoiceRegister = lazy(() => import("./pages/admin/reports/procurement/InvoiceRegister"));
+const GrnReport = lazy(() => import("./pages/admin/reports/procurement/GrnReport"));
+const VendorWisePurchase = lazy(() => import("./pages/admin/reports/procurement/VendorWisePurchase"));
+const SupplierPaymentRegister = lazy(() => import("./pages/admin/reports/procurement/SupplierPaymentRegister"));
+
+// Accounting Reports pages - lazy loaded
+const AccountingReportsDashboard = lazy(() => import("./pages/admin/reports/accounting/AccountingReportsDashboard"));
+const RevenueExpenseSummary = lazy(() => import("./pages/admin/reports/accounting/RevenueExpenseSummary"));
+const PaymentCollections = lazy(() => import("./pages/admin/reports/accounting/PaymentCollections"));
+const TaxCollectionReport = lazy(() => import("./pages/admin/reports/accounting/TaxCollectionReport"));
+const CashFlowSummary = lazy(() => import("./pages/admin/reports/accounting/CashFlowSummary"));
+
+// Master & Audit Reports pages - lazy loaded
+const MasterReportsDashboard = lazy(() => import("./pages/admin/reports/master/MasterReportsDashboard"));
+const ProductMaster = lazy(() => import("./pages/admin/reports/master/ProductMaster"));
+const CustomerMaster = lazy(() => import("./pages/admin/reports/master/CustomerMaster"));
+const SupplierMaster = lazy(() => import("./pages/admin/reports/master/SupplierMaster"));
+const UserMaster = lazy(() => import("./pages/admin/reports/master/UserMaster"));
+const ActivityLog = lazy(() => import("./pages/admin/reports/master/ActivityLog"));
+
 // Sales routes - lazy loaded
 const SalesDashboard = lazy(() => import("./pages/sales/Dashboard"));
 const Customers = lazy(() => import("./pages/sales/Customers"));
@@ -208,10 +245,45 @@ const App: React.FC = () => {
                       <Route path="sales-persons" element={<SalesPersons />} />
                       <Route path="pos" element={<AdminCreatePOSOrder />} />
                       <Route path="sales/analysis" element={<SalesAnalysis />} />
-                      <Route path="sales/reports/summary" element={<PlaceholderPage />} />
+                      {/* Real Sales Reports */}
+                      <Route path="reports/sales" element={<SalesReportsDashboard />} />
+                      <Route path="reports/sales/order-summary" element={<SalesOrderSummary />} />
+                      <Route path="reports/sales/salesperson-performance" element={<SalespersonPerformance />} />
+                      <Route path="reports/sales/customer-wise" element={<CustomerWiseSales />} />
+                      <Route path="reports/sales/product-wise" element={<ProductWiseSales />} />
+                      <Route path="reports/sales/target-vs-achievement" element={<TargetVsAchievement />} />
+                      <Route path="reports/sales/pending-deliveries" element={<PlaceholderPage />} />
+                      <Route path="reports/sales/returns" element={<PlaceholderPage />} />
+                      {/* Real Inventory Reports */}
+                      <Route path="reports/inventory" element={<InventoryReportsDashboard />} />
+                      <Route path="reports/inventory/stock-ledger" element={<StockLedger />} />
+                      <Route path="reports/inventory/current-stock" element={<CurrentStock />} />
+                      <Route path="reports/inventory/repack-summary" element={<RepackSummary />} />
+                      <Route path="reports/inventory/wastage" element={<WastageReport />} />
+                      {/* Real Procurement Reports */}
+                      <Route path="reports/procurement" element={<ProcurementReportsDashboard />} />
+                      <Route path="reports/procurement/invoice-register" element={<InvoiceRegister />} />
+                      <Route path="reports/procurement/grn-report" element={<GrnReport />} />
+                      <Route path="reports/procurement/vendor-wise" element={<VendorWisePurchase />} />
+                      <Route path="reports/procurement/payment-register" element={<SupplierPaymentRegister />} />
+                      {/* Real Accounting Reports */}
+                      <Route path="reports/accounting" element={<AccountingReportsDashboard />} />
+                      <Route path="reports/accounting/revenue-expense" element={<RevenueExpenseSummary />} />
+                      <Route path="reports/accounting/payment-collections" element={<PaymentCollections />} />
+                      <Route path="reports/accounting/tax-collection" element={<TaxCollectionReport />} />
+                      <Route path="reports/accounting/cash-flow" element={<CashFlowSummary />} />
+                      {/* Master & Audit Reports */}
+                      <Route path="reports/master" element={<MasterReportsDashboard />} />
+                      <Route path="reports/master/products" element={<ProductMaster />} />
+                      <Route path="reports/master/customers" element={<CustomerMaster />} />
+                      <Route path="reports/master/suppliers" element={<SupplierMaster />} />
+                      <Route path="reports/master/users" element={<UserMaster />} />
+                      <Route path="reports/master/activity" element={<ActivityLog />} />
+                      {/* Legacy report stubs */}
+                      <Route path="sales/reports/summary" element={<SalesOrderSummary />} />
+                      <Route path="sales/reports/by-person" element={<SalespersonPerformance />} />
                       <Route path="sales/reports/invoice-register" element={<PlaceholderPage />} />
                       <Route path="sales/reports/receivables" element={<PlaceholderPage />} />
-                      <Route path="sales/reports/by-person" element={<PlaceholderPage />} />
                       <Route path="warehouses" element={<Warehouses />} />
                       <Route path="warehouses/:warehouseId/inventory" element={<WarehouseInventory />} />
                       <Route path="purchase-orders" element={<PurchaseOrders />} />
@@ -369,12 +441,44 @@ const App: React.FC = () => {
                       <Route path="reconciliation" element={<PlaceholderPage />} />
                     </Route>
                     
-                    {/* Reports Module */}
+                    {/* Reports Module - Sales Reports */}
                     <Route path="/reports" element={<ProtectedRoute><ModuleLayout /></ProtectedRoute>}>
-                      <Route index element={<PlaceholderPage />} />
-                      <Route path="sales" element={<PlaceholderPage />} />
-                      <Route path="inventory" element={<PlaceholderPage />} />
-                      <Route path="financial" element={<PlaceholderPage />} />
+                      <Route index element={<SalesReportsDashboard />} />
+                      {/* Sales */}
+                      <Route path="sales" element={<SalesReportsDashboard />} />
+                      <Route path="sales/order-summary" element={<SalesOrderSummary />} />
+                      <Route path="sales/salesperson-performance" element={<SalespersonPerformance />} />
+                      <Route path="sales/customer-wise" element={<CustomerWiseSales />} />
+                      <Route path="sales/product-wise" element={<ProductWiseSales />} />
+                      <Route path="sales/target-vs-achievement" element={<TargetVsAchievement />} />
+                      <Route path="sales/pending-deliveries" element={<PlaceholderPage />} />
+                      <Route path="sales/returns" element={<PlaceholderPage />} />
+                      {/* Inventory */}
+                      <Route path="inventory" element={<InventoryReportsDashboard />} />
+                      <Route path="inventory/stock-ledger" element={<StockLedger />} />
+                      <Route path="inventory/current-stock" element={<CurrentStock />} />
+                      <Route path="inventory/repack-summary" element={<RepackSummary />} />
+                      <Route path="inventory/wastage" element={<WastageReport />} />
+                      {/* Procurement */}
+                      <Route path="procurement" element={<ProcurementReportsDashboard />} />
+                      <Route path="procurement/invoice-register" element={<InvoiceRegister />} />
+                      <Route path="procurement/grn-report" element={<GrnReport />} />
+                      <Route path="procurement/vendor-wise" element={<VendorWisePurchase />} />
+                      <Route path="procurement/payment-register" element={<SupplierPaymentRegister />} />
+                      {/* Accounting */}
+                      <Route path="accounting" element={<AccountingReportsDashboard />} />
+                      <Route path="accounting/revenue-expense" element={<RevenueExpenseSummary />} />
+                      <Route path="accounting/payment-collections" element={<PaymentCollections />} />
+                      <Route path="accounting/tax-collection" element={<TaxCollectionReport />} />
+                      <Route path="accounting/cash-flow" element={<CashFlowSummary />} />
+                      {/* Master & Audit */}
+                      <Route path="master" element={<MasterReportsDashboard />} />
+                      <Route path="master/products" element={<ProductMaster />} />
+                      <Route path="master/customers" element={<CustomerMaster />} />
+                      <Route path="master/suppliers" element={<SupplierMaster />} />
+                      <Route path="master/users" element={<UserMaster />} />
+                      <Route path="master/activity" element={<ActivityLog />} />
+                      {/* Custom */}
                       <Route path="custom" element={<PlaceholderPage />} />
                     </Route>
                     

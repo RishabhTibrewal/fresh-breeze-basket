@@ -24,6 +24,8 @@ export interface CreateVariantInput {
     quantity_included: number;
     price_adjustment?: number | null;
   }>;
+  collection_ids?: string[];
+  modifier_group_ids?: string[];
 }
 
 export interface UpdateVariantInput extends Partial<CreateVariantInput> {}

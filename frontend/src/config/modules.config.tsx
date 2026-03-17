@@ -11,6 +11,7 @@ import {
   Users,
   Warehouse,
   Receipt,
+  ReceiptText,
   Target,
   TrendingUp,
   Grid,
@@ -28,7 +29,12 @@ import {
   Percent,
   Plus,
   LayoutList,
-  ListChecks
+  ListChecks,
+  Activity,
+  Truck,
+  BookOpen,
+  LineChart,
+  Layers
 } from 'lucide-react';
 
 export interface ModuleKPI {
@@ -91,7 +97,20 @@ export const modulesConfig: Record<string, ModuleConfig> = {
       { label: 'Dashboard', route: '/ecommerce', icon: LayoutDashboard, permission: 'ecommerce.read' },
       { label: 'Products', route: '/ecommerce/products', icon: Package, permission: 'ecommerce.read' },
       { label: 'Orders', route: '/ecommerce/orders', icon: ShoppingCart, permission: 'ecommerce.read' },
-      { label: 'Settings', route: '/ecommerce/settings', icon: Settings, permission: 'ecommerce.write' }
+      { label: 'Settings', route: '/ecommerce/settings', icon: Settings, permission: 'ecommerce.write' },
+      // Sub-module Reports
+      {
+        label: 'Reports',
+        route: '/reports/sales',
+        icon: TrendingUp,
+        permission: 'reports.read',
+        children: [
+          { label: 'Sales Dashboard',        route: '/reports/sales',                           icon: BarChart3,     permission: 'reports.read' },
+          { label: 'Order Summary',          route: '/reports/sales/order-summary',             icon: ShoppingCart,  permission: 'reports.read' },
+          { label: 'Customer-wise Sales',    route: '/reports/sales/customer-wise',            icon: Users,         permission: 'reports.read' },
+          { label: 'Product-wise Sales',     route: '/reports/sales/product-wise',             icon: Package,       permission: 'reports.read' },
+        ]
+      }
     ]
   },
   
@@ -123,7 +142,22 @@ export const modulesConfig: Record<string, ModuleConfig> = {
       { label: 'Customers', route: '/sales/customers', icon: Users, permission: 'sales.read' },
       { label: 'Leads', route: '/sales/leads', icon: UserCheck, permission: 'sales.read' },
       { label: 'Credit Management', route: '/sales/credit-management', icon: CreditCard, permission: 'sales.read' },
-      { label: 'Analytics', route: '/sales/analytics', icon: BarChart3, permission: 'sales.read' }
+      { label: 'Analytics', route: '/sales/analytics', icon: BarChart3, permission: 'sales.read' },
+      // Sub-module Reports
+      {
+        label: 'Reports',
+        route: '/reports/sales',
+        icon: TrendingUp,
+        permission: 'reports.read',
+        children: [
+          { label: 'Dashboard',              route: '/reports/sales',                           icon: BarChart3,     permission: 'reports.read' },
+          { label: 'Order Summary',          route: '/reports/sales/order-summary',             icon: ShoppingCart,  permission: 'reports.read' },
+          { label: 'Salesperson Performance',route: '/reports/sales/salesperson-performance',  icon: Users,         permission: 'reports.read' },
+          { label: 'Customer-wise Sales',    route: '/reports/sales/customer-wise',            icon: Users,         permission: 'reports.read' },
+          { label: 'Product-wise Sales',     route: '/reports/sales/product-wise',             icon: Package,       permission: 'reports.read' },
+          { label: 'Target vs Achievement',  route: '/reports/sales/target-vs-achievement',    icon: Target,        permission: 'reports.read' },
+        ]
+      }
     ]
   },
   
@@ -156,7 +190,21 @@ export const modulesConfig: Record<string, ModuleConfig> = {
       { label: 'Stock Transfer', route: '/inventory/transfer', icon: ArrowLeftRight, permission: 'inventory.transfer' },
       { label: 'Packaging Recipes', route: '/inventory/packaging-recipes', icon: Package, permission: 'inventory.read' },
       { label: 'Repack Orders', route: '/inventory/repack-orders', icon: ArrowLeftRight, permission: 'inventory.read' },
-      { label: 'Stock Movements', route: '/inventory/movements', icon: FileText, permission: 'inventory.read' }
+      { label: 'Stock Movements', route: '/inventory/movements', icon: FileText, permission: 'inventory.read' },
+      // Sub-module Reports
+      {
+        label: 'Reports',
+        route: '/reports/inventory',
+        icon: Package,
+        permission: 'reports.read',
+        children: [
+          { label: 'Dashboard',    route: '/reports/inventory',                  icon: BarChart3,      permission: 'reports.read' },
+          { label: 'Stock Ledger', route: '/reports/inventory/stock-ledger',     icon: FileText,       permission: 'reports.read' },
+          { label: 'Current Stock',route: '/reports/inventory/current-stock',    icon: Warehouse,      permission: 'reports.read' },
+          { label: 'Repack Summary',route: '/reports/inventory/repack-summary',  icon: ArrowLeftRight, permission: 'reports.read' },
+          { label: 'Wastage Report',route: '/reports/inventory/wastage',         icon: Layers,         permission: 'reports.read' },
+        ]
+      }
     ]
   },
   
@@ -183,7 +231,21 @@ export const modulesConfig: Record<string, ModuleConfig> = {
       { label: 'Suppliers', route: '/procurement/suppliers', icon: Building2, permission: 'procurement.read' },
       { label: 'Goods Receipts', route: '/procurement/goods-receipts', icon: Receipt, permission: 'procurement.read' },
       { label: 'Purchase Invoices', route: '/procurement/purchase-invoices', icon: Receipt, permission: 'procurement.read' },
-      { label: 'Supplier Payments', route: '/procurement/supplier-payments', icon: CreditCard, permission: 'procurement.read' }
+      { label: 'Supplier Payments', route: '/procurement/supplier-payments', icon: CreditCard, permission: 'procurement.read' },
+      // Sub-module Reports
+      {
+        label: 'Reports',
+        route: '/reports/procurement',
+        icon: Truck,
+        permission: 'reports.read',
+        children: [
+          { label: 'Dashboard',          route: '/reports/procurement',                      icon: BarChart3,      permission: 'reports.read' },
+          { label: 'Invoice Register',   route: '/reports/procurement/invoice-register',     icon: ReceiptText,    permission: 'reports.read' },
+          { label: 'GRN Report',         route: '/reports/procurement/grn-report',           icon: ClipboardCheck, permission: 'reports.read' },
+          { label: 'Vendor-wise Purchase',route: '/reports/procurement/vendor-wise',         icon: Building2,      permission: 'reports.read' },
+          { label: 'Supplier Payments',  route: '/reports/procurement/payment-register',     icon: CreditCard,     permission: 'reports.read' },
+        ]
+      }
     ]
   },
   
@@ -209,7 +271,21 @@ export const modulesConfig: Record<string, ModuleConfig> = {
       { label: 'Chart of Accounts', route: '/accounting/chart-of-accounts', icon: FileText, permission: 'accounting.read' },
       { label: 'Journal Entries', route: '/accounting/journal-entries', icon: FileText, permission: 'accounting.write' },
       { label: 'Ledgers', route: '/accounting/ledgers', icon: FileText, permission: 'accounting.read' },
-      { label: 'Reconciliation', route: '/accounting/reconciliation', icon: ClipboardCheck, permission: 'accounting.reconcile' }
+      { label: 'Reconciliation', route: '/accounting/reconciliation', icon: ClipboardCheck, permission: 'accounting.reconcile' },
+      // Sub-module Reports
+      {
+        label: 'Reports',
+        route: '/reports/accounting',
+        icon: DollarSign,
+        permission: 'reports.read',
+        children: [
+          { label: 'Dashboard',             route: '/reports/accounting',                        icon: BarChart3,  permission: 'reports.read' },
+          { label: 'Revenue vs Expense',    route: '/reports/accounting/revenue-expense',        icon: LineChart,  permission: 'reports.read' },
+          { label: 'Payment Collections',   route: '/reports/accounting/payment-collections',    icon: CreditCard, permission: 'reports.read' },
+          { label: 'Tax Collection',        route: '/reports/accounting/tax-collection',         icon: Percent,    permission: 'reports.read' },
+          { label: 'Cash Flow Summary',     route: '/reports/accounting/cash-flow',              icon: TrendingUp, permission: 'reports.read' },
+        ]
+      }
     ]
   },
   
@@ -231,10 +307,78 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     ],
     sidebarItems: [
       { label: 'Dashboard', route: '/reports', icon: LayoutDashboard, permission: 'reports.read' },
-      { label: 'Sales Reports', route: '/reports/sales', icon: TrendingUp, permission: 'reports.read' },
-      { label: 'Inventory Reports', route: '/reports/inventory', icon: Package, permission: 'reports.read' },
-      { label: 'Financial Reports', route: '/reports/financial', icon: DollarSign, permission: 'reports.read' },
-      { label: 'Custom Reports', route: '/reports/custom', icon: FileText, permission: 'reports.read' }
+
+      {
+        label: 'Sales Reports',
+        route: '/reports/sales',
+        icon: TrendingUp,
+        permission: 'reports.read',
+        children: [
+          { label: 'Dashboard',              route: '/reports/sales',                           icon: BarChart3,     permission: 'reports.read' },
+          { label: 'Order Summary',          route: '/reports/sales/order-summary',             icon: ShoppingCart,  permission: 'reports.read' },
+          { label: 'Salesperson Performance',route: '/reports/sales/salesperson-performance',  icon: Users,         permission: 'reports.read' },
+          { label: 'Customer-wise Sales',    route: '/reports/sales/customer-wise',            icon: Users,         permission: 'reports.read' },
+          { label: 'Product-wise Sales',     route: '/reports/sales/product-wise',             icon: Package,       permission: 'reports.read' },
+          { label: 'Target vs Achievement',  route: '/reports/sales/target-vs-achievement',    icon: Target,        permission: 'reports.read' },
+        ]
+      },
+
+      {
+        label: 'Inventory Reports',
+        route: '/reports/inventory',
+        icon: Package,
+        permission: 'reports.read',
+        children: [
+          { label: 'Dashboard',    route: '/reports/inventory',                  icon: BarChart3,      permission: 'reports.read' },
+          { label: 'Stock Ledger', route: '/reports/inventory/stock-ledger',     icon: FileText,       permission: 'reports.read' },
+          { label: 'Current Stock',route: '/reports/inventory/current-stock',    icon: Warehouse,      permission: 'reports.read' },
+          { label: 'Repack Summary',route: '/reports/inventory/repack-summary',  icon: ArrowLeftRight, permission: 'reports.read' },
+          { label: 'Wastage Report',route: '/reports/inventory/wastage',         icon: Layers,         permission: 'reports.read' },
+        ]
+      },
+
+      {
+        label: 'Procurement Reports',
+        route: '/reports/procurement',
+        icon: Truck,
+        permission: 'reports.read',
+        children: [
+          { label: 'Dashboard',          route: '/reports/procurement',                      icon: BarChart3,      permission: 'reports.read' },
+          { label: 'Invoice Register',   route: '/reports/procurement/invoice-register',     icon: ReceiptText,    permission: 'reports.read' },
+          { label: 'GRN Report',         route: '/reports/procurement/grn-report',           icon: ClipboardCheck, permission: 'reports.read' },
+          { label: 'Vendor-wise Purchase',route: '/reports/procurement/vendor-wise',         icon: Building2,      permission: 'reports.read' },
+          { label: 'Supplier Payments',  route: '/reports/procurement/payment-register',     icon: CreditCard,     permission: 'reports.read' },
+        ]
+      },
+
+      {
+        label: 'Accounting Reports',
+        route: '/reports/accounting',
+        icon: DollarSign,
+        permission: 'reports.read',
+        children: [
+          { label: 'Dashboard',             route: '/reports/accounting',                        icon: BarChart3,  permission: 'reports.read' },
+          { label: 'Revenue vs Expense',    route: '/reports/accounting/revenue-expense',        icon: LineChart,  permission: 'reports.read' },
+          { label: 'Payment Collections',   route: '/reports/accounting/payment-collections',    icon: CreditCard, permission: 'reports.read' },
+          { label: 'Tax Collection',        route: '/reports/accounting/tax-collection',         icon: Percent,    permission: 'reports.read' },
+          { label: 'Cash Flow Summary',     route: '/reports/accounting/cash-flow',              icon: TrendingUp, permission: 'reports.read' },
+        ]
+      },
+
+      {
+        label: 'Master & Audit',
+        route: '/reports/master',
+        icon: BookOpen,
+        permission: 'reports.read',
+        children: [
+          { label: 'Dashboard',       route: '/reports/master',           icon: BarChart3, permission: 'reports.read' },
+          { label: 'Product Master',  route: '/reports/master/products',  icon: Package,  permission: 'reports.read' },
+          { label: 'Customer Master', route: '/reports/master/customers', icon: Users,    permission: 'reports.read' },
+          { label: 'Supplier Master', route: '/reports/master/suppliers', icon: Truck,    permission: 'reports.read' },
+          { label: 'User Master',     route: '/reports/master/users',     icon: UserCog,  permission: 'reports.read' },
+          { label: 'Activity Log',    route: '/reports/master/activity',  icon: Activity, permission: 'reports.read' },
+        ]
+      },
     ]
   },
   
@@ -280,7 +424,22 @@ export const modulesConfig: Record<string, ModuleConfig> = {
       { label: 'Number Series', route: '/settings/number-series', icon: Hash, permission: 'settings.write' },
       { label: 'Audit Logs', route: '/settings/audit-logs', icon: FileText, permission: 'settings.read' },
       { label: 'Sales Persons', route: '/settings/sales-persons', icon: Users, permission: 'settings.write' },
-      { label: 'Sales Targets', route: '/settings/sales-targets', icon: Target, permission: 'settings.write' }
+      { label: 'Sales Targets', route: '/settings/sales-targets', icon: Target, permission: 'settings.write' },
+      // Sub-module Reports
+      {
+        label: 'Reports',
+        route: '/reports/master',
+        icon: BookOpen,
+        permission: 'reports.read',
+        children: [
+          { label: 'Dashboard',       route: '/reports/master',           icon: BarChart3, permission: 'reports.read' },
+          { label: 'Product Master',  route: '/reports/master/products',  icon: Package,  permission: 'reports.read' },
+          { label: 'Customer Master', route: '/reports/master/customers', icon: Users,    permission: 'reports.read' },
+          { label: 'Supplier Master', route: '/reports/master/suppliers', icon: Truck,    permission: 'reports.read' },
+          { label: 'User Master',     route: '/reports/master/users',     icon: UserCog,  permission: 'reports.read' },
+          { label: 'Activity Log',    route: '/reports/master/activity',  icon: Activity, permission: 'reports.read' },
+        ]
+      }
     ]
   }
 };

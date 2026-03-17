@@ -40,6 +40,9 @@ import { toast } from 'sonner';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { collectionsApi, type Collection } from "@/api/collections";
+import { modifiersService, type ModifierGroup } from "@/api/modifiers";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface ApiResponse<T> {
   success: boolean;
@@ -105,6 +108,8 @@ const variantSchema = z.object({
   initial_stock: z.number().min(0, 'Stock must be >= 0').optional().nullable(),
   is_bundle: z.boolean().default(false),
   bundle_components: z.array(bundleComponentSchema).optional().nullable(),
+  collection_ids: z.array(z.string()).optional(),
+  modifier_group_ids: z.array(z.string()).optional(),
 }).refine((data) => {
   // Ensure at least one standard price exists
   const hasStandardPrice = data.prices.some(p => p.price_type === 'standard');
@@ -169,6 +174,8 @@ export default function VariantForm() {
       initial_stock: null,
       is_bundle: false,
       bundle_components: [],
+      collection_ids: [],
+      modifier_group_ids: [],
     },
   });
 
@@ -206,6 +213,16 @@ export default function VariantForm() {
   const { data: taxes = [] } = useQuery<Tax[]>({
     queryKey: ['taxes'],
     queryFn: taxesService.getAll,
+  });
+
+  const { data: collections } = useQuery<Collection[]>({
+    queryKey: ['collections'],
+    queryFn: () => collectionsApi.getAll(),
+  });
+
+  const { data: modifierGroups } = useQuery<ModifierGroup[]>({
+    queryKey: ['modifierGroups'],
+    queryFn: modifiersService.getModifierGroups,
   });
 
   const { data: warehouses = [] } = useQuery<Warehouse[]>({
@@ -328,6 +345,8 @@ export default function VariantForm() {
           quantity_included: c.quantity_included,
           price_adjustment: c.price_adjustment,
         })) || [],
+        collection_ids: variant.collections?.map(c => c.id) || [],
+        modifier_group_ids: variant.modifier_groups?.map(m => m.id) || [],
       });
     }
   }, [variant, existingPrices, form]);
@@ -367,6 +386,8 @@ export default function VariantForm() {
           quantity_included: c.quantity_included,
           price_adjustment: c.price_adjustment ?? null,
         })) : [],
+        collection_ids: data.collection_ids,
+        modifier_group_ids: data.modifier_group_ids,
       };
       const variant = await variantsService.create(productId!, createData);
       
@@ -458,6 +479,8 @@ export default function VariantForm() {
           quantity_included: c.quantity_included,
           price_adjustment: c.price_adjustment ?? null,
         })) : [],
+        collection_ids: data.collection_ids,
+        modifier_group_ids: data.modifier_group_ids,
         // Remove prices from variant update - they're handled separately
         prices: undefined,
       };
@@ -1351,6 +1374,105 @@ export default function VariantForm() {
                   </FormItem>
                 )}
               />
+            </CardContent>
+          </Card>
+
+          {/* Groupings */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Variant Groupings</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <h3 className="mb-4 text-sm font-medium">Collections</h3>
+                {collections && collections.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {collections.map((collection) => (
+                      <FormField
+                        key={collection.id}
+                        control={form.control}
+                        name="collection_ids"
+                        render={({ field }) => {
+                          return (
+                            <FormItem
+                              key={collection.id}
+                              className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4"
+                            >
+                              <FormControl>
+                                <Checkbox
+                                  checked={field.value?.includes(collection.id)}
+                                  onCheckedChange={(checked) => {
+                                    return checked
+                                      ? field.onChange([...(field.value || []), collection.id])
+                                      : field.onChange(
+                                          field.value?.filter(
+                                            (value) => value !== collection.id
+                                          )
+                                        )
+                                  }}
+                                />
+                              </FormControl>
+                              <FormLabel className="font-normal cursor-pointer">
+                                {collection.name}
+                              </FormLabel>
+                            </FormItem>
+                          )
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No collections found.</p>
+                )}
+              </div>
+
+              <div className="pt-4 border-t">
+                <h3 className="mb-4 text-sm font-medium">Modifier Groups</h3>
+                {modifierGroups && modifierGroups.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {modifierGroups.map((group) => (
+                      <FormField
+                        key={group.id}
+                        control={form.control}
+                        name="modifier_group_ids"
+                        render={({ field }) => {
+                          return (
+                            <FormItem
+                              key={group.id}
+                              className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4"
+                            >
+                              <FormControl>
+                                <Checkbox
+                                  checked={field.value?.includes(group.id)}
+                                  onCheckedChange={(checked) => {
+                                    return checked
+                                      ? field.onChange([...(field.value || []), group.id])
+                                      : field.onChange(
+                                          field.value?.filter(
+                                            (value) => value !== group.id
+                                          )
+                                        )
+                                  }}
+                                />
+                              </FormControl>
+                              <div className="space-y-1 leading-none">
+                                <FormLabel className="cursor-pointer">
+                                  {group.name}
+                                </FormLabel>
+                                <FormDescription>
+                                  Min: {group.min_select} | Max: {group.max_select ?? 'Any'}
+                                </FormDescription>
+                              </div>
+                            </FormItem>
+                          )
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No modifier groups found.</p>
+                )}
+              </div>
             </CardContent>
           </Card>
 
