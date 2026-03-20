@@ -165,6 +165,8 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
       expected_delivery_date,
       notes,
       terms_conditions,
+      extra_discount_percentage,
+      extra_discount_amount,
       items
     } = req.body;
 
@@ -201,38 +203,57 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
       }
     }
 
-    // Validate items and calculate total amount
-    let total_amount = 0;
-    for (const item of items) {
-      // Explicit validation: check for null/undefined/empty string, not just falsy values
-      if (!item.product_id || item.product_id === '' || 
-          item.quantity == null || item.quantity <= 0 || 
-          item.unit_price == null || item.unit_price < 0) {
-        throw new ValidationError(
-          `Each item must have a valid product_id (non-empty), quantity (greater than 0), and unit_price (non-negative). ` +
-          `Found: product_id=${item.product_id}, quantity=${item.quantity}, unit_price=${item.unit_price}`
-        );
-      }
-      
-      // Validate variant_id if provided (should belong to the product)
-      if (item.variant_id) {
-        const { data: variant, error: variantError } = await adminClient
-          .from('product_variants')
-          .select('id, product_id')
-          .eq('id', item.variant_id)
-          .eq('product_id', item.product_id)
-          .single();
-        
-        if (variantError || !variant) {
+      // Validate items and calculate totals
+      let po_subtotal = 0;
+      let po_total_tax = 0;
+      let po_total_discount = 0;
+      for (const item of items) {
+        if (!item.product_id || item.product_id === '' || 
+            item.quantity == null || item.quantity <= 0 || 
+            item.unit_price == null || item.unit_price < 0) {
           throw new ValidationError(
-            `Variant ${item.variant_id} does not belong to product ${item.product_id}`
+            `Each item must have a valid product_id (non-empty), quantity (greater than 0), and unit_price (non-negative). ` +
+            `Found: product_id=${item.product_id}, quantity=${item.quantity}, unit_price=${item.unit_price}`
           );
         }
+        
+        if (item.variant_id) {
+          const { data: variant, error: variantError } = await adminClient
+            .from('product_variants')
+            .select('id, product_id')
+            .eq('id', item.variant_id)
+            .eq('product_id', item.product_id)
+            .single();
+          
+          if (variantError || !variant) {
+            throw new ValidationError(
+              `Variant ${item.variant_id} does not belong to product ${item.product_id}`
+            );
+          }
+        }
+
+        const lineSubtotal = item.quantity * item.unit_price;
+        const taxPct = item.tax_percentage || 0;
+        const discPct = item.discount_percentage || 0;
+        const itemTax = parseFloat(((lineSubtotal * taxPct) / 100).toFixed(2));
+        const itemDiscount = parseFloat(((lineSubtotal * discPct) / 100).toFixed(2));
+        // Store computed amounts on item so they are available for INSERT below
+        item._computed_tax = itemTax;
+        item._computed_discount = itemDiscount;
+        item._line_total = lineSubtotal + itemTax - itemDiscount;
+        po_subtotal += lineSubtotal;
+        po_total_tax += itemTax;
+        po_total_discount += itemDiscount;
       }
-      
-      const line_total = item.quantity * item.unit_price;
-      total_amount += line_total;
-    }
+
+      const po_extra_disc_pct = Number(extra_discount_percentage) || 0;
+      const po_extra_disc_amt = (po_extra_disc_pct > 0)
+        ? Math.round(((po_subtotal - po_total_discount + po_total_tax) * po_extra_disc_pct / 100) * 100) / 100
+        : Number(extra_discount_amount || 0);
+        
+      const sumLineTotals = Math.round((po_subtotal - po_total_discount + po_total_tax) * 100) / 100;
+      const po_total_amount = Math.round((sumLineTotals - po_extra_disc_amt) * 100) / 100;
+      const headerTotalDiscount = Math.round((po_total_discount + po_extra_disc_amt) * 100) / 100;
 
     // Create purchase order with retry logic to handle PO number race conditions
     let purchaseOrderResult: any;
@@ -249,7 +270,12 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
           warehouse_id,
           po_number,
           expected_delivery_date,
-          total_amount,
+          subtotal: po_subtotal,
+          total_tax: po_total_tax,
+          total_discount: headerTotalDiscount,
+          extra_discount_percentage: po_extra_disc_pct,
+          extra_discount_amount: po_extra_disc_amt,
+          total_amount: po_total_amount,
           notes,
           terms_conditions,
           status: 'draft',
@@ -361,9 +387,10 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
       const unit = variant?.unit_type || variant?.unit || product?.unit_type || 'piece';
       const product_code = product?.product_code || '';
       const hsn_code = variant?.hsn || product?.hsn_code || '';
-      // Use variant tax rate if available, otherwise fall back to product tax
-      // Note: variant?.tax?.rate is fetched from taxes table via the join
-      const tax_percentage = variant?.tax?.rate ?? (product?.tax || 0);
+      // Use item-level tax rate if provided, otherwise fetch from variant/product
+      const tax_percentage = (item.tax_percentage !== undefined && item.tax_percentage !== null)
+        ? item.tax_percentage
+        : (variant?.tax?.rate ?? (product?.tax || 0));
       
       return {
         purchase_order_id: po.id,
@@ -371,11 +398,14 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
         variant_id: item.variant_id || null, // Store variant_id if provided
         quantity: item.quantity,
         unit_price: item.unit_price,
-        line_total: item.quantity * item.unit_price,
+        line_total: item._line_total,
         unit,
         product_code,
         hsn_code,
         tax_percentage,
+        tax_amount: item._computed_tax,
+        discount_percentage: item.discount_percentage || 0,
+        discount_amount: item._computed_discount,
         company_id: req.companyId
       };
     });
@@ -642,7 +672,9 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
       notes,
       terms_conditions,
       status,
-      items
+      items,
+      extra_discount_percentage,
+      extra_discount_amount
     } = req.body;
 
     // Update purchase order
@@ -660,6 +692,8 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
     if (notes !== undefined) updateData.notes = notes;
     if (terms_conditions !== undefined) updateData.terms_conditions = terms_conditions;
     if (status !== undefined) updateData.status = status;
+    if (extra_discount_percentage !== undefined) updateData.extra_discount_percentage = extra_discount_percentage;
+    if (extra_discount_amount !== undefined) updateData.extra_discount_amount = extra_discount_amount;
 
     const adminClient = supabaseAdmin || supabase;
     const { data: purchaseOrder, error: updateError } = await adminClient
@@ -771,6 +805,10 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
 
         const productsMap = new Map(products?.map((p: any) => [p.id, p]) || []);
 
+        let po_subtotal = 0;
+        let po_total_tax = 0;
+        let po_total_discount = 0;
+
         // Create purchase order items with variant-level data (preferred) or product-level (fallback)
         const orderItems = items.map((item: any) => {
           const variant = item.variant_id ? variantsMap.get(item.variant_id) : null;
@@ -780,9 +818,21 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
           const unit = variant?.unit_type || variant?.unit || product?.unit_type || 'piece';
           const product_code = product?.product_code || '';
           const hsn_code = variant?.hsn || product?.hsn_code || '';
-          // Use variant tax rate if available, otherwise fall back to product tax
-          // Note: variant?.tax?.rate is fetched from taxes table via the join
-          const tax_percentage = variant?.tax?.rate ?? (product?.tax || 0);
+          // Use item-level tax rate if provided, otherwise fetch from variant/product
+          const tax_percentage = (item.tax_percentage !== undefined && item.tax_percentage !== null)
+            ? item.tax_percentage
+            : (variant?.tax?.rate ?? (product?.tax || 0));
+
+          const lineSubtotal = item.quantity * item.unit_price;
+          const taxPct = tax_percentage || 0;
+          const discPct = item.discount_percentage || 0;
+          const itemTax = parseFloat(((lineSubtotal * taxPct) / 100).toFixed(2));
+          const itemDiscount = parseFloat(((lineSubtotal * discPct) / 100).toFixed(2));
+          const lineTotal = lineSubtotal + itemTax - itemDiscount;
+
+          po_subtotal += lineSubtotal;
+          po_total_tax += itemTax;
+          po_total_discount += itemDiscount;
           
           return {
             purchase_order_id: id,
@@ -790,11 +840,14 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
             variant_id: item.variant_id || null, // Store variant_id if provided
             quantity: item.quantity,
             unit_price: item.unit_price,
-            line_total: item.quantity * item.unit_price,
+            line_total: lineTotal,
             unit,
             product_code,
             hsn_code,
-            tax_percentage,
+            tax_percentage: taxPct,
+            tax_amount: itemTax,
+            discount_percentage: discPct,
+            discount_amount: itemDiscount,
             company_id: req.companyId
           };
         });
@@ -809,18 +862,40 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
           throw new ApiError(500, 'Failed to update purchase order items');
         }
 
-        // Recalculate total
-        let total_amount = 0;
-        for (const item of items) {
-          total_amount += item.quantity * item.unit_price;
+        // Recalculate totals on header
+        // Since we got purchaseOrder from above, we can fall back to its extra discounts if undefined
+        const finalExtraDiscPct = Number(extra_discount_percentage !== undefined ? extra_discount_percentage : (purchaseOrder.extra_discount_percentage || 0));
+        
+        const sumLineTotals = Math.round((po_subtotal - po_total_discount + po_total_tax) * 100) / 100;
+        
+        let finalExtraDiscAmt = 0;
+        if (finalExtraDiscPct > 0) {
+          finalExtraDiscAmt = Math.round(((sumLineTotals * finalExtraDiscPct) / 100) * 100) / 100;
+        } else if (extra_discount_amount !== undefined) {
+          finalExtraDiscAmt = Number(extra_discount_amount || 0);
+        } else {
+          finalExtraDiscAmt = Number(purchaseOrder.extra_discount_amount || 0);
         }
+
+        const po_total_amount = Math.round((sumLineTotals - finalExtraDiscAmt) * 100) / 100;
+        const headerTotalDiscount = Math.round((po_total_discount + finalExtraDiscAmt) * 100) / 100;
 
         await adminClient
           .schema('procurement')
           .from('purchase_orders')
-          .update({ total_amount })
+          .update({ 
+            subtotal: Math.round(po_subtotal * 100) / 100,
+            total_tax: Math.round(po_total_tax * 100) / 100,
+            total_discount: headerTotalDiscount,
+            extra_discount_percentage: finalExtraDiscPct,
+            extra_discount_amount: finalExtraDiscAmt,
+            total_amount: po_total_amount
+          })
           .eq('id', id)
           .eq('company_id', req.companyId);
+      } else {
+        // If items are an empty array, maybe we should also recalculate or zero out the totals,
+        // but skipping for now to maintain original logic
       }
     }
 

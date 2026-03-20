@@ -400,6 +400,8 @@ export default function CreateGoodsReceipt() {
                     <TableHead className="min-w-[80px]">Accepted</TableHead>
                     <TableHead className="min-w-[80px]">Rejected</TableHead>
                     <TableHead className="min-w-[100px]">Price</TableHead>
+                    <TableHead className="min-w-[80px]">Tax %</TableHead>
+                    <TableHead className="min-w-[100px]">Line Total</TableHead>
                     <TableHead className="min-w-[100px]">Batch</TableHead>
                     <TableHead className="min-w-[100px]">Expiry</TableHead>
                   </TableRow>
@@ -447,6 +449,10 @@ export default function CreateGoodsReceipt() {
                           />
                         </TableCell>
                         <TableCell className="text-sm">₹{item.unit_price.toFixed(2)}</TableCell>
+                        <TableCell className="text-sm">{item.tax_percentage}%</TableCell>
+                        <TableCell className="font-medium text-sm">
+                          ₹{((item.quantity_accepted * item.unit_price) * (1 + (item.tax_percentage || 0) / 100)).toFixed(2)}
+                        </TableCell>
                         <TableCell>
                           <Input
                             value={item.batch_number}
@@ -469,6 +475,22 @@ export default function CreateGoodsReceipt() {
                 </TableBody>
               </Table>
             </div>
+            {items.length > 0 && (
+              <div className="mt-4 flex flex-col items-end gap-1 border-t pt-4">
+                <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
+                  <span>Subtotal:</span>
+                  <span>₹{items.reduce((sum, item) => sum + (item.quantity_accepted * item.unit_price), 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
+                  <span>Tax:</span>
+                  <span>₹{items.reduce((sum, item) => sum + (item.quantity_accepted * item.unit_price * (item.tax_percentage || 0) / 100), 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between w-full max-w-[250px] font-bold text-lg pt-2 border-t mt-1">
+                  <span>Total Amount:</span>
+                  <span>₹{items.reduce((sum, item) => sum + (item.quantity_accepted * item.unit_price * (1 + (item.tax_percentage || 0) / 100)), 0).toFixed(2)}</span>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

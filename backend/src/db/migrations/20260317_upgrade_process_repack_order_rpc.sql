@@ -137,7 +137,7 @@ BEGIN
       v_item.output_product_id, v_item.output_variant_id, v_order.warehouse_id,
       'REPACK_IN', v_item.output_quantity,
       'repack_order', p_repack_order_id,
-      format('Repack: produced %s output units @ cost %.4f', v_item.output_quantity, v_final_unit_cost),
+      format('Repack: produced %s output units @ cost %s', v_item.output_quantity, ROUND(v_final_unit_cost, 4)),
       p_company_id, p_created_by, 'repack'
     );
 

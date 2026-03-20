@@ -216,7 +216,6 @@ export default function PackagingRecipes() {
                 selectedVariantId={form.input_variant_id || null}
                 onSelect={(productId, variantId) => setForm((f) => ({ ...f, input_product_id: productId, input_variant_id: variantId }))}
                 filterActive={false}
-                useListInModal
                 className="mt-1"
               />
             </div>
@@ -227,7 +226,6 @@ export default function PackagingRecipes() {
                 selectedVariantId={form.output_variant_id || null}
                 onSelect={(productId, variantId) => setForm((f) => ({ ...f, output_product_id: productId, output_variant_id: variantId }))}
                 filterActive={false}
-                useListInModal
                 className="mt-1"
               />
             </div>

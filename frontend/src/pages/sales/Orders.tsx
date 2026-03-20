@@ -273,6 +273,9 @@ export default function Orders() {
                       <div className="flex-1 min-w-0">
                         <div className="font-semibold text-sm mb-1 break-words">
                           Order #{order.order_number}
+                          {order.quotation_id && (
+                            <Badge variant="secondary" className="ml-2 text-[10px] h-4 px-1 py-0">Quote</Badge>
+                          )}
                         </div>
                         <div className="text-base font-bold text-green-600 mb-2">
                           ${parseFloat(order.total_amount).toFixed(2)}
@@ -385,7 +388,12 @@ export default function Orders() {
                 ) : (
                   filteredOrders.map((order) => (
                     <TableRow key={order.id}>
-                      <TableCell className="px-2 py-2 font-medium text-sm">{order.order_number}</TableCell>
+                      <TableCell className="px-2 py-2 font-medium text-sm">
+                        {order.order_number}
+                        {order.quotation_id && (
+                          <Badge variant="secondary" className="ml-2 text-[10px] h-4 px-1 py-0">Quote</Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="px-2 py-2 text-sm">{order.customer?.name || 'N/A'}</TableCell>
                       <TableCell className="px-2 py-2 text-sm">{formatSalesExecutive(order)}</TableCell>
                       <TableCell className="px-2 py-2 text-sm">{formatDate(order.created_at)}</TableCell>

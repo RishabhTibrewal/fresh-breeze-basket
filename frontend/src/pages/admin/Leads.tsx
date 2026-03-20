@@ -59,6 +59,7 @@ import {
   CalendarClock,
   Plus,
   ChevronDown,
+  FileText,
 } from "lucide-react";
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -613,6 +614,19 @@ export default function AdminLeads() {
                           >
                             <Trash2 className="h-3.5 w-3.5 text-destructive" />
                           </Button>
+                          {lead.stage !== 'lost' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                window.location.href = `/sales/quotations/create?leadId=${lead.id}`;
+                              }}
+                              className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700"
+                              title="Create Quotation"
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                         </div>
                       </div>
                       
@@ -775,6 +789,19 @@ export default function AdminLeads() {
                             >
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
+                            {lead.stage !== 'lost' && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  window.location.href = `/sales/quotations/create?leadId=${lead.id}`;
+                                }}
+                                className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700"
+                                title="Create Quotation"
+                              >
+                                <FileText className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>

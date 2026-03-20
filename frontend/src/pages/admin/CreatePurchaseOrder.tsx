@@ -60,6 +60,9 @@ interface OrderItem {
   hsn_code?: string;
   unit?: string;
   tax_percentage?: number;
+  discount_percentage?: number;
+  tax_amount?: number;
+  discount_amount?: number;
   quantity: number;
   unit_price: number;
   line_total: number;
@@ -78,6 +81,8 @@ export default function CreatePurchaseOrder() {
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
   const [notes, setNotes] = useState('');
   const [termsConditions, setTermsConditions] = useState('');
+  const [extraDiscount, setExtraDiscount] = useState<number>(0);
+  const [extraDiscountPct, setExtraDiscountPct] = useState<number>(0);
 
   // Fetch suppliers
   const { data: suppliers = [] } = useQuery({
@@ -125,23 +130,38 @@ export default function CreatePurchaseOrder() {
       setExpectedDeliveryDate(existingPO.expected_delivery_date || '');
       setNotes(existingPO.notes || '');
       setTermsConditions(existingPO.terms_conditions || '');
+      setExtraDiscountPct(existingPO.extra_discount_percentage || 0);
+      setExtraDiscount(existingPO.extra_discount_amount || 0);
       
       // Load items from purchase_order_items
       if (existingPO.purchase_order_items && existingPO.purchase_order_items.length > 0) {
-        const loadedItems: OrderItem[] = existingPO.purchase_order_items.map((item: any) => ({
-          id: `row-${item.id}-${Date.now()}`,
-          product_id: item.product_id,
-          variant_id: item.variant_id || null,
-          variant_name: item.variants?.name || item.variant?.name || '',
-          product_name: item.products?.name || '',
-          product_code: item.product_code || item.products?.product_code || '',
-          hsn_code: item.hsn_code || item.products?.hsn_code || '',
-          unit: item.unit || item.products?.unit_type || 'piece',
-          tax_percentage: item.tax_percentage || item.products?.tax || 0,
-          quantity: item.quantity,
-          unit_price: parseFloat(item.unit_price),
-          line_total: parseFloat(item.line_total),
-        }));
+        const loadedItems: OrderItem[] = existingPO.purchase_order_items.map((item: any) => {
+          const unitPrice = parseFloat(item.unit_price) || 0;
+          const qty = item.quantity || 0;
+          const taxPct = item.tax_percentage || 0;
+          const discPct = item.discount_percentage || 0;
+          const lineSubtotal = qty * unitPrice;
+          const taxAmt = (lineSubtotal * taxPct) / 100;
+          const discAmt = (lineSubtotal * discPct) / 100;
+
+          return {
+            id: `row-${item.id}-${Date.now()}`,
+            product_id: item.product_id,
+            variant_id: item.variant_id || null,
+            variant_name: item.variants?.name || item.variant?.name || '',
+            product_name: item.products?.name || '',
+            product_code: item.product_code || item.products?.product_code || '',
+            hsn_code: item.hsn_code || item.products?.hsn_code || '',
+            unit: item.unit || item.products?.unit_type || 'piece',
+            tax_percentage: taxPct,
+            discount_percentage: discPct,
+            tax_amount: taxAmt,
+            discount_amount: discAmt,
+            quantity: qty,
+            unit_price: unitPrice,
+            line_total: lineSubtotal + taxAmt - discAmt,
+          };
+        });
         setItems(loadedItems);
       }
     }
@@ -180,6 +200,9 @@ export default function CreatePurchaseOrder() {
         hsn_code: '',
         unit: '',
         tax_percentage: 0,
+        discount_percentage: 0,
+        tax_amount: 0,
+        discount_amount: 0,
         quantity: 1,
         unit_price: 0,
         line_total: 0
@@ -248,8 +271,9 @@ export default function CreatePurchaseOrder() {
           hsn_code: hsnCode,
           unit: unit,
           tax_percentage: taxPercentage,
+          discount_percentage: 0,
           unit_price: price,
-          line_total: lineTotal
+          line_total: item.quantity * price + (item.quantity * price * taxPercentage / 100)
         };
       }
       return item;
@@ -288,16 +312,23 @@ export default function CreatePurchaseOrder() {
     }));
   };
 
+  // Helper to recalculate line total for an item
+  const recalculateLineTotal = (item: OrderItem) => {
+    const subtotal = item.quantity * item.unit_price;
+    const tax = (subtotal * (item.tax_percentage || 0)) / 100;
+    const discount = (subtotal * (item.discount_percentage || 0)) / 100;
+    return Math.round((subtotal + tax - discount) * 100) / 100;
+  };
+
   // Update quantity
   const updateQuantity = (rowId: string, delta: number) => {
     setItems(items.map(item => {
       if (item.id === rowId) {
         const newQuantity = Math.max(1, item.quantity + delta);
-        const taxAmount = (newQuantity * item.unit_price * (item.tax_percentage || 0)) / 100;
+        const updatedItem = { ...item, quantity: newQuantity };
         return {
-          ...item,
-          quantity: newQuantity,
-          line_total: (newQuantity * item.unit_price) + taxAmount
+          ...updatedItem,
+          line_total: recalculateLineTotal(updatedItem)
         };
       }
       return item;
@@ -309,11 +340,10 @@ export default function CreatePurchaseOrder() {
     setItems(items.map(item => {
       if (item.id === rowId) {
         const newQuantity = Math.max(1, quantity);
-        const taxAmount = (newQuantity * item.unit_price * (item.tax_percentage || 0)) / 100;
+        const updatedItem = { ...item, quantity: newQuantity };
         return {
-          ...item,
-          quantity: newQuantity,
-          line_total: (newQuantity * item.unit_price) + taxAmount
+          ...updatedItem,
+          line_total: recalculateLineTotal(updatedItem)
         };
       }
       return item;
@@ -324,15 +354,76 @@ export default function CreatePurchaseOrder() {
   const updatePrice = (rowId: string, price: number) => {
     setItems(items.map(item => {
       if (item.id === rowId) {
-        const taxAmount = (item.quantity * price * (item.tax_percentage || 0)) / 100;
+        const updatedItem = { ...item, unit_price: price };
         return {
-          ...item,
-          unit_price: price,
-          line_total: (item.quantity * price) + taxAmount
+          ...updatedItem,
+          line_total: recalculateLineTotal(updatedItem)
         };
       }
       return item;
     }));
+  };
+
+  // Update Tax Percentage
+  const updateTaxPct = (rowId: string, taxPct: number) => {
+    setItems(items.map(item => {
+      if (item.id === rowId) {
+        const updatedItem = { ...item, tax_percentage: taxPct };
+        return {
+          ...updatedItem,
+          line_total: recalculateLineTotal(updatedItem)
+        };
+      }
+      return item;
+    }));
+  };
+
+  // Update Discount Percentage
+  const updateDiscountPct = (rowId: string, discountPct: number) => {
+    setItems(items.map(item => {
+      if (item.id === rowId) {
+        const updatedItem = { ...item, discount_percentage: discountPct };
+        return {
+          ...updatedItem,
+          line_total: recalculateLineTotal(updatedItem)
+        };
+      }
+      return item;
+    }));
+  };
+
+  // Helper calculations for line items
+  const calculateItemsSubtotal = () => {
+    return items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+  };
+
+  const calculateTotalTax = () => {
+    return items.reduce((sum, item) => {
+      const lineSubtotal = item.quantity * item.unit_price;
+      return sum + (lineSubtotal * (item.tax_percentage || 0)) / 100;
+    }, 0);
+  };
+
+  const calculateTotalDiscount = () => {
+    return items.reduce((sum, item) => {
+      const lineSubtotal = item.quantity * item.unit_price;
+      return sum + (lineSubtotal * (item.discount_percentage || 0)) / 100;
+    }, 0);
+  };
+
+  const calculateItemsLineTotalSum = () => {
+    return items.reduce((total, item) => {
+      const lineSubtotal = item.quantity * item.unit_price;
+      const lineTax = (lineSubtotal * (item.tax_percentage || 0)) / 100;
+      const lineDisc = (lineSubtotal * (item.discount_percentage || 0)) / 100;
+      return total + lineSubtotal + lineTax - lineDisc;
+    }, 0);
+  };
+
+  const calculateGrandTotal = () => {
+    const itemsTotal = calculateItemsLineTotalSum();
+    const pctDiscount = Math.round(((itemsTotal * (extraDiscountPct || 0)) / 100) * 100) / 100;
+    return Math.max(0, itemsTotal - pctDiscount - (extraDiscount || 0));
   };
 
   // Remove item
@@ -341,9 +432,7 @@ export default function CreatePurchaseOrder() {
   };
 
   // Calculate total (only for items with products selected)
-  const totalAmount = items
-    .filter(item => item.product_id && item.product_id !== '')
-    .reduce((sum, item) => sum + item.line_total, 0);
+  const finalTotalAmount = calculateGrandTotal();
 
   // Handle submit
   const handleSubmit = () => {
@@ -376,11 +465,15 @@ export default function CreatePurchaseOrder() {
       expected_delivery_date: expectedDeliveryDate || undefined,
       notes: notes || undefined,
       terms_conditions: termsConditions || undefined,
+      extra_discount_percentage: extraDiscountPct,
+      extra_discount_amount: extraDiscount,
       items: validItems.map(item => ({
         product_id: item.product_id,
         variant_id: item.variant_id || undefined,
         quantity: item.quantity,
-        unit_price: item.unit_price
+        unit_price: item.unit_price,
+        tax_percentage: item.tax_percentage,
+        discount_percentage: item.discount_percentage
       }))
     });
   };
@@ -517,14 +610,17 @@ export default function CreatePurchaseOrder() {
                       <TableHead className="min-w-[80px]">Unit</TableHead>
                       <TableHead className="min-w-[100px]">Price</TableHead>
                       <TableHead className="min-w-[80px]">Tax %</TableHead>
+                      <TableHead className="min-w-[100px]">Disc %</TableHead>
                       <TableHead className="min-w-[120px]">Total</TableHead>
                       <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {items.map((item) => {
-                      const taxAmount = item.product_id ? (item.quantity * item.unit_price * (item.tax_percentage || 0)) / 100 : 0;
-                      const totalWithTax = item.product_id ? (item.quantity * item.unit_price) + taxAmount : 0;
+                      const lineSubtotal = item.quantity * item.unit_price;
+                      const lineTax = (lineSubtotal * (item.tax_percentage || 0)) / 100;
+                      const lineDisc = (lineSubtotal * (item.discount_percentage || 0)) / 100;
+                      const totalWithTax = lineSubtotal + lineTax - lineDisc;
                       return (
                         <TableRow key={item.id}>
                           <TableCell className="text-sm">
@@ -704,8 +800,29 @@ export default function CreatePurchaseOrder() {
                               disabled={!item.product_id}
                             />
                           </TableCell>
-                          <TableCell className="text-sm">
-                            {item.tax_percentage ? `${item.tax_percentage}%` : '-'}
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={item.tax_percentage || 0}
+                              onChange={(e) => updateTaxPct(item.id, parseFloat(e.target.value) || 0)}
+                              className="h-8 w-20 text-sm"
+                              min="0"
+                              max="100"
+                              step="0.1"
+                              disabled={!item.product_id}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={item.discount_percentage || 0}
+                              onChange={(e) => updateDiscountPct(item.id, parseFloat(e.target.value) || 0)}
+                              className="h-8 w-20 text-sm"
+                              min="0"
+                              max="100"
+                              step="0.1"
+                              disabled={!item.product_id}
+                            />
                           </TableCell>
                           <TableCell className="font-medium text-sm">
                             {item.product_id ? `₹${totalWithTax.toFixed(2)}` : '-'}
@@ -731,9 +848,23 @@ export default function CreatePurchaseOrder() {
                   <Plus className="h-4 w-4 mr-2" />
                   Add Row
                 </Button>
-                <div className="flex justify-between font-bold text-lg min-w-[200px]">
-                  <span>Total:</span>
-                  <span>₹{totalAmount.toFixed(2)}</span>
+                <div className="flex flex-col items-end gap-1 min-w-[200px]">
+                  <div className="flex justify-between w-full text-sm text-muted-foreground">
+                    <span>Subtotal:</span>
+                    <span>₹{calculateItemsSubtotal().toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between w-full text-sm text-muted-foreground font-medium">
+                    <span>Tax:</span>
+                    <span className="text-red-500">+₹{calculateTotalTax().toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between w-full text-sm text-muted-foreground font-medium">
+                    <span>Item Discount:</span>
+                    <span className="text-green-600">-₹{calculateTotalDiscount().toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between w-full font-bold text-lg pt-2 border-t mt-1">
+                    <span>Items Total:</span>
+                    <span>₹{calculateItemsLineTotalSum().toFixed(2)}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -749,14 +880,58 @@ export default function CreatePurchaseOrder() {
               <CardTitle>Summary</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Items:</span>
-                  <span className="font-medium">{items.length}</span>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs">Extra Discount (%)</Label>
+                    <Input 
+                      type="number" 
+                      placeholder="0"
+                      value={extraDiscountPct || ''} 
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setExtraDiscountPct(val);
+                        if (val > 0) setExtraDiscount(0);
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Extra Discount (Fixed)</Label>
+                    <Input 
+                      type="number" 
+                      placeholder="0"
+                      value={extraDiscount || ''} 
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setExtraDiscount(val);
+                        if (val > 0) setExtraDiscountPct(0);
+                      }}
+                    />
+                  </div>
                 </div>
-                <div className="flex justify-between font-bold text-lg pt-2 border-t">
-                  <span>Total:</span>
-                  <span>₹{totalAmount.toFixed(2)}</span>
+
+                <div className="space-y-2 pt-4 border-t">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Items Total:</span>
+                    <span>₹{calculateItemsLineTotalSum().toFixed(2)}</span>
+                  </div>
+                  {(extraDiscountPct > 0 || extraDiscount > 0) && (
+                    <div className="flex justify-between text-sm text-green-600 font-medium font-serif italic border-b pb-1">
+                      <span>
+                        Extra Discount 
+                        {extraDiscountPct > 0 ? ` (${extraDiscountPct}%)` : ''}:
+                      </span>
+                      <span>
+                        -₹{extraDiscountPct > 0 
+                          ? ((calculateItemsLineTotalSum() * extraDiscountPct) / 100).toFixed(2)
+                          : extraDiscount.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-bold text-xl pt-2 text-primary">
+                    <span>Grand Total:</span>
+                    <span>₹{finalTotalAmount.toFixed(2)}</span>
+                  </div>
                 </div>
               </div>
             </CardContent>

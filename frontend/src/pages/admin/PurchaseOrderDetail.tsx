@@ -189,6 +189,7 @@ export default function PurchaseOrderDetail() {
                       <TableHead className="min-w-[80px]">Quantity</TableHead>
                       <TableHead className="min-w-[100px]">Unit Price</TableHead>
                       <TableHead className="min-w-[80px]">Tax %</TableHead>
+                      <TableHead className="min-w-[80px]">Disc %</TableHead>
                       <TableHead className="min-w-[100px]">Received</TableHead>
                       <TableHead className="min-w-[100px]">Total</TableHead>
                     </TableRow>
@@ -206,7 +207,8 @@ export default function PurchaseOrderDetail() {
                         <TableCell className="text-sm">{item.hsn_code || item.products?.hsn_code || '-'}</TableCell>
                         <TableCell>{item.quantity}</TableCell>
                         <TableCell>₹{item.unit_price.toFixed(2)}</TableCell>
-                        <TableCell className="text-sm">{item.tax_percentage ? `${item.tax_percentage}%` : (item.products?.tax ? `${item.products.tax}%` : '-')}</TableCell>
+                        <TableCell className="text-sm">{item.tax_percentage ? `${item.tax_percentage}%` : '-'}</TableCell>
+                        <TableCell className="text-sm">{item.discount_percentage ? `${item.discount_percentage}%` : '-'}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <span>{item.received_quantity || 0} / {item.quantity}</span>
@@ -228,11 +230,28 @@ export default function PurchaseOrderDetail() {
                   </TableBody>
                 </Table>
               </div>
-              <div className="mt-4 flex justify-end">
-                <div className="text-right">
-                  <p className="text-lg font-bold">
-                    Total: ₹{purchaseOrder.total_amount.toFixed(2)}
-                  </p>
+              <div className="mt-4 flex flex-col items-end gap-1 border-t pt-4">
+                <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
+                  <span>Subtotal:</span>
+                  <span>₹{purchaseOrder.subtotal?.toFixed(2) || '0.00'}</span>
+                </div>
+                <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
+                  <span>Tax:</span>
+                  <span>₹{purchaseOrder.total_tax?.toFixed(2) || '0.00'}</span>
+                </div>
+                <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
+                  <span>Item Discount:</span>
+                  <span>-₹{(purchaseOrder.total_discount - (purchaseOrder.extra_discount_amount || 0)).toFixed(2)}</span>
+                </div>
+                {purchaseOrder.extra_discount_amount > 0 && (
+                  <div className="flex justify-between w-full max-w-[250px] text-sm text-green-600 italic">
+                    <span>Extra Discount{purchaseOrder.extra_discount_percentage > 0 ? ` (${purchaseOrder.extra_discount_percentage}%)` : ''}:</span>
+                    <span>-₹{purchaseOrder.extra_discount_amount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between w-full max-w-[250px] font-bold text-lg pt-2 border-t mt-1">
+                  <span>Total Amount:</span>
+                  <span>₹{purchaseOrder.total_amount.toFixed(2)}</span>
                 </div>
               </div>
             </CardContent>

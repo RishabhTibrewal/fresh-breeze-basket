@@ -643,10 +643,11 @@ export default function OrderDocumentPage() {
                   <TableRow>
                     <TableHead>Product</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
-                      <TableHead className="hidden md:table-cell">Warehouse</TableHead>
-                      <TableHead className="text-right">Unit Price</TableHead>
-                      <TableHead className="text-right">Tax</TableHead>
-                      <TableHead className="text-right">Line Total</TableHead>
+                    <TableHead className="hidden md:table-cell">Warehouse</TableHead>
+                    <TableHead className="text-right">Unit Price</TableHead>
+                    <TableHead className="text-right">Disc %</TableHead>
+                    <TableHead className="text-right">Tax %</TableHead>
+                    <TableHead className="text-right">Line Total</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -657,9 +658,9 @@ export default function OrderDocumentPage() {
                         );
                         const unitPrice = item.unit_price || 0;
                         const quantity = item.quantity || 0;
-                        const subtotal = quantity * unitPrice;
-                        const taxAmount = item.tax_amount || 0;
-                        const lineTotal = subtotal + taxAmount;
+                        const discPct = item.discount_percentage || 0;
+                        const taxPct = item.tax_percentage || 0;
+                        const lineTotal = item.line_total || (quantity * unitPrice);
 
                         return (
                       <TableRow key={item.id}>
@@ -711,22 +712,39 @@ export default function OrderDocumentPage() {
                               ₹ {unitPrice.toFixed(2)}
                         </TableCell>
                         <TableCell className="text-right text-sm">
-                              ₹ {Number(taxAmount).toFixed(2)}
+                              {discPct}%
+                        </TableCell>
+                        <TableCell className="text-right text-sm">
+                              {taxPct}%
                         </TableCell>
                         <TableCell className="text-right text-sm font-medium">
-                              ₹ {lineTotal.toFixed(2)}
+                              ₹ {Number(lineTotal).toFixed(2)}
                         </TableCell>
                       </TableRow>
                         );
                       }
                   )}
-                    <TableRow className="font-bold">
-                      <TableCell colSpan={6} className="text-right">
-                        Total
-                      </TableCell>
-                      <TableCell className="text-right">
-                        ₹ {order.total_amount?.toFixed(2) ?? "0.00"}
-                      </TableCell>
+                    <TableRow className="border-t-2">
+                      <TableCell colSpan={6} className="text-right font-medium">Subtotal (Sum of Items)</TableCell>
+                      <TableCell className="text-right font-medium">₹ {(order.subtotal || 0).toFixed(2)}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-right text-muted-foreground">Total Item Tax</TableCell>
+                      <TableCell className="text-right text-muted-foreground">₹ {(order.total_tax || 0).toFixed(2)}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-right text-muted-foreground">Total Discount (Incl. Extra)</TableCell>
+                      <TableCell className="text-right text-muted-foreground text-red-500">-₹ {(order.total_discount || 0).toFixed(2)}</TableCell>
+                    </TableRow>
+                    {order.extra_discount_percentage > 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-right text-xs text-muted-foreground italic">Extra Discount ({order.extra_discount_percentage}%)</TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground italic">-₹ {(order.extra_discount_amount || 0).toFixed(2)}</TableCell>
+                      </TableRow>
+                    )}
+                    <TableRow className="font-bold text-lg">
+                      <TableCell colSpan={6} className="text-right">Grand Total</TableCell>
+                      <TableCell className="text-right">₹ {order.total_amount?.toFixed(2) ?? "0.00"}</TableCell>
                     </TableRow>
                 </TableBody>
               </Table>

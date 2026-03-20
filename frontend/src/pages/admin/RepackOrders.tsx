@@ -11,8 +11,9 @@ import {
   CreateRepackOrderInput,
   PackagingRecipe,
 } from '@/api/inventory';
-import { warehousesService } from '@/api/warehouses';
+import { warehousesService, Warehouse } from '@/api/warehouses';
 import { ProductVariantCombobox } from '@/components/products/ProductVariantCombobox';
+import { WarehouseCombobox } from '@/components/warehouses/WarehouseCombobox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -103,7 +104,7 @@ const statusBadge = (status: string) => {
 // ─── New Order Form ───────────────────────────────────────────────────────────
 
 interface NewOrderFormProps {
-  warehouses: { id: string; name: string }[];
+  warehouses: Warehouse[];
   recipes: PackagingRecipe[];
   onSuccess: () => void;
 }
@@ -266,16 +267,13 @@ function NewOrderForm({ warehouses, recipes, onSuccess }: NewOrderFormProps) {
         {/* Warehouse */}
         <div className="space-y-1.5">
           <label className="text-sm font-semibold text-gray-700">Warehouse</label>
-          <select
-            value={warehouseId}
-            onChange={(e) => setWarehouseId(e.target.value)}
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
-          >
-            <option value="">Select warehouse…</option>
-            {warehouses.map((w) => (
-              <option key={w.id} value={w.id}>{w.name}</option>
-            ))}
-          </select>
+          <WarehouseCombobox
+            warehouses={warehouses}
+            selectedWarehouseId={warehouseId}
+            onSelect={setWarehouseId}
+            placeholder="Select warehouse…"
+            className="w-full"
+          />
         </div>
 
         {/* Input product */}
@@ -296,9 +294,7 @@ function NewOrderForm({ warehouses, recipes, onSuccess }: NewOrderFormProps) {
             selectedVariantId={inputVariantId || null}
             onSelect={(pid, vid) => { setInputProductId(pid); setInputVariantId(vid); }}
             filterActive={false}
-            useListInModal
           />
-          <p className="text-xs text-gray-400">Select bulk/input variant (bags, cartons, etc.)</p>
         </div>
 
         {/* Quantities row */}
@@ -349,9 +345,7 @@ function NewOrderForm({ warehouses, recipes, onSuccess }: NewOrderFormProps) {
             selectedVariantId={outputVariantId || null}
             onSelect={(pid, vid) => { setOutputProductId(pid); setOutputVariantId(vid); }}
             filterActive={false}
-            useListInModal
           />
-          <p className="text-xs text-gray-400">Select retail/output variant (packets, pouches, etc.)</p>
         </div>
 
         {/* Notes */}
@@ -461,7 +455,7 @@ function PreviewRow({ label, value, highlight, muted }: { label: string; value: 
 // ─── Order History ────────────────────────────────────────────────────────────
 
 interface OrderHistoryProps {
-  warehouses: { id: string; name: string }[];
+  warehouses: Warehouse[];
 }
 
 function OrderHistory({ warehouses }: OrderHistoryProps) {
@@ -520,17 +514,14 @@ function OrderHistory({ warehouses }: OrderHistoryProps) {
   return (
     <>
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-5">
-        <select
-          value={filterWarehouse}
-          onChange={(e) => setFilterWarehouse(e.target.value)}
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm min-w-[160px] focus:ring-2 focus:ring-indigo-400 outline-none"
-        >
-          <option value="">All warehouses</option>
-          {warehouses.map((w) => (
-            <option key={w.id} value={w.id}>{w.name}</option>
-          ))}
-        </select>
+      <div className="flex flex-wrap gap-3 mb-5 items-center">
+        <WarehouseCombobox
+          warehouses={warehouses}
+          selectedWarehouseId={filterWarehouse}
+          onSelect={setFilterWarehouse}
+          placeholder="All warehouses"
+          className="min-w-[200px]"
+        />
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}

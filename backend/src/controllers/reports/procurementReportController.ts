@@ -39,7 +39,7 @@ const INVOICE_COLS: ExportColumn[] = [
   { key: 'grn_number',     label: 'GRN #',                            width: 18 },
   { key: 'supplier_name',  label: 'Supplier',                         width: 24 },
   { key: 'subtotal',       label: 'Subtotal',    format: 'currency',  align: 'right', width: 16 },
-  { key: 'tax_amount',     label: 'Tax',         format: 'currency',  align: 'right', width: 14 },
+  { key: 'total_tax',      label: 'Tax',         format: 'currency',  align: 'right', width: 14 },
   { key: 'total_amount',   label: 'Total',       format: 'currency',  align: 'right', width: 16 },
   { key: 'paid_amount',    label: 'Paid',        format: 'currency',  align: 'right', width: 16 },
   { key: 'outstanding',    label: 'Outstanding', format: 'currency',  align: 'right', width: 16 },

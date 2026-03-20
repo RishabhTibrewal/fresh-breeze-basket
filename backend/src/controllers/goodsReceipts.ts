@@ -103,7 +103,7 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
     const { data: poItems, error: poItemsError } = await adminClient
       .schema('procurement')
       .from('purchase_order_items')
-      .select('id, quantity, received_quantity, variant_id, product_id')
+      .select('id, quantity, received_quantity, variant_id, product_id, tax_percentage')
       .eq('purchase_order_id', purchase_order_id)
       .eq('company_id', req.companyId);
 
@@ -226,10 +226,17 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
         quantity_accepted = item.quantity_received;
       }
 
-      // Calculate line total based on accepted quantity only
-      const line_total = quantity_accepted * item.unit_price;
-      total_received_amount += line_total;
+      // Calculate line total based on accepted quantity only (subtotal first for header calculation)
+      const itemSubtotal = quantity_accepted * item.unit_price;
+      const itemTaxPct = (item.tax_percentage !== undefined && item.tax_percentage !== null) ? item.tax_percentage : (poItem.tax_percentage ?? 0);
+      const itemTaxAmt = Math.round((itemSubtotal * itemTaxPct / 100) * 100) / 100;
+      const itemLineTotal = Math.round((itemSubtotal + itemTaxAmt) * 100) / 100;
+      
+      total_received_amount += itemLineTotal;
     }
+
+    // Ensure total_received_amount is rounded
+    total_received_amount = Math.round(total_received_amount * 100) / 100;
 
     // Create goods receipt
     const { data: goodsReceipt, error: grnError } = await adminClient
@@ -316,6 +323,13 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
         quantity_rejected = 0;
       }
       
+      // Use item-level tax rate if provided, otherwise fetch from PO item or product
+      const po_tax_percentage = (item.tax_percentage !== undefined && item.tax_percentage !== null)
+        ? item.tax_percentage
+        : (poItem?.tax_percentage ?? (product?.tax || 0));
+      const tax_amount = Math.round((((quantity_accepted * item.unit_price) * po_tax_percentage) / 100) * 100) / 100;
+      const line_total = Math.round(((quantity_accepted * item.unit_price) + tax_amount) * 100) / 100;
+
       return {
         goods_receipt_id: goodsReceipt.id,
         purchase_order_item_id: item.purchase_order_item_id,
@@ -331,10 +345,14 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
         unit: product?.unit_type || 'piece',
         product_code: product?.product_code || '',
         hsn_code: product?.hsn_code || '',
-        tax_percentage: product?.tax || 0,
+        tax_percentage: po_tax_percentage,
+        tax_amount: tax_amount,
+        line_total: line_total,
         company_id: req.companyId
       };
     });
+
+    const grn_total_tax = receiptItems.reduce((sum: number, item: any) => sum + item.tax_amount, 0);
 
     const { data: createdItems, error: itemsError } = await adminClient
       .schema('procurement')
@@ -351,6 +369,18 @@ export const createGoodsReceipt = async (req: Request, res: Response, next: Next
         .eq('id', goodsReceipt.id)
         .eq('company_id', req.companyId);
       throw new ApiError(500, `Failed to create goods receipt items: ${itemsError.message}`);
+    }
+
+    // Update GRN header with total_tax
+    if (grn_total_tax >= 0) {
+      await adminClient
+        .schema('procurement')
+        .from('goods_receipts')
+        .update({ total_tax: grn_total_tax })
+        .eq('id', goodsReceipt.id)
+        .eq('company_id', req.companyId);
+      
+      goodsReceipt.total_tax = grn_total_tax;
     }
 
     // Auto-update PO status to 'ordered' if PO is approved (GRN can only be created for approved/ordered/partially_received POs)
@@ -669,6 +699,20 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
           productsMap = new Map(products?.map((p: any) => [p.id, p]) || []);
         }
 
+        // Fetch PO items to get tax_percentage snapshot if applicable
+        const poItemIds = items.map((item: any) => item.purchase_order_item_id).filter(Boolean);
+        let poItemsMap = new Map();
+        if (poItemIds.length > 0) {
+          const { data: poItems } = await adminClient
+            .schema('procurement')
+            .from('purchase_order_items')
+            .select('id, tax_percentage')
+            .in('id', poItemIds)
+            .eq('company_id', req.companyId);
+            
+          poItemsMap = new Map(poItems?.map((poItem: any) => [poItem.id, poItem]) || []);
+        }
+
         const receiptItems = items.map((item: any) => {
           const product = productsMap.get(item.product_id);
           const quantity_received = item.quantity_received;
@@ -701,6 +745,15 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
             quantity_rejected = 0;
           }
           
+          const poItem = poItemsMap.get(item.purchase_order_item_id);
+          // Use item-level tax rate if provided, otherwise fetch from PO item or product
+          const po_tax_percentage = (item.tax_percentage !== undefined && item.tax_percentage !== null)
+            ? item.tax_percentage
+            : (poItem?.tax_percentage ?? (product?.tax || 0));
+
+          const tax_amount = Math.round((((quantity_accepted * item.unit_price) * po_tax_percentage) / 100) * 100) / 100;
+          const line_total = Math.round(((quantity_accepted * item.unit_price) + tax_amount) * 100) / 100;
+
           return {
             goods_receipt_id: id,
             purchase_order_item_id: item.purchase_order_item_id,
@@ -715,10 +768,14 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
             unit: product?.unit_type || 'piece',
             product_code: product?.product_code || '',
             hsn_code: product?.hsn_code || '',
-            tax_percentage: product?.tax || 0,
+            tax_percentage: po_tax_percentage,
+            tax_amount: tax_amount,
+            line_total: line_total,
             company_id: req.companyId
           };
         });
+
+        const grn_total_tax = receiptItems.reduce((sum: number, item: any) => sum + item.tax_amount, 0);
 
         const { error: itemsError } = await adminClient
           .schema('procurement')
@@ -730,16 +787,22 @@ export const updateGoodsReceipt = async (req: Request, res: Response, next: Next
           throw new ApiError(500, 'Failed to update goods receipt items');
         }
 
-        // Recalculate total based on accepted quantity only
+        // Recalculate total based on accepted quantity only (including tax)
         let total_received_amount = 0;
         for (const item of receiptItems) {
-          total_received_amount += item.quantity_accepted * item.unit_price;
+           total_received_amount += item.line_total;
         }
+        total_received_amount = Math.round(total_received_amount * 100) / 100;
+
+        const updatePayload: any = { 
+          total_received_amount,
+          total_tax: grn_total_tax 
+        };
 
         await adminClient
           .schema('procurement')
           .from('goods_receipts')
-          .update({ total_received_amount })
+          .update(updatePayload)
           .eq('id', id)
           .eq('company_id', req.companyId);
       }

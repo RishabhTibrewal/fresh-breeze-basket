@@ -9,6 +9,7 @@ export interface PurchaseInvoiceItem {
   unit: string;
   unit_price: number;
   tax_percentage: number;
+  discount_percentage: number;
   tax_amount: number;
   discount_amount: number;
   line_total: number;
@@ -26,8 +27,10 @@ export interface PurchaseInvoice {
   invoice_date: string;
   due_date?: string;
   subtotal: number;
-  tax_amount: number;
-  discount_amount: number;
+  total_tax: number;
+  total_discount: number;
+  extra_discount_percentage?: number;
+  extra_discount_amount?: number;
   total_amount: number;
   paid_amount: number;
   status: 'pending' | 'partial' | 'paid' | 'overdue' | 'cancelled';
@@ -49,8 +52,10 @@ export interface CreatePurchaseInvoiceData {
   invoice_date: string;
   due_date?: string;
   subtotal?: number;
-  tax_amount?: number;
-  discount_amount?: number;
+  total_tax?: number;
+  total_discount?: number;
+  extra_discount_percentage?: number;
+  extra_discount_amount?: number;
   total_amount?: number;
   invoice_file_url?: string;
   notes?: string;
@@ -61,6 +66,7 @@ export interface CreatePurchaseInvoiceData {
     unit?: string;
     unit_price: number;
     tax_percentage?: number;
+    discount_percentage?: number;
     discount_amount?: number;
     hsn_code?: string;
     product_code?: string;
@@ -72,8 +78,10 @@ export interface CreateInvoiceFromGRNData {
   supplier_invoice_number?: string;
   invoice_date?: string;
   due_date?: string;
-  tax_amount?: number;
-  discount_amount?: number;
+  tax_amount?: number;       // legacy — maps to total_tax on backend
+  discount_amount?: number;  // legacy — maps to total_discount on backend
+  extra_discount_percentage?: number;
+  extra_discount_amount?: number;
   notes?: string;
 }
 

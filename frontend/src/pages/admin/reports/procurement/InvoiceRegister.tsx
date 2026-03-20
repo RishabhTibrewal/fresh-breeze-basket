@@ -16,7 +16,7 @@ interface InvoiceRegisterRow {
   grn_number: string;
   supplier_name: string;
   subtotal: number;
-  tax_amount: number;
+  total_tax: number;
   total_amount: number;
   paid_amount: number;
   outstanding: number;
@@ -44,7 +44,7 @@ const COLUMNS: ReportColumn<InvoiceRegisterRow>[] = [
   },
   { key: 'supplier_name',  label: 'Supplier',    sortable: true },
   { key: 'subtotal',       label: 'Subtotal',    align: 'right', render: (v) => formatCurrency(Number(v)) },
-  { key: 'tax_amount',     label: 'Tax',         align: 'right', render: (v) => formatCurrency(Number(v)) },
+  { key: 'total_tax',     label: 'Tax',         align: 'right', render: (v) => formatCurrency(Number(v)) },
   { key: 'total_amount',   label: 'Total',       align: 'right', sortable: true, render: (v) => <span className="font-semibold">{formatCurrency(Number(v))}</span> },
   { key: 'paid_amount',    label: 'Paid',        align: 'right', render: (v) => <span className="text-emerald-700">{formatCurrency(Number(v))}</span> },
   {

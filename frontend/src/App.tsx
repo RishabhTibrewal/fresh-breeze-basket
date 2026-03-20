@@ -147,6 +147,8 @@ const CreatePayment = lazy(() => import("./pages/sales/CreatePayment"));
 const CreditManagement = lazy(() => import("./pages/sales/CreditManagement"));
 const SalesAnalytics = lazy(() => import("./pages/sales/SalesAnalytics"));
 const Leads = lazy(() => import("./pages/sales/Leads"));
+const Quotations = lazy(() => import("./pages/sales/Quotations"));
+const CreateQuotation = lazy(() => import("./pages/sales/CreateQuotation"));
 const CreatePOSOrder = lazy(() => import("./pages/pos/CreatePOSOrder"));
 
 // Shared order pages
@@ -238,7 +240,8 @@ const App: React.FC = () => {
                       <Route path="settings" element={<AdminSettings />} />
                       <Route path="sales-targets" element={<SalesTargets />} />
                       <Route path="leads" element={<AdminLeads />} />
-                      <Route path="quotations" element={<PlaceholderPage />} />
+                      <Route path="quotations" element={<Quotations />} />
+                      <Route path="quotations/create" element={<CreateQuotation />} />
                       <Route path="invoices" element={<PlaceholderPage />} />
                       <Route path="payments" element={<PlaceholderPage />} />
                       <Route path="credit-management" element={<AdminCreditManagement />} />
@@ -366,14 +369,15 @@ const App: React.FC = () => {
                       <Route path="orders/:id/edit" element={<OrderUpdate />} />
                       <Route path="orders/:orderId/edit" element={<OrderUpdate />} />
                       <Route path="orders/:id/return" element={<CreateReturnOrderPage />} />
-                      <Route path="quotations" element={<PlaceholderPage />} />
+                      <Route path="quotations" element={<Quotations />} />
+                      <Route path="quotations/create" element={<CreateQuotation />} />
                       <Route path="invoices" element={<PlaceholderPage />} />
                       <Route path="payments" element={<Payments />} />
                       <Route path="payments/new" element={<CreatePayment />} />
                       <Route path="customers" element={<Customers />} />
                       <Route path="customers/:id" element={<AdminCustomerDetails />} />
                       <Route path="customers/:customerId/orders" element={<CustomerOrders />} />
-                      <Route path="leads" element={<AdminLeads />} />
+                      <Route path="leads" element={<Leads />} />
                       <Route path="credit-management" element={<AdminCreditManagement />} />
                       <Route path="analytics" element={<SalesAnalysis />} />
                     </Route>

@@ -11,6 +11,7 @@ export interface GoodsReceipt {
   inspection_notes?: string;
   status: 'pending' | 'inspected' | 'approved' | 'rejected' | 'completed';
   total_received_amount: number;
+  total_tax?: number;
   notes?: string;
   created_at: string;
   updated_at: string;
@@ -28,13 +29,15 @@ export interface GoodsReceiptItem {
   quantity_accepted: number;
   quantity_rejected: number;
   unit_price: number;
+  tax_percentage?: number;
+  tax_amount?: number;
+  line_total?: number;
   batch_number?: string;
   expiry_date?: string;
   condition_notes?: string;
   unit?: string;
   product_code?: string;
   hsn_code?: string;
-  tax_percentage?: number;
   created_at: string;
   products?: any;
   purchase_order_items?: any;

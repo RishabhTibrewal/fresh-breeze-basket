@@ -86,7 +86,7 @@ const createPurchaseOrderFromInvoiceOrderRow = async (params: {
  */
 export const createInvoiceFromGRN = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { goods_receipt_id, supplier_invoice_number, invoice_date, due_date, tax_amount, discount_amount, notes } = req.body;
+    const { goods_receipt_id, supplier_invoice_number, invoice_date, due_date, tax_amount, discount_amount, extra_discount_percentage, extra_discount_amount, notes } = req.body;
 
     if (!goods_receipt_id) {
       throw new ValidationError('Goods receipt ID is required');
@@ -160,11 +160,89 @@ export const createInvoiceFromGRN = async (req: Request, res: Response, next: Ne
     // Generate invoice number
     const invoice_number = await generateInvoiceNumber(req.companyId);
 
-    // Calculate amounts from GRN
-    const calculatedSubtotal = goodsReceipt.total_received_amount || 0;
-    const calculatedTax = tax_amount || 0;
-    const calculatedDiscount = discount_amount || 0;
-    const calculatedTotal = calculatedSubtotal + calculatedTax - calculatedDiscount;
+    // Fetch GRN items to calculate totals and create invoice items
+    const { data: grnItems, error: grnItemsError } = await adminClient
+      .schema('procurement')
+      .from('goods_receipt_items')
+      .select('*')
+      .eq('goods_receipt_id', goods_receipt_id)
+      .eq('company_id', req.companyId);
+
+    if (grnItemsError || !grnItems) {
+      console.error('Error fetching GRN items:', grnItemsError);
+      throw new ApiError(500, 'Failed to fetch GRN items for calculation');
+    }
+
+    // Fetch PO items to get discounts
+    const poItemIds = grnItems.map(item => item.purchase_order_item_id).filter(Boolean);
+    const { data: poItems, error: poItemsError } = await adminClient
+      .schema('procurement')
+      .from('purchase_order_items')
+      .select('id, discount_percentage')
+      .in('id', poItemIds)
+      .eq('company_id', req.companyId);
+
+    const poItemsMap = new Map(poItems?.map(item => [item.id, item]) || []);
+
+    // Calculate totals locally first to ensure header matches items
+    let calculatedSubtotal = 0;
+    let calculatedTax = 0;
+    let calculatedDiscount = 0;
+
+    const invoiceItemsData = grnItems.map((grnItem: any) => {
+      const quantity = grnItem.quantity_accepted || 0;
+      if (quantity <= 0) return null;
+
+      const unitPrice = grnItem.unit_price || 0;
+      const taxPercentage = grnItem.tax_percentage || 0;
+      const poItem = poItemsMap.get(grnItem.purchase_order_item_id);
+      const discountPercentage = poItem?.discount_percentage || 0;
+
+      const itemSubtotal = quantity * unitPrice;
+      const taxAmount = Math.round(((itemSubtotal * taxPercentage) / 100) * 100) / 100;
+      const discountAmount = Math.round(((itemSubtotal * discountPercentage) / 100) * 100) / 100;
+      const lineTotal = Math.round((itemSubtotal + taxAmount - discountAmount) * 100) / 100;
+
+      calculatedSubtotal += itemSubtotal;
+      calculatedTax += taxAmount;
+      calculatedDiscount += discountAmount;
+
+      return {
+        product_id: grnItem.product_id,
+        variant_id: grnItem.variant_id,
+        goods_receipt_item_id: grnItem.id,
+        quantity,
+        unit: grnItem.unit,
+        unit_price: unitPrice,
+        tax_percentage: taxPercentage,
+        tax_amount: taxAmount,
+        discount_percentage: discountPercentage,
+        discount_amount: discountAmount,
+        line_total: lineTotal,
+        hsn_code: grnItem.hsn_code,
+        product_code: grnItem.product_code,
+        company_id: req.companyId
+      };
+    }).filter(Boolean);
+
+    calculatedSubtotal = Math.round(calculatedSubtotal * 100) / 100;
+    calculatedTax = Math.round(calculatedTax * 100) / 100;
+    calculatedDiscount = Math.round(calculatedDiscount * 100) / 100;
+
+    let extraDiscPct = extra_discount_percentage !== undefined ? extra_discount_percentage : (purchaseOrder?.extra_discount_percentage || 0);
+    let extraDiscAmt = extra_discount_amount || 0;
+
+    // Standardized Extra Discount logic
+    if (extraDiscPct > 0) {
+      // Base for extra discount: (subtotal + tax - item_discount)
+      const extraDiscBase = calculatedSubtotal + calculatedTax - calculatedDiscount;
+      extraDiscAmt = Math.round(((extraDiscBase * extraDiscPct) / 100) * 100) / 100;
+    } else {
+      extraDiscAmt = Math.round(extraDiscAmt * 100) / 100;
+      extraDiscPct = 0;
+    }
+
+    const calculatedTotal = Math.round((calculatedSubtotal - calculatedDiscount + calculatedTax - extraDiscAmt) * 100) / 100;
 
     // Set default dates if not provided
     const invoiceDate = invoice_date || new Date().toISOString().split('T')[0];
@@ -184,8 +262,10 @@ export const createInvoiceFromGRN = async (req: Request, res: Response, next: Ne
         invoice_date: invoiceDate,
         due_date: dueDate,
         subtotal: calculatedSubtotal,
-        tax_amount: calculatedTax,
-        discount_amount: calculatedDiscount,
+        total_tax: calculatedTax,
+        total_discount: calculatedDiscount,
+        extra_discount_percentage: extraDiscPct,
+        extra_discount_amount: extraDiscAmt,
         total_amount: calculatedTotal,
         paid_amount: 0,
         status: 'pending',
@@ -201,57 +281,17 @@ export const createInvoiceFromGRN = async (req: Request, res: Response, next: Ne
       throw new ApiError(500, `Failed to create purchase invoice: ${invoiceError.message}`);
     }
 
-    // Fetch GRN items to create invoice items
-    const { data: grnItems, error: grnItemsError } = await adminClient
-      .schema('procurement')
-      .from('goods_receipt_items')
-      .select('*')
-      .eq('goods_receipt_id', goods_receipt_id)
-      .eq('company_id', req.companyId);
-
-    if (grnItemsError) {
-      console.error('Error fetching GRN items:', grnItemsError);
-      // Don't fail the invoice creation, but log the error
-    }
-
-    // Create invoice items from GRN items
-    // Only use accepted quantity for invoicing (rejected items should not be invoiced)
-    if (grnItems && grnItems.length > 0) {
-      const invoiceItems = grnItems.map((grnItem: any) => {
-        // Use only accepted quantity - rejected items should not be invoiced
-        const quantity = grnItem.quantity_accepted || 0;
-        
-        if (quantity <= 0) {
-          // Skip items with no accepted quantity
-          return null;
-        }
-        
-        const unitPrice = grnItem.unit_price || 0;
-        const taxPercentage = grnItem.tax_percentage || 0;
-        const taxAmount = (quantity * unitPrice * taxPercentage) / 100;
-        const lineTotal = (quantity * unitPrice) + taxAmount - (grnItem.discount_amount || 0);
-
-        return {
-          purchase_invoice_id: purchaseInvoice.id,
-          product_id: grnItem.product_id,
-          goods_receipt_item_id: grnItem.id,
-          quantity,
-          unit: grnItem.unit || 'piece',
-          unit_price: unitPrice,
-          tax_percentage: taxPercentage,
-          tax_amount: taxAmount,
-          discount_amount: 0,
-          line_total: lineTotal,
-          hsn_code: grnItem.hsn_code || '',
-          product_code: grnItem.product_code || '',
-          company_id: req.companyId
-        };
-      }).filter((item: any) => item !== null); // Remove null items (those with no accepted quantity)
+    // Insert invoice items
+    if (invoiceItemsData.length > 0) {
+      const itemsToInsert = invoiceItemsData.map(item => ({
+        ...item,
+        purchase_invoice_id: purchaseInvoice.id
+      }));
 
       const { error: itemsError } = await adminClient
         .schema('procurement')
         .from('purchase_invoice_items')
-        .insert(invoiceItems);
+        .insert(itemsToInsert);
 
       if (itemsError) {
         console.error('Error creating invoice items:', itemsError);
@@ -289,8 +329,10 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
       invoice_date,
       due_date,
       subtotal,
-      tax_amount,
-      discount_amount,
+      total_tax,
+      total_discount,
+      extra_discount_percentage,
+      extra_discount_amount,
       total_amount,
       notes
     } = req.body;
@@ -330,10 +372,23 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
     const invoice_number = await generateInvoiceNumber(req.companyId);
 
     // Calculate amounts if not provided
-    const calculatedSubtotal = subtotal || goodsReceipt.total_received_amount || 0;
-    const calculatedTax = tax_amount || 0;
-    const calculatedDiscount = discount_amount || 0;
-    const calculatedTotal = calculatedSubtotal + calculatedTax - calculatedDiscount;
+    const calculatedSubtotal = Math.round((subtotal || 0) * 100) / 100;
+    const calculatedTax = Math.round((total_tax || 0) * 100) / 100;
+    const calculatedDiscount = Math.round((total_discount || 0) * 100) / 100;
+    let calcExtraDiscPct = extra_discount_percentage || 0;
+    let calcExtraDiscAmt = extra_discount_amount || 0;
+
+    // Standardized Extra Discount logic
+    if (calcExtraDiscPct > 0) {
+      // Base for extra discount is (subtotal + tax - item_discount)
+      const extraDiscBase = calculatedSubtotal + calculatedTax - calculatedDiscount;
+      calcExtraDiscAmt = Math.round(((extraDiscBase * calcExtraDiscPct) / 100) * 100) / 100;
+    } else {
+      calcExtraDiscAmt = Math.round(calcExtraDiscAmt * 100) / 100;
+      calcExtraDiscPct = 0;
+    }
+
+    const calculatedTotal = Math.round((calculatedSubtotal - calculatedDiscount + calculatedTax - calcExtraDiscAmt) * 100) / 100;
 
     // Create purchase invoice
     const { data: purchaseInvoice, error: invoiceError } = await adminClient
@@ -347,8 +402,10 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
         invoice_date,
         due_date,
         subtotal: calculatedSubtotal,
-        tax_amount: calculatedTax,
-        discount_amount: calculatedDiscount,
+        total_tax: calculatedTax,
+        total_discount: calculatedDiscount,
+        extra_discount_percentage: calcExtraDiscPct,
+        extra_discount_amount: calcExtraDiscAmt,
         total_amount: calculatedTotal,
         paid_amount: 0,
         status: 'pending',
@@ -425,9 +482,10 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
         const quantity = item.quantity || 0;
         const unitPrice = item.unit_price || 0;
         const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : (product?.tax || 0);
-        const taxAmount = (quantity * unitPrice * taxPercentage) / 100;
-        const discountAmount = item.discount_amount || 0;
-        const lineTotal = (quantity * unitPrice) + taxAmount - discountAmount;
+        const taxAmount = Math.round(((quantity * unitPrice * taxPercentage) / 100) * 100) / 100;
+        const discountPercentage = item.discount_percentage || 0;
+        const discountAmount = Math.round(((quantity * unitPrice * discountPercentage) / 100) * 100) / 100;
+        const lineTotal = Math.round(((quantity * unitPrice) + taxAmount - discountAmount) * 100) / 100;
 
         return {
           purchase_invoice_id: purchaseInvoice.id,
@@ -439,6 +497,7 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
           unit_price: unitPrice,
           tax_percentage: taxPercentage,
           tax_amount: taxAmount,
+          discount_percentage: discountPercentage,
           discount_amount: discountAmount,
           line_total: lineTotal,
           hsn_code: item.hsn_code || product?.hsn_code || '',
@@ -802,8 +861,10 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
       invoice_date,
       due_date,
       subtotal,
-      tax_amount,
-      discount_amount,
+      total_tax,
+      total_discount,
+      extra_discount_percentage,
+      extra_discount_amount,
       total_amount,
       notes,
       status
@@ -817,8 +878,10 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
     if (invoice_date !== undefined) updateData.invoice_date = invoice_date;
     if (due_date !== undefined) updateData.due_date = due_date;
     if (subtotal !== undefined) updateData.subtotal = subtotal;
-    if (tax_amount !== undefined) updateData.tax_amount = tax_amount;
-    if (discount_amount !== undefined) updateData.discount_amount = discount_amount;
+    if (total_tax !== undefined) updateData.total_tax = total_tax;
+    if (total_discount !== undefined) updateData.total_discount = total_discount;
+    if (extra_discount_percentage !== undefined) updateData.extra_discount_percentage = extra_discount_percentage;
+    if (extra_discount_amount !== undefined) updateData.extra_discount_amount = extra_discount_amount;
     if (total_amount !== undefined) updateData.total_amount = total_amount;
     if (notes !== undefined) updateData.notes = notes;
     if (status !== undefined) updateData.status = status;
@@ -893,9 +956,10 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
           const quantity = item.quantity || 0;
           const unitPrice = item.unit_price || 0;
           const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : (product?.tax || 0);
-          const taxAmount = (quantity * unitPrice * taxPercentage) / 100;
-          const discountAmount = item.discount_amount || 0;
-          const lineTotal = (quantity * unitPrice) + taxAmount - discountAmount;
+          const taxAmount = Math.round(((quantity * unitPrice * taxPercentage) / 100) * 100) / 100;
+          const discountPercentage = item.discount_percentage || 0;
+          const discountAmount = Math.round(((quantity * unitPrice * discountPercentage) / 100) * 100) / 100;
+          const lineTotal = Math.round(((quantity * unitPrice) + taxAmount - discountAmount) * 100) / 100;
 
           return {
             purchase_invoice_id: id,
@@ -906,6 +970,7 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
             unit_price: unitPrice,
             tax_percentage: taxPercentage,
             tax_amount: taxAmount,
+            discount_percentage: discountPercentage,
             discount_amount: discountAmount,
             line_total: lineTotal,
             hsn_code: item.hsn_code || product?.hsn_code || '',
@@ -926,9 +991,11 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
 
         // Use provided totals or recalculate from items
         const newSubtotal = subtotal !== undefined ? subtotal : invoiceItems.reduce((sum: number, item: any) => sum + (item.quantity * item.unit_price), 0);
-        const newTaxAmount = tax_amount !== undefined ? tax_amount : invoiceItems.reduce((sum: number, item: any) => sum + item.tax_amount, 0);
-        const newDiscountAmount = discount_amount !== undefined ? discount_amount : invoiceItems.reduce((sum: number, item: any) => sum + item.discount_amount, 0);
-        const newTotalAmount = total_amount !== undefined ? total_amount : (newSubtotal + newTaxAmount - newDiscountAmount);
+        const newTaxAmt = total_tax !== undefined ? total_tax : invoiceItems.reduce((sum: number, item: any) => sum + item.tax_amount, 0);
+        const newDiscAmt = total_discount !== undefined ? total_discount : invoiceItems.reduce((sum: number, item: any) => sum + item.discount_amount, 0);
+        const newExtraDiscPct = extra_discount_percentage || 0;
+        const newExtraDiscAmt = extra_discount_amount !== undefined ? extra_discount_amount : parseFloat(((newSubtotal * newExtraDiscPct) / 100).toFixed(2));
+        const newTotalAmount = total_amount !== undefined ? total_amount : (newSubtotal - newDiscAmt + newTaxAmt - newExtraDiscAmt);
 
         // Update invoice totals
         await adminClient
@@ -936,8 +1003,10 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
           .from('purchase_invoices')
           .update({
             subtotal: newSubtotal,
-            tax_amount: newTaxAmount,
-            discount_amount: newDiscountAmount,
+            total_tax: newTaxAmt,
+            total_discount: newDiscAmt,
+            extra_discount_percentage: newExtraDiscPct,
+            extra_discount_amount: newExtraDiscAmt,
             total_amount: newTotalAmount
           })
           .eq('id', id)

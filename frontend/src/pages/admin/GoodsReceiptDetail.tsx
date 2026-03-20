@@ -241,6 +241,8 @@ export default function GoodsReceiptDetail() {
                       <TableHead className="min-w-[80px]">Accepted</TableHead>
                       <TableHead className="min-w-[80px]">Rejected</TableHead>
                       <TableHead className="min-w-[100px]">Unit Price</TableHead>
+                      <TableHead className="min-w-[80px]">Tax %</TableHead>
+                      <TableHead className="min-w-[100px]">Line Total</TableHead>
                       <TableHead className="min-w-[100px]">Batch Number</TableHead>
                       <TableHead className="min-w-[100px]">Expiry Date</TableHead>
                       <TableHead className="min-w-[150px]">Condition Notes</TableHead>
@@ -265,6 +267,8 @@ export default function GoodsReceiptDetail() {
                           {item.quantity_rejected || 0}
                         </TableCell>
                         <TableCell>₹{item.unit_price?.toFixed(2) || '0.00'}</TableCell>
+                        <TableCell className="text-sm">{item.tax_percentage || 0}%</TableCell>
+                        <TableCell className="font-medium text-sm">₹{item.line_total?.toFixed(2) || '0.00'}</TableCell>
                         <TableCell>{item.batch_number || '-'}</TableCell>
                         <TableCell>
                           {item.expiry_date ? new Date(item.expiry_date).toLocaleDateString() : '-'}
@@ -277,11 +281,18 @@ export default function GoodsReceiptDetail() {
                   </TableBody>
                 </Table>
               </div>
-              <div className="mt-4 flex justify-end">
-                <div className="text-right">
-                  <p className="text-lg font-bold">
-                    Total Received: ₹{grn.total_received_amount?.toFixed(2) || '0.00'}
-                  </p>
+              <div className="mt-4 flex flex-col items-end gap-1 border-t pt-4">
+                <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
+                  <span>Subtotal:</span>
+                  <span>₹{(grn.total_received_amount - (grn.total_tax || 0)).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
+                  <span>Tax:</span>
+                  <span>₹{grn.total_tax?.toFixed(2) || '0.00'}</span>
+                </div>
+                <div className="flex justify-between w-full max-w-[250px] font-bold text-lg pt-2 border-t mt-1">
+                  <span>Grand Total:</span>
+                  <span>₹{grn.total_received_amount?.toFixed(2) || '0.00'}</span>
                 </div>
               </div>
             </CardContent>

@@ -8,6 +8,11 @@ export interface PurchaseOrder {
   po_number: string;
   order_date: string;
   expected_delivery_date?: string;
+  subtotal?: number;
+  total_tax?: number;
+  total_discount?: number;
+  extra_discount_percentage?: number;
+  extra_discount_amount?: number;
   total_amount: number;
   notes?: string;
   terms_conditions?: string;
@@ -27,12 +32,15 @@ export interface PurchaseOrderItem {
   product_id: string;
   quantity: number;
   unit_price: number;
+  tax_percentage?: number;
+  discount_percentage?: number;
+  tax_amount?: number;
+  discount_amount?: number;
   line_total: number;
   received_quantity: number;
   unit?: string;
   product_code?: string;
   hsn_code?: string;
-  tax_percentage?: number;
   created_at: string;
   products?: any;
 }
@@ -47,6 +55,8 @@ export interface CreatePurchaseOrderData {
     product_id: string;
     quantity: number;
     unit_price: number;
+    tax_percentage?: number;
+    discount_percentage?: number;
   }>;
 }
 

@@ -14,11 +14,17 @@ type Customer = Database['public']['Tables']['customers']['Row'];
 
 interface OrderItemInput {
   product_id: string;
+  variant_id?: string;
   quantity: number;
-  price: number;
-  unit_price?: number; // Add unit_price as an optional field
-  product_name?: string; // Optional field for frontend
-  warehouse_id?: string; // Warehouse ID for this item
+  price?: number;
+  unit_price?: number;
+  discount_percentage?: number;
+  discount_amount?: number;
+  tax_percentage?: number;
+  tax_amount?: number;
+  line_total?: number;
+  product_name?: string;
+  warehouse_id?: string;
 }
 
 export const orderController = {
@@ -37,10 +43,13 @@ export const orderController = {
         credit_details,
         partial_payment_amount,
         total_amount,
+        extra_discount_amount,
+        extra_discount_percentage,
         transaction_id,
         cheque_no,
         payment_date,
-        sales_executive_id: bodySalesExecutiveId
+        sales_executive_id: bodySalesExecutiveId,
+        quotation_id
       } = req.body;
 
       // Log the received payment_status from frontend
@@ -85,8 +94,13 @@ export const orderController = {
 
       console.log('Customer found:', customer);
 
-      // Calculate order total amount using variant pricing
-      console.log('Calculating order total for items:', items);
+      // Calculate order total amount and items total from frontend provided values
+      // We sum up the line_total from items to use as the base for extra discount
+      const itemTotalPromise = (items as OrderItemInput[]).reduce((sum, item) => sum + (item.line_total || 0), 0);
+      const projectedItemTotal = itemTotalPromise;
+      
+      console.log('Projected item total from line totals:', projectedItemTotal);
+
       let subtotal = 0;
       const productServiceForPricing = new ProductService(req.companyId!);
       
@@ -102,7 +116,7 @@ export const orderController = {
             return res.status(404).json({ 
               error: `Variant ${(item as any).variant_id} not found: ${variantError instanceof Error ? variantError.message : 'Unknown error'}` 
             });
-        }
+          }
         } else {
           // Default to DEFAULT variant pricing
           try {
@@ -119,12 +133,14 @@ export const orderController = {
         subtotal += priceToUse * item.quantity;
       }
 
-      // Note: We'll calculate the actual total_amount from order items after they're created
-      // because each item has its own tax_amount calculated via PricingService
-      // The total_amount will be: sum(quantity * unit_price + tax_amount) for all items + shipping_fee
-      // Temporarily use provided total_amount or subtotal (will be recalculated from items)
-      // This is used for credit limit checks and initial order creation
-      const initialTotalAmount = total_amount || subtotal;
+      // Initial total amount calculation
+      // Note: extra_discount_percentage should apply to line-item-total (incl tax/disc), not raw subtotal
+      const orderExtraDiscPct = extra_discount_percentage || 0;
+      const orderExtraDiscAmt = extra_discount_amount != null
+        ? extra_discount_amount
+        : parseFloat(((projectedItemTotal * orderExtraDiscPct) / 100).toFixed(2));
+
+      const initialTotalAmount = total_amount || (projectedItemTotal - orderExtraDiscAmt);
       console.log('Initial total_amount (will be recalculated from items):', initialTotalAmount);
 
       console.log('Creating order with payment status:', payment_status);
@@ -204,6 +220,10 @@ export const orderController = {
       const fulfillmentType: 'delivery' | 'pickup' =
         shipping_address_id ? 'delivery' : 'pickup';
 
+      // Compute formula columns for the orders header
+      // These variables (orderExtraDiscPct, orderExtraDiscAmt) were already calculated above using projectedItemTotal
+
+
       // Create order record data object for better logging
       const orderData = {
         user_id: customer.user_id,
@@ -212,13 +232,19 @@ export const orderController = {
         shipping_address_id,
         billing_address_id,
         payment_method,
+        subtotal: subtotal,
+        total_tax: 0,
+        total_discount: 0,
+        extra_discount_percentage: orderExtraDiscPct,
+        extra_discount_amount: orderExtraDiscAmt,
         total_amount: initialTotalAmount, // Will be updated after order items are created
         notes,
         payment_status: orderPaymentStatus,
         order_type: 'sales',
         order_source: 'sales',
         fulfillment_type: fulfillmentType,
-        ...(orderSalesExecutiveId != null && { sales_executive_id: orderSalesExecutiveId })
+        ...(orderSalesExecutiveId != null && { sales_executive_id: orderSalesExecutiveId }),
+        ...(quotation_id && { quotation_id })
       };
       
       console.log('Order data being inserted:', JSON.stringify(orderData, null, 2));
@@ -305,86 +331,116 @@ export const orderController = {
       // Create order items with variant prices, variant_id and tax_amount
       const orderItems = await Promise.all(
         (items as OrderItemInput[]).map(async (item) => {
-        // Use the price sent from frontend if available, otherwise fallback to variant prices
-        const unitPrice = item.price || item.unit_price || productPrices[item.product_id];
-        
-        if (!unitPrice || isNaN(Number(unitPrice))) {
-          console.error(`Missing or invalid price for product ${item.product_id}`, { 
-            item_price: item.price,
-            item_unit_price: item.unit_price,
-            variant_price: productPrices[item.product_id],
+          // Use the price sent from frontend if available, otherwise fallback to variant prices
+          const unitPrice = item.price || item.unit_price || productPrices[item.product_id];
+          
+          if (!unitPrice || isNaN(Number(unitPrice))) {
+            console.error(`Missing or invalid price for product ${item.product_id}`, { 
+              item_price: item.price,
+              item_unit_price: item.unit_price,
+              variant_price: productPrices[item.product_id],
               item: item,
-          });
-          throw new Error(`Missing price for product ${item.product_id}`);
-        }
-        
-        // Get variant_id (from request or from variantIds map)
-        const variantId = (item as any).variant_id || variantIds[item.product_id];
-
-          // Calculate tax amount for this line using PricingService
-          let taxAmount = 0;
-          try {
-            const result = await pricingService.calculateLineTotal(
-              item.product_id,
-              item.quantity,
-              Number(unitPrice),
-              variantId || null
-            );
-            taxAmount = result.taxAmount;
-          } catch (err) {
-            console.error(
-              `Error calculating tax for product ${item.product_id}, falling back to 0`,
-              err
-            );
-            taxAmount = 0;
+            });
+            throw new Error(`Missing price for product ${item.product_id}`);
           }
+          
+          // Get variant_id (from request or from variantIds map)
+          const variantId = item.variant_id || variantIds[item.product_id];
+
+          // Use provided values or calculate
+          const taxPercentage = item.tax_percentage || 0;
+          const discountPercentage = item.discount_percentage || 0;
+          
+          let taxAmount = item.tax_amount;
+          if (taxAmount === undefined) {
+            try {
+              const result = await pricingService.calculateLineTotal(
+                item.product_id,
+                item.quantity,
+                Number(unitPrice),
+                variantId || null
+              );
+              taxAmount = result.taxAmount;
+            } catch (err) {
+              console.error(`Error calculating tax for product ${item.product_id}, falling back to 0`, err);
+              taxAmount = 0;
+            }
+          }
+
+          const amount = item.quantity * Number(unitPrice);
+          const discountAmount = item.discount_amount !== undefined 
+            ? item.discount_amount 
+            : (amount * discountPercentage) / 100;
+          
+          const lineTotal = item.line_total !== undefined
+            ? item.line_total
+            : (amount + (taxAmount || 0) - (discountAmount || 0));
         
-        return {
-          order_id: order.id,
-          company_id: req.companyId!,
-          product_id: item.product_id,
-          variant_id: variantId || null, // Include variant_id in order items
-          quantity: item.quantity,
-          unit_price: unitPrice,
-            tax_amount: Math.round(taxAmount * 100) / 100,
+          return {
+            order_id: order.id,
+            company_id: req.companyId!,
+            product_id: item.product_id,
+            variant_id: variantId || null,
+            quantity: item.quantity,
+            unit_price: unitPrice,
+            tax_percentage: taxPercentage,
+            tax_amount: Math.round((taxAmount || 0) * 100) / 100,
+            discount_percentage: discountPercentage,
+            discount_amount: Math.round((discountAmount || 0) * 100) / 100,
+            line_total: Math.round((lineTotal || 0) * 100) / 100,
             warehouse_id: item.warehouse_id || defaultWarehouseId || null,
-        };
+          };
         })
       );
 
       console.log('Final order items to insert:', JSON.stringify(orderItems, null, 2));
 
-      // Calculate actual total_amount from order items (sum of quantity * unit_price + tax_amount for each item)
-      // This ensures the order total matches the sum of item totals, which use per-item tax rates from PricingService
-      const calculatedTotalFromItems = orderItems.reduce((sum, item) => {
-        const itemSubtotal = Number(item.quantity) * Number(item.unit_price);
-        const itemTax = Number(item.tax_amount) || 0;
-        return sum + itemSubtotal + itemTax;
-      }, 0);
+      // Calculate actual total_amount from order items
+      const itemSubtotalSum = orderItems.reduce((s, item) => s + (Number(item.quantity) * Number(item.unit_price)), 0);
+      const itemTaxSum = orderItems.reduce((s, item) => s + (Number(item.tax_amount) || 0), 0);
+      const itemDiscountSum = orderItems.reduce((s, item) => s + (Number(item.discount_amount) || 0), 0);
       
+      const calculatedTotalFromItems = orderItems.reduce((s, item) => s + Number(item.line_total), 0);
       const shipping_fee = 0; // For future implementation
-      const calculatedTotalAmount = calculatedTotalFromItems + shipping_fee;
       
-      console.log('Calculated total_amount from items:', calculatedTotalAmount);
-      console.log('  - Items subtotal + tax:', calculatedTotalFromItems);
-      console.log('  - Shipping fee:', shipping_fee);
+      // RE-CALCULATE extra discount amount based on ACTUAL calculated totals from items
+      const finalExtraDiscAmt = (orderExtraDiscPct > 0)
+        ? parseFloat(((calculatedTotalFromItems * orderExtraDiscPct) / 100).toFixed(2))
+        : Number(extra_discount_amount || 0);
+
+      const finalTotalAmount = calculatedTotalFromItems + shipping_fee - finalExtraDiscAmt;
       
-      // Update order with the calculated total_amount
-      if (Math.abs(calculatedTotalAmount - Number(order.total_amount)) > 0.01) {
-        console.warn(`Order total_amount mismatch: stored=${order.total_amount}, calculated=${calculatedTotalAmount}. Updating order.`);
-        const { error: updateError } = await (supabaseAdmin || supabase)
-          .from('orders')
-          .update({ total_amount: calculatedTotalAmount })
-          .eq('id', order.id)
-          .eq('company_id', req.companyId);
-        
-        if (updateError) {
-          console.error('Error updating order total_amount:', updateError);
-          // Don't fail the request, but log the error
-        } else {
-          order.total_amount = calculatedTotalAmount;
-        }
+      console.log('Calculated totals:', {
+        itemSubtotalSum,
+        itemTaxSum,
+        itemDiscountSum,
+        calculatedTotalFromItems,
+        finalExtraDiscAmt,
+        finalTotalAmount
+      });
+      
+      // Update order with the calculated financial fields
+      const { error: updateError } = await (supabaseAdmin || supabase)
+        .from('orders')
+        .update({
+          subtotal: itemSubtotalSum,
+          total_tax: itemTaxSum,
+          total_discount: Math.round((itemDiscountSum + finalExtraDiscAmt) * 100) / 100,
+          extra_discount_percentage: orderExtraDiscPct,
+          extra_discount_amount: finalExtraDiscAmt,
+          total_amount: Math.round(finalTotalAmount * 100) / 100
+        })
+        .eq('id', order.id)
+        .eq('company_id', req.companyId);
+      
+      if (updateError) {
+        console.error('Error updating order financial fields:', updateError);
+      } else {
+        order.total_amount = Math.round(finalTotalAmount * 100) / 100;
       }
+
+      // Preserve calculatedTotalAmount for following logic (if needed)
+      const calculatedTotalAmount = order.total_amount;
 
       // Reserve stock for all order items (move from stock_count to reserved_stock)
       // Note: For sales orders, stock reservation is non-blocking - inventory will be updated
@@ -499,10 +555,11 @@ export const orderController = {
       const isFullCredit = payment_status === 'full_credit' || payment_method === 'full_credit';
       
       if (isCredit) {
-        // Calculate credit amount (use calculatedTotalAmount from items)
+        // Calculate credit amount (use the final total amount from order)
+        const currentOrderTotal = order.total_amount;
         const creditAmount = isFullCredit
-          ? calculatedTotalAmount 
-          : (calculatedTotalAmount - (partial_payment_amount || 0));
+          ? currentOrderTotal 
+          : (currentOrderTotal - (partial_payment_amount || 0));
         
         if (creditAmount > 0 && credit_details) {
           console.log('Creating credit period for amount:', creditAmount);
@@ -587,6 +644,37 @@ export const orderController = {
         } catch (paymentError) {
           console.error('Error creating payment record during order creation:', paymentError);
           // Don't fail order creation if payment record creation fails
+        }
+      }
+
+      // Handle quotation conversion if quotation_id was provided
+      if (quotation_id) {
+        console.log('Linking order to quotation:', quotation_id);
+        const { error: quoteUpdateError } = await (supabaseAdmin || supabase)
+          .from('quotations')
+          .update({
+             status: 'accepted',
+             converted_to_order_id: order.id
+          })
+          .eq('id', quotation_id)
+          .eq('company_id', req.companyId);
+
+        if (quoteUpdateError) {
+           console.error('Error updating quotation status:', quoteUpdateError);
+        } else {
+           // Also update the lead if it was attached
+           const { data: quotationData } = await (supabaseAdmin || supabase)
+             .from('quotations')
+             .select('lead_id')
+             .eq('id', quotation_id)
+             .single();
+             
+           if (quotationData?.lead_id) {
+             await (supabaseAdmin || supabase)
+               .from('leads')
+               .update({ stage: 'won', converted_at: new Date().toISOString() })
+               .eq('id', quotationData.lead_id);
+           }
         }
       }
 

@@ -26,7 +26,7 @@ export interface InvoiceRegisterRow {
   grn_number: string;
   supplier_name: string;
   subtotal: number;
-  tax_amount: number;
+  total_tax: number;
   total_amount: number;
   paid_amount: number;
   outstanding: number;
@@ -41,7 +41,7 @@ export async function getInvoiceRegister(q: ReportQuery, companyId: string) {
     .from('purchase_invoices')
     .select(`
       id, invoice_number, invoice_date, due_date,
-      subtotal, tax_amount, total_amount, paid_amount, status,
+      subtotal, total_tax, total_discount, extra_discount_amount, total_amount, paid_amount, status,
       goods_receipt_id, purchase_order_id
     `, { count: 'exact' })
     .eq('company_id', companyId)
@@ -88,7 +88,7 @@ export async function getInvoiceRegister(q: ReportQuery, companyId: string) {
       grn_number:     grn?.grn_number ?? '—',
       supplier_name:  sup?.name ?? '—',
       subtotal:       Number(inv.subtotal ?? 0),
-      tax_amount:     Number(inv.tax_amount ?? 0),
+      total_tax:      Number(inv.total_tax ?? 0),
       total_amount:   Number(inv.total_amount ?? 0),
       paid_amount:    Number(inv.paid_amount ?? 0),
       outstanding:    Number(inv.total_amount ?? 0) - Number(inv.paid_amount ?? 0),

@@ -52,6 +52,8 @@ export default function CreatePurchaseInvoice() {
   const [subtotal, setSubtotal] = useState(0);
   const [taxAmount, setTaxAmount] = useState(0);
   const [discountAmount, setDiscountAmount] = useState(0);
+  const [extraDiscount, setExtraDiscount] = useState<number>(0);
+  const [extraDiscountPct, setExtraDiscountPct] = useState<number>(0);
   const [notes, setNotes] = useState('');
 
   // Fetch existing invoice if in edit mode
@@ -98,6 +100,7 @@ export default function CreatePurchaseInvoice() {
     unit_price: number;
     tax_percentage: number;
     tax_amount: number;
+    discount_percentage: number;
     discount_amount: number;
     line_total: number;
     goods_receipt_item_id?: string;
@@ -111,8 +114,10 @@ export default function CreatePurchaseInvoice() {
       setInvoiceDate(invoiceToEdit.invoice_date || new Date().toISOString().split('T')[0]);
       setDueDate(invoiceToEdit.due_date || '');
       setSubtotal(invoiceToEdit.subtotal || 0);
-      setTaxAmount(invoiceToEdit.tax_amount || 0);
-      setDiscountAmount(invoiceToEdit.discount_amount || 0);
+      setTaxAmount(invoiceToEdit.total_tax || 0);
+      setDiscountAmount(invoiceToEdit.total_discount - (invoiceToEdit.extra_discount_amount || 0));
+      setExtraDiscountPct(invoiceToEdit.extra_discount_percentage !== undefined ? invoiceToEdit.extra_discount_percentage : (invoiceToEdit.purchase_orders?.extra_discount_percentage || 0));
+      setExtraDiscount(invoiceToEdit.extra_discount_amount || 0);
       setNotes(invoiceToEdit.notes || '');
       
       // Load invoice items
@@ -129,6 +134,7 @@ export default function CreatePurchaseInvoice() {
           unit_price: item.unit_price,
           tax_percentage: item.tax_percentage || 0,
           tax_amount: item.tax_amount || 0,
+          discount_percentage: item.discount_percentage || 0,
           discount_amount: item.discount_amount || 0,
           line_total: item.line_total,
           goods_receipt_item_id: item.goods_receipt_item_id,
@@ -149,8 +155,12 @@ export default function CreatePurchaseInvoice() {
           const quantity = item.quantity_accepted || 0;
           const unitPrice = item.unit_price || 0;
           const taxPercentage = item.tax_percentage || item.products?.tax || 0;
-          const taxAmount = (quantity * unitPrice * taxPercentage) / 100;
-          const lineTotal = (quantity * unitPrice) + taxAmount;
+          const discountPercentage = item.purchase_order_items?.discount_percentage || 0;
+          
+          const lineSubtotal = quantity * unitPrice;
+          const taxAmount = Math.round(((lineSubtotal * taxPercentage) / 100) * 100) / 100;
+          const discountAmount = Math.round(((lineSubtotal * discountPercentage) / 100) * 100) / 100;
+          const lineTotal = Math.round((lineSubtotal + taxAmount - discountAmount) * 100) / 100;
           
           return {
             product_id: item.product_id,
@@ -164,18 +174,27 @@ export default function CreatePurchaseInvoice() {
             unit_price: unitPrice,
             tax_percentage: taxPercentage,
             tax_amount: taxAmount,
-            discount_amount: 0,
+            discount_percentage: discountPercentage,
+            discount_amount: discountAmount,
             line_total: lineTotal,
             goods_receipt_item_id: item.id, // Include GRN item ID for traceability
           };
         });
       setInvoiceItems(items);
       
-      // Calculate totals based on accepted quantities only
+      // Calculate totals based on accepted quantities and discounts
       const calculatedSubtotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
       const calculatedTax = items.reduce((sum, item) => sum + item.tax_amount, 0);
+      const calculatedDiscount = items.reduce((sum, item) => sum + item.discount_amount, 0);
+      
       setSubtotal(calculatedSubtotal);
       setTaxAmount(calculatedTax);
+      setDiscountAmount(calculatedDiscount);
+
+      // Default extra discount % from PO
+      if (selectedGRN.purchase_orders?.extra_discount_percentage) {
+        setExtraDiscountPct(selectedGRN.purchase_orders.extra_discount_percentage);
+      }
     }
   }, [selectedGRN, isEditMode]);
 
@@ -234,6 +253,12 @@ export default function CreatePurchaseInvoice() {
     });
   };
 
+  const calculateGrandTotal = () => {
+    const itemsTotal = subtotal + taxAmount - discountAmount;
+    const extraPctAmt = Math.round(((itemsTotal * (extraDiscountPct || 0)) / 100) * 100) / 100;
+    return Math.max(0, itemsTotal - extraPctAmt - (extraDiscount || 0));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isEditMode && !goodsReceiptId) {
@@ -248,9 +273,11 @@ export default function CreatePurchaseInvoice() {
       invoice_date: invoiceDate,
       due_date: dueDate || undefined,
       subtotal,
-      tax_amount: taxAmount,
-      discount_amount: discountAmount,
-      total_amount: totalAmount,
+      total_tax: taxAmount,
+      total_discount: Math.round((discountAmount + (extraDiscountPct > 0 ? (subtotal + taxAmount - discountAmount) * extraDiscountPct / 100 : extraDiscount)) * 100) / 100,
+      extra_discount_percentage: extraDiscountPct,
+      extra_discount_amount: extraDiscountPct > 0 ? Math.round(((subtotal + taxAmount - discountAmount) * extraDiscountPct / 100) * 100) / 100 : extraDiscount,
+      total_amount: Math.round(calculateGrandTotal() * 100) / 100,
       notes: notes || undefined,
     };
 
@@ -270,6 +297,7 @@ export default function CreatePurchaseInvoice() {
       unit_price: item.unit_price,
       tax_percentage: item.tax_percentage,
       tax_amount: item.tax_amount,
+      discount_percentage: item.discount_percentage,
       discount_amount: item.discount_amount,
       product_code: item.product_code,
       hsn_code: item.hsn_code
@@ -289,28 +317,29 @@ export default function CreatePurchaseInvoice() {
       item.unit_price = parseFloat(value) || 0;
     } else if (field === 'tax_percentage') {
       item.tax_percentage = parseFloat(value) || 0;
-    } else if (field === 'discount_amount') {
-      item.discount_amount = parseFloat(value) || 0;
+    } else if (field === 'discount_percentage') {
+      item.discount_percentage = parseFloat(value) || 0;
     }
     
-    // Recalculate tax_amount and line_total
+    // Recalculate tax_amount, discount_amount and line_total
     const lineSubtotal = item.quantity * item.unit_price;
-    item.tax_amount = (lineSubtotal * item.tax_percentage) / 100;
-    item.line_total = lineSubtotal + item.tax_amount - item.discount_amount;
+    item.tax_amount = Math.round(((lineSubtotal * item.tax_percentage) / 100) * 100) / 100;
+    item.discount_amount = Math.round(((lineSubtotal * item.discount_percentage) / 100) * 100) / 100;
+    item.line_total = Math.round((lineSubtotal + item.tax_amount - item.discount_amount) * 100) / 100;
     
     updatedItems[index] = item;
     setInvoiceItems(updatedItems);
     
     // Recalculate totals
-    const newSubtotal = updatedItems.reduce((sum, it) => sum + (it.quantity * it.unit_price), 0);
-    const newTaxAmount = updatedItems.reduce((sum, it) => sum + it.tax_amount, 0);
-    const newDiscountAmount = updatedItems.reduce((sum, it) => sum + it.discount_amount, 0);
+    const newSubtotal = Math.round(updatedItems.reduce((sum, it) => sum + (it.quantity * it.unit_price), 0) * 100) / 100;
+    const newTaxAmount = Math.round(updatedItems.reduce((sum, it) => sum + it.tax_amount, 0) * 100) / 100;
+    const newDiscountAmount = Math.round(updatedItems.reduce((sum, it) => sum + it.discount_amount, 0) * 100) / 100;
     setSubtotal(newSubtotal);
     setTaxAmount(newTaxAmount);
     setDiscountAmount(newDiscountAmount);
   };
 
-  const totalAmount = subtotal + taxAmount - discountAmount;
+  const totalAmount = calculateGrandTotal();
 
   // Show loading state when fetching existing invoice
   if (isEditMode && isLoadingInvoice) {
@@ -497,7 +526,7 @@ export default function CreatePurchaseInvoice() {
                           <TableHead className="min-w-[80px]">Unit</TableHead>
                           <TableHead className="min-w-[100px]">Price</TableHead>
                           <TableHead className="min-w-[80px]">Tax %</TableHead>
-                          <TableHead className="min-w-[100px]">Discount</TableHead>
+                          <TableHead className="min-w-[80px]">Disc %</TableHead>
                           <TableHead className="min-w-[100px]">Tax Amt</TableHead>
                           <TableHead className="min-w-[120px]">Total</TableHead>
                         </TableRow>
@@ -546,10 +575,11 @@ export default function CreatePurchaseInvoice() {
                             <TableCell>
                               <Input
                                 type="number"
-                                value={item.discount_amount}
-                                onChange={(e) => updateInvoiceItem(index, 'discount_amount', e.target.value)}
-                                className="w-24 h-8 text-sm"
+                                value={item.discount_percentage}
+                                onChange={(e) => updateInvoiceItem(index, 'discount_percentage', e.target.value)}
+                                className="w-20 h-8 text-sm"
                                 min="0"
+                                max="100"
                                 step="0.01"
                               />
                             </TableCell>
@@ -573,47 +603,68 @@ export default function CreatePurchaseInvoice() {
               <CardHeader>
                 <CardTitle>Amounts</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Subtotal</Label>
-                  <Input
-                    type="number"
-                    value={subtotal}
-                    onChange={(e) => setSubtotal(parseFloat(e.target.value) || 0)}
-                    className="mt-1"
-                    step="0.01"
-                    min="0"
+                  <Label className="text-xs">Extra Discount (%)</Label>
+                  <Input 
+                    type="number" 
+                    placeholder="0"
+                    value={extraDiscountPct || ''} 
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      setExtraDiscountPct(val);
+                      if (val > 0) setExtraDiscount(0);
+                    }}
                   />
                 </div>
                 <div>
-                  <Label>Tax Amount</Label>
-                  <Input
-                    type="number"
-                    value={taxAmount}
-                    onChange={(e) => setTaxAmount(parseFloat(e.target.value) || 0)}
-                    className="mt-1"
-                    step="0.01"
-                    min="0"
+                  <Label className="text-xs">Extra Discount (Fixed)</Label>
+                  <Input 
+                    type="number" 
+                    placeholder="0"
+                    value={extraDiscount || ''} 
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      setExtraDiscount(val);
+                      if (val > 0) setExtraDiscountPct(0);
+                    }}
                   />
                 </div>
-                <div>
-                  <Label>Discount Amount</Label>
-                  <Input
-                    type="number"
-                    value={discountAmount}
-                    onChange={(e) => setDiscountAmount(parseFloat(e.target.value) || 0)}
-                    className="mt-1"
-                    step="0.01"
-                    min="0"
-                  />
+              </div>
+
+              <div className="space-y-2 pt-4 border-t">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Items Subtotal:</span>
+                  <span>₹{subtotal.toFixed(2)}</span>
                 </div>
-                <div className="border-t pt-4">
-                  <div className="flex justify-between font-bold text-lg">
-                    <span>Total:</span>
-                    <span>₹{totalAmount.toFixed(2)}</span>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Tax:</span>
+                  <span className="text-red-500">+₹{taxAmount.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Item Discount:</span>
+                  <span className="text-green-600">-₹{discountAmount.toFixed(2)}</span>
+                </div>
+                {(extraDiscountPct > 0 || extraDiscount > 0) && (
+                  <div className="flex justify-between text-sm text-green-600 font-medium italic border-b pb-1">
+                    <span>
+                      Extra Discount 
+                      {extraDiscountPct > 0 ? ` (${extraDiscountPct}%)` : ''}:
+                    </span>
+                    <span>
+                      -₹{extraDiscountPct > 0 
+                        ? (( (subtotal + taxAmount - discountAmount) * extraDiscountPct) / 100).toFixed(2)
+                        : extraDiscount.toFixed(2)}
+                    </span>
                   </div>
+                )}
+                <div className="flex justify-between font-bold text-xl pt-2 border-t mt-2 text-primary">
+                  <span>Grand Total:</span>
+                  <span>₹{totalAmount.toFixed(2)}</span>
                 </div>
-              </CardContent>
+              </div>
+            </CardContent>
             </Card>
           </div>
 

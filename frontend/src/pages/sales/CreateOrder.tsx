@@ -48,6 +48,7 @@ import { addressApi } from '@/api/addresses';
 import { warehousesService } from '@/api/warehouses';
 import { productsService } from '@/api/products';
 import { variantsService } from '@/api/variants';
+import { quotationsService } from '@/api/quotations';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
@@ -118,6 +119,7 @@ export default function CreateOrder() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const customerId = searchParams.get('customerId');
+  const quotationId = searchParams.get('quotationId');
   const { user, isSales } = useAuth();
   
   // Active tab state (products or checkout)
@@ -137,7 +139,9 @@ export default function CreateOrder() {
     unit_price: number;
     original_price: number; // Store original product price for reference
     line_total: number;
-    discount?: number; // Optional discount percentage
+    discount_percentage?: number; // Optional discount percentage
+    discount_amount?: number;
+    tax_amount?: number;
     image_url?: string;
     origin?: string;
     stock_count?: number;
@@ -145,6 +149,11 @@ export default function CreateOrder() {
   }
   
   const [items, setItems] = useState<OrderItem[]>([]);
+  const [totalAmount, setTotalAmount] = useState(0);
+  
+  // Extra discount state mirroring quotation features
+  const [extraDiscountPct, setExtraDiscountPct] = useState<number | undefined>(undefined);
+  const [extraDiscountAmt, setExtraDiscountAmt] = useState<number | undefined>(undefined);
   
   // State to store variants for each product
   const [productVariants, setProductVariants] = useState<Record<string, any[]>>({});
@@ -152,8 +161,6 @@ export default function CreateOrder() {
   // State for product search combobox
   const [productSearchOpen, setProductSearchOpen] = useState<Record<string, boolean>>({});
   const [productSearchQuery, setProductSearchQuery] = useState<Record<string, string>>({});
-  
-  const [totalAmount, setTotalAmount] = useState(0);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
   const [useSameAsShipping, setUseSameAsShipping] = useState(true);
@@ -181,6 +188,13 @@ export default function CreateOrder() {
     queryKey: ['customer', customerId],
     queryFn: () => customerService.getCustomerById(customerId!),
     enabled: !!customerId,
+  });
+  
+  // Get quotation details if ID is provided
+  const { data: quotationData } = useQuery({
+    queryKey: ['quotation', quotationId],
+    queryFn: () => quotationsService.getQuotationById(quotationId!),
+    enabled: !!quotationId,
   });
   
   // Get products for the order
@@ -278,12 +292,20 @@ export default function CreateOrder() {
   }, [products, productsLoading]);
   
   useEffect(() => {
-    // Calculate total amount whenever items change
-    const total = items
+    // Calculate total amount whenever items or extra discounts change
+    const itemsLineTotalSum = items
       .filter(item => item.product_id && item.product_id !== '')
       .reduce((sum, item) => sum + item.line_total, 0);
-    setTotalAmount(total);
-  }, [items]);
+      
+    let calculatedExtraDiscount = 0;
+    if (extraDiscountAmt !== undefined) {
+      calculatedExtraDiscount = extraDiscountAmt;
+    } else if (extraDiscountPct !== undefined) {
+      calculatedExtraDiscount = (itemsLineTotalSum * extraDiscountPct) / 100;
+    }
+
+    setTotalAmount(Math.max(0, itemsLineTotalSum - calculatedExtraDiscount));
+  }, [items, extraDiscountAmt, extraDiscountPct]);
   
   // Fill in customer details when loaded from URL param
   useEffect(() => {
@@ -322,6 +344,89 @@ export default function CreateOrder() {
       }
     }
   }, [isSales, user?.id, form]);
+
+  // Pre-populate from quotation if provided
+  useEffect(() => {
+    const populateFromQuotation = async () => {
+      if (quotationData && products.length > 0) {
+        if (quotationData.customer_id) form.setValue('customer_id', quotationData.customer_id);
+        if (quotationData.sales_executive_id) form.setValue('sales_executive_id', quotationData.sales_executive_id);
+        if (quotationData.notes) form.setValue('notes', quotationData.notes);
+        
+        if (quotationData.quotation_items?.length && items.length === 0) {
+          // 1. Fetch all variants for all products in the quotation
+          const uniqueProductIds = Array.from(new Set(quotationData.quotation_items.map((qi: any) => qi.product_id).filter(Boolean)));
+          const allVariantsMap: Record<string, any[]> = { ...productVariants };
+          
+          for (const pid of uniqueProductIds) {
+            if (!allVariantsMap[pid]) {
+              try {
+                const variants = await variantsService.getByProduct(pid);
+                allVariantsMap[pid] = variants;
+              } catch (err) {
+                console.error(`Error fetching variants for ${pid}:`, err);
+                allVariantsMap[pid] = [];
+              }
+            }
+          }
+          
+          // Update the global state once
+          setProductVariants(allVariantsMap);
+
+          // 2. Map items using the fetched variants for name/metadata resolution
+          const mappedItems = quotationData.quotation_items.map((qi: any) => {
+            const product = products.find((p: any) => p.id === qi.product_id);
+            const qty = qi.quantity || 0;
+            const unitPrice = qi.unit_price || 0;
+            const taxPct = qi.tax_percentage || 0;
+            const discPct = qi.discount_percentage || 0;
+
+            const lineSubtotal = qty * unitPrice;
+            const discAmt = parseFloat(((lineSubtotal * discPct) / 100).toFixed(2));
+            const taxAmt = parseFloat(((lineSubtotal * taxPct) / 100).toFixed(2));
+            const lineTotal = lineSubtotal + taxAmt - discAmt;
+
+            const variants = allVariantsMap[qi.product_id] || [];
+            const variantObj = variants.find((v: any) => v.id === qi.variant_id);
+
+            return {
+              id: `quote-item-${Math.random().toString(36).substring(7)}`,
+              product_id: qi.product_id,
+              variant_id: qi.variant_id,
+              product_name: product?.name || qi.product?.name || 'Unknown Product',
+              product_code: product?.product_code || qi.product?.sku || '',
+              variant_name: variantObj?.name || qi.variant?.name || '',
+              hsn_code: variantObj?.hsn || product?.hsn_code || '',
+              unit: variantObj?.unit_type || product?.unit_type || 'piece',
+              quantity: qty,
+              unit_price: unitPrice,
+              original_price: unitPrice,
+              line_total: Math.round(lineTotal * 100) / 100,
+              tax_percentage: taxPct,
+              tax_amount: taxAmt,
+              discount_percentage: discPct,
+              discount_amount: discAmt,
+              image_url: product?.image_url,
+              origin: product?.origin,
+              stock_count: product?.stock_count
+            };
+          });
+          setItems(mappedItems);
+          
+          // Preserve extra discount from quotation, prioritizing percentage IF both exist
+          if (quotationData.extra_discount_percentage && quotationData.extra_discount_percentage > 0) {
+            setExtraDiscountPct(quotationData.extra_discount_percentage);
+            setExtraDiscountAmt(undefined); // Treat fixed amount as derived and clear it
+          } else if (quotationData.extra_discount_amount && quotationData.extra_discount_amount > 0) {
+            setExtraDiscountAmt(quotationData.extra_discount_amount);
+            setExtraDiscountPct(undefined);
+          }
+        }
+      }
+    };
+
+    populateFromQuotation();
+  }, [quotationData, products, form]);
 
   // Set default address if available
   useEffect(() => {
@@ -413,8 +518,10 @@ export default function CreateOrder() {
         quantity: 1,
         unit_price: 0,
         original_price: 0,
+        tax_amount: 0,
+        discount_percentage: 0,
+        discount_amount: 0,
         line_total: 0,
-        discount: 0,
         warehouse_id: warehouses.length > 0 ? warehouses[0].id : undefined
       }
     ]);
@@ -473,24 +580,29 @@ export default function CreateOrder() {
     
     setItems(items.map(item => {
       if (item.id === rowId) {
-        // Calculate line total with tax (consistent with other update functions)
-        const taxAmount = (item.quantity * price * taxPercentage) / 100;
-        const lineTotal = (item.quantity * price) + taxAmount;
+        const amount = item.quantity * price;
+        const taxAmount = (amount * taxPercentage) / 100;
+        const discountPercentage = item.discount_percentage || 0;
+        const discountAmount = (amount * discountPercentage) / 100;
+        const lineTotal = amount + taxAmount - discountAmount;
+
         return {
           ...item,
-        product_id: product.id,
+          product_id: product.id,
           variant_id: variantId,
           variant_name: variantName,
-        product_name: product.name,
+          product_name: product.name,
           product_code: product.product_code || '',
           hsn_code: hsnCode,
           unit: unit,
           tax_percentage: taxPercentage,
           unit_price: price,
           original_price: originalPrice,
+          tax_amount: taxAmount,
+          discount_amount: discountAmount,
           line_total: lineTotal,
-        image_url: product.image_url,
-        origin: product.origin,
+          image_url: product.image_url,
+          origin: product.origin,
           stock_count: product.stock_count
         };
       }
@@ -514,9 +626,11 @@ export default function CreateOrder() {
 
     setItems(items.map(i => {
       if (i.id === rowId) {
-        // Calculate line total with tax (consistent with other update functions)
-        const taxAmount = (i.quantity * price * taxPercentage) / 100;
-        const lineTotal = (i.quantity * price) + taxAmount;
+        const amount = i.quantity * price;
+        const taxAmount = (amount * taxPercentage) / 100;
+        const discountPercentage = i.discount_percentage || 0;
+        const discountAmount = (amount * discountPercentage) / 100;
+        const lineTotal = amount + taxAmount - discountAmount;
         return {
           ...i,
           variant_id: variant.id,
@@ -524,8 +638,11 @@ export default function CreateOrder() {
           hsn_code: hsnCode,
           unit: unit,
           tax_percentage: taxPercentage,
+          tax_amount: taxAmount,
           unit_price: price,
           original_price: price,
+          discount_percentage: discountPercentage,
+          discount_amount: discountAmount,
           line_total: lineTotal
         };
       }
@@ -538,11 +655,18 @@ export default function CreateOrder() {
     setItems(items.map(item => {
       if (item.id === rowId) {
         const newQuantity = Math.max(1, item.quantity + delta);
-        const taxAmount = (newQuantity * item.unit_price * (item.tax_percentage || 0)) / 100;
-        return {
-          ...item,
+        const amount = newQuantity * item.unit_price;
+        const taxPercentage = item.tax_percentage || 0;
+        const taxAmount = (amount * taxPercentage) / 100;
+        const discountPercentage = item.discount_percentage || 0;
+        const discountAmount = (amount * discountPercentage) / 100;
+        const lineTotal = amount + taxAmount - discountAmount;
+        return { 
+          ...item, 
           quantity: newQuantity,
-          line_total: (newQuantity * item.unit_price) + taxAmount
+          tax_amount: taxAmount,
+          discount_amount: discountAmount,
+          line_total: lineTotal 
         };
       }
       return item;
@@ -554,11 +678,18 @@ export default function CreateOrder() {
     setItems(items.map(item => {
       if (item.id === rowId) {
         const newQuantity = Math.max(1, quantity);
-        const taxAmount = (newQuantity * item.unit_price * (item.tax_percentage || 0)) / 100;
-        return {
-          ...item,
+        const amount = newQuantity * item.unit_price;
+        const taxPercentage = item.tax_percentage || 0;
+        const taxAmount = (amount * taxPercentage) / 100;
+        const discountPercentage = item.discount_percentage || 0;
+        const discountAmount = (amount * discountPercentage) / 100;
+        const lineTotal = amount + taxAmount - discountAmount;
+        return { 
+          ...item, 
           quantity: newQuantity,
-          line_total: (newQuantity * item.unit_price) + taxAmount
+          tax_amount: taxAmount,
+          discount_amount: discountAmount,
+          line_total: lineTotal 
         };
       }
       return item;
@@ -569,21 +700,21 @@ export default function CreateOrder() {
   const updatePrice = (rowId: string, price: number) => {
     setItems(items.map(item => {
       if (item.id === rowId) {
-        const taxAmount = (item.quantity * price * (item.tax_percentage || 0)) / 100;
-        const newLineTotal = (item.quantity * price) + taxAmount;
-    
-    // Calculate discount percentage if price is different from original
-        let discount = 0;
+        const amount = item.quantity * price;
+        const taxPercentage = item.tax_percentage || 0;
+        const taxAmount = (amount * taxPercentage) / 100;
+        
+        let discountPercentage = item.discount_percentage || 0;
+        // If the new price is less than the original price, calculate a new discount percentage
         if (item.original_price > 0 && price < item.original_price) {
-          const discountAmount = item.original_price - price;
-          discount = (discountAmount / item.original_price) * 100;
     }
     
         return {
           ...item,
           unit_price: price,
-          line_total: newLineTotal,
-          discount: discount
+          tax_amount: taxAmount,
+          discount_amount: (amount * discountPercentage) / 100,
+          line_total: amount + taxAmount - ((amount * discountPercentage) / 100)
         };
       }
       return item;
@@ -591,6 +722,25 @@ export default function CreateOrder() {
   };
 
   // Update warehouse for an item
+  const updateDiscount = (rowId: string, discountPercentage: number) => {
+    setItems(items.map(item => {
+      if (item.id === rowId) {
+        const amount = item.quantity * item.unit_price;
+        const taxPercentage = item.tax_percentage || 0;
+        const taxAmount = (amount * taxPercentage) / 100;
+        const discountAmount = (amount * discountPercentage) / 100;
+        const lineTotal = amount + taxAmount - discountAmount;
+        return { 
+          ...item, 
+          discount_percentage: discountPercentage,
+          discount_amount: discountAmount,
+          line_total: lineTotal 
+        };
+      }
+      return item;
+    }));
+  };
+
   const updateWarehouse = (rowId: string, warehouseId: string) => {
     setItems(items.map(item => {
       if (item.id === rowId) {
@@ -625,10 +775,13 @@ export default function CreateOrder() {
       // This console.log was already good for seeing what data object contains
       console.log('Form data for mutation:', data);
       
-      const orderData: OrderData = {
+      const orderData: OrderData & { quotation_id?: string, extra_discount_percentage?: number, extra_discount_amount?: number } = {
         ...data,
-        items,
-        total_amount: totalAmount
+        items: data.items,
+        total_amount: totalAmount,
+        extra_discount_percentage: extraDiscountPct,
+        extra_discount_amount: extraDiscountAmt,
+        ...(quotationId ? { quotation_id: quotationId } : {})
       };
       // Radix Select cannot use empty string; we use __none__ for "None" – omit from payload when submitting
       if (orderData.sales_executive_id === '__none__' || orderData.sales_executive_id === '') {
@@ -753,13 +906,16 @@ export default function CreateOrder() {
       return;
     }
     
-    // Ensure all items have the price field set correctly and include warehouse_id
+    // Ensure all items have the price field set correctly and include financial fields
     const processedItems: any[] = validItems.map(item => ({
-      product_id: item.product_id,
-      variant_id: item.variant_id || undefined,
-      quantity: item.quantity,
+      ...item,
       price: item.unit_price,
-      warehouse_id: item.warehouse_id // Include warehouse_id for each item
+      tax_percentage: item.tax_percentage || 0,
+      discount_percentage: item.discount_percentage || 0,
+      tax_amount: item.tax_amount || 0,
+      discount_amount: item.discount_amount || 0,
+      line_total: item.line_total || 0,
+      warehouse_id: item.warehouse_id
     }));
     
     createOrderMutation.mutate({
@@ -1001,6 +1157,7 @@ export default function CreateOrder() {
                                     <TableHead className="min-w-[80px]">Qty</TableHead>
                                     <TableHead className="min-w-[80px]">Unit</TableHead>
                                     <TableHead className="min-w-[100px]">Price</TableHead>
+                                    <TableHead className="min-w-[80px]">Disc %</TableHead>
                                     <TableHead className="min-w-[80px]">Tax %</TableHead>
                                     <TableHead className="min-w-[100px]">Warehouse</TableHead>
                                     <TableHead className="min-w-[120px]">Total</TableHead>
@@ -1193,9 +1350,21 @@ export default function CreateOrder() {
                                             disabled={!item.product_id}
                                       />
                                     </TableCell>
-                                        <TableCell className="text-sm">
-                                          {item.tax_percentage ? `${item.tax_percentage}%` : '-'}
-                                        </TableCell>
+                                        <TableCell>
+                                    <Input
+                                      type="number"
+                                      value={item.discount_percentage || 0}
+                                      onChange={(e) => updateDiscount(item.id, parseFloat(e.target.value) || 0)}
+                                      className="h-8 w-16 text-sm"
+                                      min="0"
+                                      max="100"
+                                      step="0.01"
+                                      disabled={!item.product_id}
+                                    />
+                                  </TableCell>
+                                  <TableCell className="text-sm">
+                                    {item.tax_percentage ? `${item.tax_percentage}%` : '0%'}
+                                  </TableCell>
                                         <TableCell>
                                       {warehousesLoading ? (
                                         <div className="text-xs text-muted-foreground">Loading...</div>
@@ -1236,20 +1405,70 @@ export default function CreateOrder() {
                             </TableBody>
                           </Table>
                         </div>
-                            <div className="flex justify-between items-center pt-4 border-t">
-                              <Button onClick={addRow} variant="outline" size="sm">
-                                <Plus className="h-4 w-4 mr-2" />
-                                Add Row
-                              </Button>
-                              <div className="flex justify-between font-bold text-lg min-w-[200px]">
-                                <span>Total:</span>
+                        <div className="pt-4 border-t space-y-4">
+                          <div className="flex justify-between items-center">
+                            <Button onClick={addRow} variant="outline" size="sm">
+                              <Plus className="h-4 w-4 mr-2" />
+                              Add Row
+                            </Button>
+                            <div className="space-y-2 min-w-[300px]">
+                              <div className="flex justify-between text-sm text-muted-foreground">
+                                <span>Items Total (Incl. Tax & Disc)</span>
+                                <span>₹{items.reduce((sum, item) => sum + item.line_total, 0).toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between text-sm py-1 border-b">
+                                <span>Extra Discount (%) - {extraDiscountPct || 0}%</span>
+                                <span className="text-red-500">
+                                  -₹{((items.reduce((sum, item) => sum + item.line_total, 0) * (extraDiscountPct || 0)) / 100).toFixed(2)}
+                                </span>
+                              </div>
+                              <div className="flex justify-between text-sm py-1 border-b">
+                                <span>Extra Discount (Fixed)</span>
+                                <span className="text-red-500">-₹{(extraDiscountAmt || 0).toFixed(2)}</span>
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-4 items-center pt-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-medium">Extra Disc %:</span>
+                                  <Input
+                                    type="number"
+                                    value={extraDiscountPct || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                      setExtraDiscountPct(val);
+                                      if (val !== undefined) setExtraDiscountAmt(undefined);
+                                    }}
+                                    className="h-8 w-16 text-xs"
+                                    placeholder="0"
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2 ml-auto">
+                                  <span className="text-xs font-medium">Extra Disc ₹:</span>
+                                  <Input
+                                    type="number"
+                                    value={extraDiscountAmt || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                      setExtraDiscountAmt(val);
+                                      if (val !== undefined) setExtraDiscountPct(undefined);
+                                    }}
+                                    className="h-8 w-24 text-xs"
+                                    placeholder="0"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="flex justify-between font-bold text-lg border-t pt-2">
+                                <span>Grand Total:</span>
                                 <span>₹{totalAmount.toFixed(2)}</span>
-                        </div>
+                              </div>
                             </div>
                           </div>
-                        )}
-                      </CardContent>
-                    </Card>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
                         
                             {items.length > 0 && (
                       <div className="flex justify-end mt-4">

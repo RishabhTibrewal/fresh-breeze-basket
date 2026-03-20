@@ -17,6 +17,11 @@ export interface Order {
   userId: string;
   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
   total_amount: number;
+  subtotal?: number;
+  total_tax?: number;
+  total_discount?: number;
+  extra_discount_percentage?: number;
+  extra_discount_amount?: number;
   tax_amount?: number;
   tax_rate?: number;
   items: OrderItem[];
@@ -63,7 +68,6 @@ export interface Order {
     country: string;
   };
   user_id?: string;
-  // Explicit order classification fields (may be undefined for older data)
   order_type?: 'sales' | 'purchase' | 'return';
   order_source?: 'ecommerce' | 'pos' | 'sales' | 'internal';
   fulfillment_type?: 'delivery' | 'pickup' | 'cash_counter';

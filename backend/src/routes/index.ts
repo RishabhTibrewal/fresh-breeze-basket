@@ -8,6 +8,7 @@ import customerRoutes from './customerRoutes';
 import creditPeriodRoutes from './creditPeriod';
 import companyRoutes from './companies';
 import brandRoutes from './brands';
+import quotationRoutes from './quotationRoutes';
 
 export {
   authRoutes,
@@ -19,5 +20,6 @@ export {
   customerRoutes,
   creditPeriodRoutes,
   companyRoutes,
-  brandRoutes
+  brandRoutes,
+  quotationRoutes
 }; 

@@ -58,7 +58,8 @@ import {
   customerRoutes,
   creditPeriodRoutes,
   companyRoutes,
-  brandRoutes
+  brandRoutes,
+  quotationRoutes
 } from './routes';
 import productImagesRouter from './routes/productImages';
 import inventoryRouter from './routes/inventory';
@@ -241,6 +242,7 @@ app.use('/api/taxes', taxesRouter);
 app.use('/api/kpis', kpiRouter);
 app.use('/api/modifiers', modifiersRouter);
 app.use('/api/collections', collectionsRouter);
+app.use('/api/quotations', quotationRoutes);
 // Reports — apply export rate limiter before the router
 app.use('/api/reports', exportRateLimiter, reportsRouter);
 

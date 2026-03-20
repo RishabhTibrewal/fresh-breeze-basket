@@ -290,6 +290,7 @@ export default function PurchaseInvoiceDetail() {
                         <TableHead className="min-w-[80px]">Unit</TableHead>
                         <TableHead className="min-w-[100px]">Price</TableHead>
                         <TableHead className="min-w-[80px]">Tax %</TableHead>
+                        <TableHead className="min-w-[80px]">Disc %</TableHead>
                         <TableHead className="min-w-[100px]">Tax Amt</TableHead>
                         <TableHead className="min-w-[120px]">Total</TableHead>
                       </TableRow>
@@ -309,6 +310,7 @@ export default function PurchaseInvoiceDetail() {
                           <TableCell className="text-sm">{item.unit || '-'}</TableCell>
                           <TableCell className="text-sm">₹{item.unit_price?.toFixed(2) || '0.00'}</TableCell>
                           <TableCell className="text-sm">{item.tax_percentage ? `${item.tax_percentage}%` : '-'}</TableCell>
+                          <TableCell className="text-sm">{item.discount_percentage ? `${item.discount_percentage}%` : '-'}</TableCell>
                           <TableCell className="text-sm">₹{item.tax_amount?.toFixed(2) || '0.00'}</TableCell>
                           <TableCell className="font-medium text-sm">₹{item.line_total?.toFixed(2) || '0.00'}</TableCell>
                         </TableRow>
@@ -383,14 +385,22 @@ export default function PurchaseInvoiceDetail() {
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">Tax:</span>
-                <span className="font-medium">₹{invoice.tax_amount.toFixed(2)}</span>
+                <span className="font-medium">₹{invoice.total_tax.toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Discount:</span>
-                <span className="font-medium">₹{invoice.discount_amount.toFixed(2)}</span>
+                <span className="text-sm text-muted-foreground">Item Discount:</span>
+                <span className="font-medium">₹{(invoice.total_discount - (invoice.extra_discount_amount || 0)).toFixed(2)}</span>
               </div>
+              {(invoice.extra_discount_amount > 0 || invoice.extra_discount_percentage > 0) && (
+                <div className="flex justify-between text-green-600 italic">
+                  <span className="text-sm">
+                    Extra Discount {invoice.extra_discount_percentage > 0 ? `(${invoice.extra_discount_percentage}%)` : ''}:
+                  </span>
+                  <span className="font-medium">-₹{invoice.extra_discount_amount?.toFixed(2) || '0.00'}</span>
+                </div>
+              )}
               <div className="border-t pt-3 flex justify-between">
-                <span className="font-bold">Total Amount:</span>
+                <span className="font-bold">Grand Total:</span>
                 <span className="font-bold text-lg">₹{invoice.total_amount.toFixed(2)}</span>
               </div>
               <div className="flex justify-between">

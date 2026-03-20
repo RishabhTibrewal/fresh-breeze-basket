@@ -67,6 +67,7 @@ import {
   Bell,
   AlertTriangle,
   ChevronDown,
+  FileText,
 } from "lucide-react";
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -801,6 +802,21 @@ export default function Leads() {
                               </Button>
                             </>
                           )}
+                          {lead.stage !== 'lost' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                // Add navigation
+                                window.location.href = `/sales/quotations/create?leadId=${lead.id}`;
+                              }}
+                              className="h-7 text-xs text-blue-600 hover:text-blue-700"
+                              title="Create Quotation"
+                            >
+                              <FileText className="h-3 w-3 mr-1" />
+                              Quote
+                            </Button>
+                          )}
                         </div>
                         <div className="flex items-center gap-1">
                           <Button
@@ -832,26 +848,26 @@ export default function Leads() {
               </div>
 
               {/* Desktop Table View */}
-              <div className="hidden md:block rounded-md border w-full min-w-0 overflow-x-auto">
-                <Table className="min-w-[900px]">
+              <div className="hidden md:block rounded-md border w-full min-w-0">
+                <Table className="w-full">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="px-3 py-3 min-w-[200px]">Contact</TableHead>
-                      <TableHead className="px-3 py-3 min-w-[150px]">Company</TableHead>
-                      <TableHead className="px-3 py-3 min-w-[180px]">Title</TableHead>
-                      <TableHead className="px-3 py-3 w-24">Stage</TableHead>
-                      <TableHead className="px-3 py-3 w-24">Priority</TableHead>
-                      <TableHead className="px-3 py-3 w-28">Source</TableHead>
-                      <TableHead className="px-3 py-3 w-28">Value</TableHead>
-                      <TableHead className="px-3 py-3 w-32">Expected Close</TableHead>
-                      <TableHead className="px-3 py-3 w-32">Next Follow-up</TableHead>
-                      <TableHead className="px-3 py-3 w-32">Actions</TableHead>
+                      <TableHead className="px-2 py-3">Contact</TableHead>
+                      <TableHead className="px-2 py-3">Company</TableHead>
+                      <TableHead className="px-2 py-3">Title</TableHead>
+                      <TableHead className="px-2 py-3">Stage</TableHead>
+                      <TableHead className="px-2 py-3">Priority</TableHead>
+                      <TableHead className="px-2 py-3">Source</TableHead>
+                      <TableHead className="px-2 py-3">Value</TableHead>
+                      <TableHead className="px-2 py-3">Expected</TableHead>
+                      <TableHead className="px-2 py-3">Next Follow-up</TableHead>
+                      <TableHead className="px-2 py-3 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredLeads.map((lead) => (
                       <TableRow key={lead.id}>
-                        <TableCell className="px-3 py-3">
+                        <TableCell className="px-2 py-3">
                           <div className="space-y-1">
                             <div className="font-medium flex items-center gap-2 text-sm">
                               <User className="h-4 w-4 text-muted-foreground" />
@@ -871,7 +887,7 @@ export default function Leads() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="px-3 py-3">
+                        <TableCell className="px-2 py-3">
                           {lead.company_name ? (
                             <div className="flex items-center gap-2">
                               <Building2 className="h-4 w-4 text-muted-foreground" />
@@ -881,17 +897,17 @@ export default function Leads() {
                             <span className="text-sm text-muted-foreground">-</span>
                           )}
                         </TableCell>
-                        <TableCell className="px-3 py-3">
+                        <TableCell className="px-2 py-3">
                           <div className="text-sm max-w-[160px] break-words" title={lead.title}>
                             {lead.title}
                           </div>
                         </TableCell>
-                        <TableCell className="px-3 py-3">
+                        <TableCell className="px-2 py-3">
                           <Badge className={STAGE_COLORS[lead.stage]}>
                             {lead.stage.charAt(0).toUpperCase() + lead.stage.slice(1)}
                           </Badge>
                         </TableCell>
-                        <TableCell className="px-3 py-3">
+                        <TableCell className="px-2 py-3">
                           <Badge className={PRIORITY_COLORS[lead.priority]} variant="outline">
                             <span className="flex items-center gap-1">
                               {PRIORITY_ICONS[lead.priority]}
@@ -899,16 +915,16 @@ export default function Leads() {
                             </span>
                           </Badge>
                         </TableCell>
-                        <TableCell className="px-3 py-3">
+                        <TableCell className="px-2 py-3">
                           <span className="text-sm capitalize">{lead.source.replace('_', ' ')}</span>
                         </TableCell>
-                        <TableCell className="px-3 py-3">
+                        <TableCell className="px-2 py-3">
                           <div className="flex items-center gap-1 font-medium text-sm">
                             <DollarSign className="h-4 w-4 text-muted-foreground" />
                             {lead.estimated_value.toLocaleString()}
                           </div>
                         </TableCell>
-                        <TableCell className="px-3 py-3">
+                        <TableCell className="px-2 py-3">
                           {lead.expected_close_date ? (
                             <div className="flex items-center gap-1 text-sm">
                               <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -918,7 +934,7 @@ export default function Leads() {
                             <span className="text-sm text-muted-foreground">-</span>
                           )}
                         </TableCell>
-                        <TableCell className="px-3 py-3">
+                        <TableCell className="px-2 py-3">
                           {lead.next_follow_up ? (
                             <div className="flex items-center gap-1 text-sm">
                               <CalendarClock className={`h-4 w-4 ${new Date(lead.next_follow_up) < new Date() ? 'text-red-600' : 'text-blue-600'}`} />
@@ -935,10 +951,10 @@ export default function Leads() {
                             </div>
                           )}
                         </TableCell>
-                        <TableCell className="px-3 py-3">
-                          <div className="flex flex-col items-start gap-2">
+                        <TableCell className="px-2 py-3 text-right">
+                          <div className="flex flex-col items-end gap-2">
                             {/* Quick Actions */}
-                            <div className="flex items-center gap-1 flex-wrap">
+                            <div className="flex items-center justify-end gap-1 flex-wrap">
                               {lead.stage !== 'won' && lead.stage !== 'lost' && (
                                 <>
                                   <Button
@@ -949,7 +965,7 @@ export default function Leads() {
                                     title="Log Call"
                                   >
                                     <PhoneCall className="h-3 w-3 mr-1" />
-                                    <span className="hidden sm:inline">Call</span>
+                                    <span className="hidden xl:inline">Call</span>
                                   </Button>
                                   <Button
                                     variant="outline"
@@ -959,7 +975,7 @@ export default function Leads() {
                                     title="Reschedule"
                                   >
                                     <CalendarClock className="h-3 w-3 mr-1" />
-                                    <span className="hidden sm:inline">Schedule</span>
+                                    <span className="hidden xl:inline">Schedule</span>
                                   </Button>
                                   <Button
                                     variant="outline"
@@ -969,13 +985,27 @@ export default function Leads() {
                                     title="Mark as Won"
                                   >
                                     <Trophy className="h-3 w-3 mr-1" />
-                                    <span className="hidden sm:inline">Won</span>
+                                    <span className="hidden xl:inline">Won</span>
                                   </Button>
                                 </>
                               )}
+                              {lead.stage !== 'lost' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    window.location.href = `/sales/quotations/create?leadId=${lead.id}`;
+                                  }}
+                                  className="h-7 text-xs text-blue-600 hover:text-blue-700"
+                                  title="Create Quotation"
+                                >
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  <span className="hidden xl:inline">Quote</span>
+                                </Button>
+                              )}
                             </div>
                             {/* Edit/Delete */}
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center justify-end gap-1">
                               <Button
                                 variant="ghost"
                                 size="icon"
