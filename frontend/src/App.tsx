@@ -91,6 +91,8 @@ const StockAdjustment = lazy(() => import("./pages/admin/StockAdjustment"));
 const StockTransfer = lazy(() => import("./pages/admin/StockTransfer"));
 const PackagingRecipes = lazy(() => import("./pages/admin/PackagingRecipes"));
 const RepackOrders = lazy(() => import("./pages/admin/RepackOrders"));
+const RepackOrderCreate = lazy(() => import("./pages/repack/RepackOrderCreate"));
+const RecipeTemplateForm = lazy(() => import("./components/repack/RecipeTemplateForm"));
 const StockMovements = lazy(() => import("./pages/admin/StockMovements"));
 const PlaceholderPage = lazy(() => import("./pages/admin/PlaceholderPage"));
 const SalesAnalysis = lazy(() => import("./pages/admin/SalesAnalysis"));
@@ -353,7 +355,11 @@ const App: React.FC = () => {
                       <Route path="adjust" element={<StockAdjustment />} />
                       <Route path="transfer" element={<StockTransfer />} />
                       <Route path="packaging-recipes" element={<PackagingRecipes />} />
+                      <Route path="packaging-recipes/new" element={<RecipeTemplateForm />} />
+                      <Route path="packaging-recipes/:id/edit" element={<RecipeTemplateForm />} />
                       <Route path="repack-orders" element={<RepackOrders />} />
+                      <Route path="repack-orders/new" element={<RepackOrderCreate />} />
+                      <Route path="repack-orders/:id/edit" element={<RepackOrderCreate />} />
                       <Route path="movements" element={<StockMovements />} />
                       <Route path="balance" element={<PlaceholderPage />} />
                       <Route path="warehouse-balance" element={<PlaceholderPage />} />

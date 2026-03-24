@@ -186,12 +186,13 @@ export async function getRepackSummary(q: ReportQuery, companyId: string) {
     .select(`
       id, created_at, status, warehouse_id,
       warehouses:warehouse_id(name),
-      repack_order_items(
-        input_product_id, input_variant_id, input_quantity,
-        output_product_id, output_variant_id, output_quantity,
-        wastage_quantity, unit_cost, additional_cost_per_unit,
-        input_products:input_product_id(name),
-        output_products:output_product_id(name)
+      repack_order_inputs(
+        input_quantity, wastage_quantity, variant_id,
+        product:products(name)
+      ),
+      repack_order_outputs(
+        output_quantity, unit_cost, additional_cost_per_unit,
+        product:products(name)
       )
     `, { count: 'exact' })
     .eq('company_id', companyId)
@@ -208,29 +209,41 @@ export async function getRepackSummary(q: ReportQuery, companyId: string) {
   const { data, count, error } = await query;
   if (error) throw error;
 
-  const rows: RepackSummaryRow[] = (data ?? []).flatMap((ro: any) => {
-    return (ro.repack_order_items ?? []).map((item: any) => {
-      const inputQty   = Number(item.input_quantity ?? 0);
-      const outputQty  = Number(item.output_quantity ?? 0);
-      const wastageQty = Number(item.wastage_quantity ?? 0);
-      const unitCost   = Number(item.unit_cost ?? 0);
-      const addCost    = Number(item.additional_cost_per_unit ?? 0);
-      const totalCost  = outputQty * (unitCost + addCost);
-      return {
-        repack_order_id: ro.id,
-        order_date: ro.created_at?.split('T')[0] ?? '',
-        warehouse: ro.warehouses?.name ?? '—',
-        status: ro.status,
-        input_product: item.input_products?.name ?? '—',
-        input_qty: inputQty,
-        output_product: item.output_products?.name ?? '—',
-        output_qty: outputQty,
-        wastage_qty: wastageQty,
-        wastage_pct: inputQty > 0 ? (wastageQty / inputQty) * 100 : 0,
-        unit_cost: unitCost + addCost,
-        total_cost: totalCost,
-      };
-    });
+  const rows: RepackSummaryRow[] = (data ?? []).map((ro: any) => {
+    const inputs = ro.repack_order_inputs ?? [];
+    const outputs = ro.repack_order_outputs ?? [];
+    
+    const inputQty = inputs.reduce((s: number, i: any) => s + Number(i.input_quantity || 0), 0);
+    const wastageQty = inputs.reduce((s: number, i: any) => s + Number(i.wastage_quantity || 0), 0);
+    
+    const outputQty = outputs.reduce((s: number, o: any) => s + Number(o.output_quantity || 0), 0);
+    
+    const totalCost = outputs.reduce((s: number, o: any) => {
+       const qty = Number(o.output_quantity || 0);
+       const cost = Number(o.unit_cost || 0);
+       const addCost = Number(o.additional_cost_per_unit || 0);
+       return s + (qty * (cost + addCost));
+    }, 0);
+
+    const unitCost = outputQty > 0 ? totalCost / outputQty : 0;
+
+    const inputProducts = inputs.map((i: any) => i.product?.name || '—').join(', ');
+    const outputProducts = outputs.map((o: any) => o.product?.name || '—').join(', ');
+
+    return {
+      repack_order_id: ro.id,
+      order_date: ro.created_at?.split('T')[0] ?? '',
+      warehouse: ro.warehouses?.name ?? '—',
+      status: ro.status,
+      input_product: inputProducts || '—',
+      input_qty: inputQty,
+      output_product: outputProducts || '—',
+      output_qty: outputQty,
+      wastage_qty: wastageQty,
+      wastage_pct: inputQty > 0 ? (wastageQty / inputQty) * 100 : 0,
+      unit_cost: unitCost,
+      total_cost: totalCost,
+    };
   });
 
   const totalWastage  = rows.reduce((s, r) => s + r.wastage_qty, 0);
@@ -272,9 +285,9 @@ export async function getWastageReport(q: ReportQuery, companyId: string) {
     .select(`
       id, created_at, status, warehouse_id,
       warehouses:warehouse_id(name),
-      repack_order_items(
-        input_product_id, input_quantity, wastage_quantity, unit_cost,
-        input_products:input_product_id(name)
+      repack_order_inputs(
+        input_quantity, wastage_quantity, variant_id,
+        product:products(name)
       )
     `, { count: 'exact' })
     .eq('company_id', companyId)
@@ -284,18 +297,38 @@ export async function getWastageReport(q: ReportQuery, companyId: string) {
 
   if (error) throw error;
 
+  const variantIds = [...new Set((data ?? []).flatMap((ro: any) => 
+    (ro.repack_order_inputs ?? [])
+      .filter((item: any) => Number(item.wastage_quantity ?? 0) > 0)
+      .map((item: any) => item.variant_id)
+  ))];
+
+  let pricesMap: Record<string, number> = {};
+  if (variantIds.length > 0) {
+    const { data: prices } = await db()
+      .from('product_prices')
+      .select('variant_id, sale_price')
+      .eq('company_id', companyId)
+      .eq('price_type', 'standard')
+      .is('outlet_id', null)
+      .in('variant_id', variantIds);
+    (prices ?? []).forEach(p => {
+      if (p.variant_id) pricesMap[p.variant_id] = Number(p.sale_price || 0);
+    });
+  }
+
   const rows: WastageRow[] = (data ?? []).flatMap((ro: any) =>
-    (ro.repack_order_items ?? [])
+    (ro.repack_order_inputs ?? [])
       .filter((item: any) => Number(item.wastage_quantity ?? 0) > 0)
       .map((item: any) => {
         const inputQty   = Number(item.input_quantity ?? 0);
         const wastageQty = Number(item.wastage_quantity ?? 0);
-        const unitCost   = Number(item.unit_cost ?? 0);
+        const unitCost   = pricesMap[item.variant_id] || 0;
         return {
           repack_order_id: ro.id,
           order_date: ro.created_at?.split('T')[0] ?? '',
           warehouse: ro.warehouses?.name ?? '—',
-          input_product: item.input_products?.name ?? '—',
+          input_product: item.product?.name ?? '—',
           input_qty: inputQty,
           wastage_qty: wastageQty,
           wastage_pct: inputQty > 0 ? (wastageQty / inputQty) * 100 : 0,
@@ -336,7 +369,7 @@ export async function getInventoryDashboardKpis(q: ReportQuery, companyId: strin
   const [invRes, repackRes] = await Promise.all([
     db().from('warehouse_inventory').select('stock_count, reserved_stock').eq('company_id', companyId),
     db().from('repack_orders')
-      .select('repack_order_items(wastage_quantity)')
+      .select('repack_order_inputs(wastage_quantity)')
       .eq('company_id', companyId)
       .gte('created_at', q.from_date)
       .lte('created_at', q.to_date + 'T23:59:59Z'),
@@ -351,7 +384,7 @@ export async function getInventoryDashboardKpis(q: ReportQuery, companyId: strin
 
   const repacks = repackRes.data ?? [];
   const totalWastage = repacks.reduce((s: number, ro: any) =>
-    s + (ro.repack_order_items ?? []).reduce((ss: number, i: any) => ss + Number(i.wastage_quantity ?? 0), 0), 0
+    s + (ro.repack_order_inputs ?? []).reduce((ss: number, i: any) => ss + Number(i.wastage_quantity ?? 0), 0), 0
   );
 
   return {

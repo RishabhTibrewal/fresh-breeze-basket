@@ -1,6 +1,6 @@
 # Architecture State Document
 
-**Last Updated:** 2026-03-18 (01:10 IST)
+**Last Updated:** 2026-03-21 (15:50 IST)
 **Purpose:** Technical reference for current system architecture, routing patterns, and critical implementation details to prevent architectural mistakes. This document serves as the long-term memory and architectural blueprint for all future AI interactions.
 
 ---
@@ -390,11 +390,12 @@ fresh-breeze-basket/
 - ✅ Stock Movements (including REPACK_OUT, REPACK_IN)
 - ✅ Stock Adjustments
 - ✅ Stock Transfers
-- ✅ Packaging Recipes (bulk-to-retail conversion definitions, with `wastage_per_input` & `additional_cost_per_unit`)
-- ✅ Repack Orders (package breakdown: bulk → retail) — **upgraded 2026-03-17:**
-  - `repack_order_items` tracks `wastage_quantity`, `unit_cost`, `additional_cost_per_unit`
-  - `process_repack_order` RPC computes unit cost + does weighted-average `product_prices` update
-  - Frontend: tabbed New Order (live price preview) + Order History (wastage/cost columns, date filters)
+- ✅ Packaging Recipes (templates for bulk/retail conversions, supports M:N relations)
+- ✅ Repack Orders (package breakdown: bulk → retail) — **upgraded 2026-03-22:**
+  - `repack_order_inputs` tracks `wastage_quantity`
+  - `repack_order_outputs` tracks `unit_cost`, `additional_cost_per_unit`
+  - `process_repack_order_v3` RPC computes unit cost distributing base costs + updates weighted-average `product_prices`
+  - Frontend: React-Hook-Form dynamic array builders (M:1, 1:M, M:M) in Edit/Create + History with wastage reporting
 
 **Sales Module:**
 - ✅ Sales Orders
@@ -444,6 +445,47 @@ fresh-breeze-basket/
 - ⚠️ Basic structure in place
 - ⚠️ Full implementation pending
 
+### Recent Changes (2026-03-21) — Procurement Financial Logic & Discount Standardization
+
+- **Purchase Invoice Discount Standardization:**
+  - Migrated item-level discounts from fixed `discount_amount` to `discount_percentage` in `CreatePurchaseInvoice.tsx`, aligning with the Purchase Order workflow.
+  - Automatically derive `discount_amount` and `line_total` from the percentage to ensure 100% mathematical consistency.
+  - Updated `purchase_invoice_items` backend mapping to persist `discount_percentage` alongside the calculated amount.
+
+- **Unified Extra Discount Logic:**
+  - Standardized the calculation base for "Extra Discount %" across Quotations, Orders, and Invoices.
+  - **Formula:** `Extra Discount Amount = (Subtotal + Tax - Item Discounts) × Extra Discount %`.
+  - Implemented automatic data flow: When creating an invoice from a GRN, the system now automatically pulls the `extra_discount_percentage` from the original Purchase Order.
+
+- **Backend: Quick Create from GRN Fixes:**
+  - Upgraded `createFromGRN` in `purchaseInvoices.ts` to fetch the linked `purchase_order_items`.
+  - Auto-generated invoices now correctly inherit negotiated discounts from the PO, preventing loss of financial data during the conversion from receipt to invoice.
+
+- **Rounding & Precision:**
+  - Enforced a system-wide 2-decimal rounding rule using `Math.round(val * 100) / 100` for all financial totals in the procurement flow.
+
+- **Frontend UX for Invoices:**
+  - `PurchaseInvoiceDetail.tsx`: Added `Disc %` column to the items table for full visibility into the original discount terms.
+  - Form state restoration: Fixed a regression in `handleSubmit` where the edit-mode mutation was bypassed; restored the `updateMutation` path.
+
+### Recent Changes (2026-03-21) — UX & Improved Selectors
+
+- **Warehouse Selection Component (`WarehouseCombobox.tsx`):**
+  - New searchable combobox replacing standard HTML `<select>` across the Repacking module.
+  - Supports search by warehouse name or code; displays both in the selection trigger with a mono-font code badge.
+  - Integrated into **Repack Orders** (New Order Form & History Filter) and **Create Purchase Order**.
+
+- **Product & Variant Selection Enhancement (`ProductVariantCombobox.tsx`):**
+  - Selection trigger redesigned to show rich metadata: **Brand Badge**, **Product Name**, **Variant Name**, and **SKU/Code Badge**.
+  - Height uniformized to `h-10` matching the warehouse selector for a balanced form layout.
+  - **Portal-less Rendering fix:** Bypassed Radix Portals for the Popover content. Rendering it as a local DOM sibling resolves focus-trapping and scroll-blocking issues when used inside Radix Dialogs (e.g., **Packaging Recipes** modal).
+  - Explicit focus management (`onOpenAutoFocus=preventDefault` + `autoFocus` input) ensures the search box is always ready for typing.
+  - Native `cmdk` filtering used for performance; search space includes Brand, SKU, and Product Code.
+
+- **Repacking Module UI Refinement:**
+  - **RepackOrders.tsx**: Replaced all warehouse and product pickers with the new searchable comboboxes. Removed redundant helper text to streamline the form.
+  - **PackagingRecipes.tsx**: Upgraded all variant selectors inside the "Add/Edit Recipe" dialog to the new portal-less Popover comboboxes, fixing previously reported scroll and search issues.
+
 ### Recent Changes (2026-03-18) — Comprehensive Reports Module
 
 - **Materialized Views for Aggregation**:
@@ -469,30 +511,28 @@ fresh-breeze-basket/
   - Replaced bulk-loading array exports with `json2csv` stream pipelines connected directly to the Express `res` object.
   - Reports gracefully handle `.csv` extensions by streaming directly, preventing backend memory exhaustion on large datasets.
 
-### Recent Changes (2026-03-17) — Repacking Module Upgrade
+### Recent Changes (2026-03-22) — Repacking Module Multi-Relation Upgrade (M:N)
 
-- **Schema: New cost & wastage columns (applied to Supabase Gluf-fresh-v2):**
-  - `repack_order_items` → `wastage_quantity NUMERIC DEFAULT 0`, `unit_cost NUMERIC DEFAULT 0`, `additional_cost_per_unit NUMERIC DEFAULT 0`
-  - `packaging_recipes` → `wastage_per_input NUMERIC DEFAULT 0`, `additional_cost_per_unit NUMERIC DEFAULT 0`
-  - Migration: `backend/src/db/migrations/20260317_add_repack_cost_fields.sql`
+- **Schema: Upgraded from 1:1 to Multi-Relation (M:N) Repacking:**
+  - Safely dropped legacy 1:1 tables (`packaging_recipes`, `repack_order_items`).
+  - Implemented new M:N relational structure: `packaging_recipe_templates` (header), `packaging_recipe_inputs`, `packaging_recipe_outputs`.
+  - Implemented tracking tables: `repack_orders` (header), `repack_order_inputs` (tracks `wastage_quantity`), `repack_order_outputs` (tracks `unit_cost`, `additional_cost_per_unit`).
 
-- **Upgraded `process_repack_order` RPC (same name, fully backward-compatible):**
-  - Pricing formula: `final_unit_cost = (input_qty × sale_price / output_qty) + additional_cost_per_unit`
-  - Writes computed `unit_cost` back to each `repack_order_items` row after execution
-  - Weighted-average update to `product_prices.sale_price` on execute: `new_price = (existing_stock × old_price + output_qty × unit_cost) / total_stock`
-  - Returns per-item JSONB summary: `{ item_id, input_quantity, output_quantity, wastage_quantity, final_unit_cost }`
-  - Migration: `backend/src/db/migrations/20260317_upgrade_process_repack_order_rpc.sql`
+- **Upgraded `process_repack_order_v3` RPC (Atomic Execution Engine):**
+  - Fully supports Many-to-One, One-to-Many, and Many-to-Many transformations.
+  - Automatically calculates total raw material capacity used and deducts stock symmetrically across all defined inputs.
+  - Base Yield Costing: Base cost of produced items is distributed proportionally among outputs based on their quantities.
+  - Weighted-average update to `product_prices.sale_price` dynamically calculates true landed cost per output item upon execution.
+  - Generates comprehensive `inventory_movements` (REPACK_OUT for all inputs, REPACK_IN for all outputs) in a single transaction.
 
-- **Backend controller (`inventory.ts`):** `createRepackOrder` and `updateRepackOrder` now persist `wastage_quantity` and `additional_cost_per_unit` per item row.
+- **Reports Formatting & Data Visibility:**
+  - **Repack Summary & Wastage Report:** Upgraded SQL endpoints to correctly query the new M:N table structures.
+  - **Accurate Wastage Financials:** Cost of wastage is now accurately quantified by pulling the raw material's live standard cost from `product_prices` dynamically during report generation.
 
-- **Frontend API types (`frontend/src/api/inventory.ts`):**
-  - `PackagingRecipe` + `RepackOrderItem` + `CreateRepackOrderInput` updated with new fields
-  - `processRepackOrder()` return type exposes `items[]` array with per-item computed values
-
-- **Frontend page (`RepackOrders.tsx`) — full redesign:**
-  - Tab 1 **"New Order":** input/output pickers (shows live stock), qty + target size + wastage + additional cost inputs, live price preview panel (pure `computeRepackPreview()`) — single **Execute Repack** atomically creates + processes, auto-switches to history on success; auto-fills from matching `packaging_recipes` row
-  - Tab 2 **"Order History":** warehouse / status / date-range filters; columns: Date | Warehouse | Input | Output | Bags In | Bags Out | Wastage | Unit Cost | Status; inline execute/delete for drafts
-  - Post-execution toast includes: output count, final unit cost, wastage (from RPC items summary)
+- **Frontend API & UX:**
+  - Built out React-Hook-Form dynamic array builders in `RecipeTemplateForm` and `RepackOrderCreate` to allow N inputs and N outputs.
+  - Integrated full Edit / Draft modes for both `packaging_recipe_templates` and `repack_orders` with corresponding `/edit` routing and auto-refresh invalidations.
+  - Repack Orders list view upgraded to clearly display exact Wastage amounts inline underneath each input item.
 
 ### Recent Changes (2026-03-17) — Product Groupings
 
