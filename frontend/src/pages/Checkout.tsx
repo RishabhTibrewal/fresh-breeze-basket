@@ -22,7 +22,7 @@ import { Address } from "@/types/database";
 import AddressForm from "./account/AddressForm";
 import { API_BASE_URL } from "@/config";
 import { paymentsService } from '@/api/payments';
-import  apiClient  from '@/lib/apiClient';
+import apiClient from '@/lib/apiClient';
 
 export default function CheckoutPage() {
   const navigate = useNavigate();
@@ -105,12 +105,11 @@ export default function CheckoutPage() {
       }
       
       // Build order items directly from cart — variant prices are already accurate
-      // (loaded from product_prices via the backend cart sync)
       const items = cartState.items.map(cartItem => ({
-          product_id: cartItem.id,
-        variant_id: cartItem.variant_id,                 // send the selected variant
-          quantity: cartItem.quantity,
-        price: cartItem.sale_price ?? cartItem.price,   // use variant's sale_price, fall back to MRP
+        product_id: cartItem.id,
+        variant_id: cartItem.variant_id,
+        quantity: cartItem.quantity,
+        price: cartItem.sale_price ?? cartItem.price,
       }));
       
       // Calculate total amount from cart prices
@@ -120,7 +119,7 @@ export default function CheckoutPage() {
       const taxAmount = subtotal * taxRate;
       const totalAmount = subtotal + shippingCost + taxAmount;
       
-      // Store order data for payment step (don't create order yet)
+      // Store order data for payment step
       const orderDataToSave = {
         items,
         shipping_address_id: selectedAddressId,
@@ -135,14 +134,14 @@ export default function CheckoutPage() {
 
       console.log('Preparing order data for payment:', orderDataToSave);
       
-      // Create payment intent first (without order ID)
+      // Create payment intent first
       const { data } = await apiClient.post('/payments/create-payment-intent', {
         amount: totalAmount
       });
       setClientSecret(data.clientSecret);
       setPaymentIntentId(data.paymentIntentId);
       
-      // Store order data for after payment (include payment intent ID)
+      // Store order data for after payment
       setOrderData({
         ...orderDataToSave,
         payment_intent_id: data.paymentIntentId
@@ -169,13 +168,10 @@ export default function CheckoutPage() {
       setIsProcessing(true);
       
       console.log('Creating order with data:', orderData);
-      console.log('Payment intent ID in orderData:', orderData.payment_intent_id);
       
       // Create the order after successful payment
       const orderResult = await createOrder.mutateAsync(orderData);
       const orderId = orderResult.order_id;
-      
-      console.log('Order created after payment with ID:', orderId);
       
       toast.success("Order placed successfully!");
       clearCart();
@@ -190,7 +186,6 @@ export default function CheckoutPage() {
   };
 
   const handlePaymentFailure = () => {
-    // Reset payment state and go back to checkout
     setShowPayment(false);
     setOrderData(null);
     setClientSecret(null);
@@ -207,11 +202,8 @@ export default function CheckoutPage() {
 
   // Handle address added
   const handleAddressAdded = (newAddress: Address) => {
-    if (editingAddressId) {
-      refetchAddresses();
-    } else {
-      refetchAddresses();
-      // Select the newly added address
+    refetchAddresses();
+    if (!editingAddressId) {
       setSelectedAddressId(newAddress.id);
     }
     setShowAddressForm(false);
@@ -278,7 +270,6 @@ export default function CheckoutPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Payment Form */}
               <div className="bg-white rounded-lg shadow-md p-6">
                 <h2 className="text-xl font-semibold mb-6">Payment Details</h2>
                 {clientSecret ? (
@@ -298,7 +289,6 @@ export default function CheckoutPage() {
                 )}
               </div>
 
-              {/* Order Summary */}
               <div>
                 <Card>
                   <CardHeader>
@@ -306,7 +296,6 @@ export default function CheckoutPage() {
                     <CardDescription>Review your order details</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {/* Products */}
                     <div className="space-y-3">
                       {cartState.items.map((item) => (
                         <div key={item.id} className="flex justify-between">
@@ -333,7 +322,6 @@ export default function CheckoutPage() {
 
                     <Separator />
 
-                    {/* Totals */}
                     <div className="space-y-2">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Subtotal</span>
@@ -356,18 +344,11 @@ export default function CheckoutPage() {
                       </div>
                     </div>
 
-                    {/* Security Notice */}
                     <div className="mt-4 p-3 bg-green-50 rounded-md">
                       <h4 className="text-sm font-medium text-green-800 mb-1">Secure Payment</h4>
-                      <p className="text-xs text-green-700">
-                        • Your payment information is encrypted and secure
-                      </p>
-                      <p className="text-xs text-green-700">
-                        • We never store your card details
-                      </p>
-                      <p className="text-xs text-green-700">
-                        • Powered by Stripe for maximum security
-                      </p>
+                      <p className="text-xs text-green-700">• Your payment information is encrypted and secure</p>
+                      <p className="text-xs text-green-700">• We never store your card details</p>
+                      <p className="text-xs text-green-700">• Powered by Stripe for maximum security</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -386,10 +367,19 @@ export default function CheckoutPage() {
       <Navbar />
       <main className="flex-grow bg-gray-50 py-8">
         <div className="container mx-auto px-4">
-          <h1 className="text-2xl md:text-3xl font-bold mb-8">Checkout</h1>
+          <div className="flex items-center justify-between mb-8">
+            <h1 className="text-2xl md:text-3xl font-bold">Checkout</h1>
+            <Button 
+              variant="ghost" 
+              onClick={() => navigate('/cart')}
+              className="text-muted-foreground"
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Cart
+            </Button>
+          </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left Column - Delivery Address */}
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-white rounded-lg shadow-md p-6">
                 <div className="flex items-center justify-between mb-6">
@@ -462,7 +452,6 @@ export default function CheckoutPage() {
                 )}
               </div>
 
-              {/* Payment Method */}
               <div className="bg-white rounded-lg shadow-md p-6">
                 <h2 className="text-xl font-semibold mb-6">Payment Method</h2>
                 <RadioGroup defaultValue="card" className="grid gap-4">
@@ -480,7 +469,6 @@ export default function CheckoutPage() {
               </div>
             </div>
 
-            {/* Right Column - Order Summary */}
             <div>
               <Card>
                 <CardHeader>
@@ -488,7 +476,6 @@ export default function CheckoutPage() {
                   <CardDescription>Review your order before payment</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Products */}
                   <div className="space-y-3">
                     {cartState.items.map((item) => (
                       <div key={item.id} className="flex justify-between">
@@ -515,7 +502,6 @@ export default function CheckoutPage() {
 
                   <Separator />
 
-                  {/* Totals */}
                   <div className="space-y-2">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Subtotal</span>
@@ -538,18 +524,11 @@ export default function CheckoutPage() {
                     </div>
                   </div>
 
-                  {/* Order Processing Information */}
                   <div className="mt-4 p-3 bg-blue-50 rounded-md">
                     <h4 className="text-sm font-medium text-blue-800 mb-1">Order Processing</h4>
-                    <p className="text-xs text-blue-700">
-                      • Orders can be cancelled within 5 minutes of placing
-                    </p>
-                    <p className="text-xs text-blue-700">
-                      • After 5 minutes, your order status changes to "Processing"
-                    </p>
-                    <p className="text-xs text-blue-700">
-                      • Products are reserved and delivery is scheduled for 3 days later
-                    </p>
+                    <p className="text-xs text-blue-700">• Orders can be cancelled within 5 minutes of placing</p>
+                    <p className="text-xs text-blue-700">• After 5 minutes, your order status changes to "Processing"</p>
+                    <p className="text-xs text-blue-700">• Products are reserved and delivery is scheduled for 3 days later</p>
                   </div>
                 </CardContent>
                 <CardFooter>
@@ -575,7 +554,6 @@ export default function CheckoutPage() {
       </main>
       <Footer />
 
-      {/* Address Form Modal */}
       {showAddressForm && (
         <div 
           className="fixed inset-0 bg-black/5 backdrop-blur-sm z-50 flex items-center justify-center overflow-auto"
@@ -598,4 +576,4 @@ export default function CheckoutPage() {
       )}
     </div>
   );
-} 
+}

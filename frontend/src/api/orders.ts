@@ -72,6 +72,20 @@ export interface Order {
   order_source?: 'ecommerce' | 'pos' | 'sales' | 'internal';
   fulfillment_type?: 'delivery' | 'pickup' | 'cash_counter';
   original_order_id?: string;
+  // CD and Financial breakdown fields
+  cd_enabled?: boolean;
+  cd_percentage?: number;
+  cd_days?: number;
+  cd_amount?: number;
+  cd_settlement_mode?: 'direct' | 'credit_note';
+  taxable_value?: number;
+  total_extra_charges?: number;
+  round_off_amount?: number;
+  extra_charges?: Array<{
+    name: string;
+    amount: number;
+    is_taxable: boolean;
+  }>;
 }
 
 export interface CreateOrderData {

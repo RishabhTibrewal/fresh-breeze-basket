@@ -106,7 +106,9 @@ const CustomerProfilePage = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {customer.credit_periods.map((period) => (
+                  {[...customer.credit_periods]
+                    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                    .map((period) => (
                     <tr key={period.id}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {new Date(period.created_at).toLocaleDateString()}

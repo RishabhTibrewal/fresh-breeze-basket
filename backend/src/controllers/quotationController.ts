@@ -131,8 +131,9 @@ export const createQuotation = async (req: Request, res: Response) => {
 
       const lineSubtotal  = qty * unitPrice;
       const discAmt       = parseFloat(((lineSubtotal * discPct) / 100).toFixed(2));
-      const taxAmt        = parseFloat(((lineSubtotal * taxPct)  / 100).toFixed(2));
-      const lineTotal     = lineSubtotal - discAmt + taxAmt;
+      const taxBase       = lineSubtotal - discAmt;
+      const taxAmt        = parseFloat(((taxBase * taxPct)  / 100).toFixed(2));
+      const lineTotal     = taxBase + taxAmt;
 
       subtotal      = Math.round((subtotal + lineSubtotal) * 100) / 100;
       totalTax      = Math.round((totalTax + taxAmt) * 100) / 100;
@@ -161,7 +162,7 @@ export const createQuotation = async (req: Request, res: Response) => {
       : Number(extra_discount_amount || 0);
     
     const totalAmount  = Math.round((sumLineTotals - extraDiscAmt) * 100) / 100;
-    const headerTotalDiscount = Math.round((totalDiscount + extraDiscAmt) * 100) / 100;
+    const headerTotalDiscount = Math.round(totalDiscount * 100) / 100;
 
     // ─── Insert quotation header ─────────────────────────────────────────────
     const { data: quotation, error: qError } = await (supabaseAdmin || supabase)

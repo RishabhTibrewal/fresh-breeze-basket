@@ -253,3 +253,109 @@ export const getCompanyBySlug = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const getMyCompany = async (req: Request, res: Response) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+
+    const { data: company, error } = await (supabaseAdmin || supabase)
+      .from('companies')
+      .select('*')
+      .eq('id', companyId)
+      .single();
+
+    if (error || !company) {
+      return res.status(404).json({
+        success: false,
+        message: 'Company not found'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: company
+    });
+  } catch (error) {
+    console.error('Error in getMyCompany:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching company profile'
+    });
+  }
+};
+
+export const updateMyCompany = async (req: Request, res: Response) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+
+    const {
+      name,
+      address,
+      city,
+      state,
+      postal_code,
+      country,
+      phone,
+      email,
+      gstin,
+      bank_details
+    } = req.body;
+
+    const updateData: any = {
+      updated_at: new Date().toISOString()
+    };
+
+    if (name !== undefined) updateData.name = name;
+    if (address !== undefined) updateData.address = address;
+    if (city !== undefined) updateData.city = city;
+    if (state !== undefined) updateData.state = state;
+    if (postal_code !== undefined) updateData.postal_code = postal_code;
+    if (country !== undefined) updateData.country = country;
+    if (phone !== undefined) updateData.phone = phone;
+    if (email !== undefined) updateData.email = email;
+    if (gstin !== undefined) updateData.gstin = gstin;
+    if (bank_details !== undefined) updateData.bank_details = bank_details;
+
+    const { data: updatedCompany, error } = await (supabaseAdmin || supabase)
+      .from('companies')
+      .update(updateData)
+      .eq('id', companyId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating company:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update company profile',
+        details: error.message
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: updatedCompany,
+      message: 'Company profile updated successfully'
+    });
+  } catch (error) {
+    console.error('Error in updateMyCompany:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error updating company profile'
+    });
+  }
+};

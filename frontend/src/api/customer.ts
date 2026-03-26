@@ -11,6 +11,11 @@ export interface CustomerDetails {
   credit_period_days: number;
   credit_limit: number;
   current_credit: number;
+  // CD (Cash Discount) fields
+  cd_enabled: boolean;
+  cd_percentage: number;
+  cd_days: number;
+  cd_settlement_mode: 'direct' | 'credit_note';
   credit_periods: Array<{
     id: string;
     amount: number;
@@ -61,6 +66,11 @@ export interface CustomerFormValues {
   credit_period_days?: number | null;
   credit_limit?: number | null;
   current_credit?: number | null;
+  // CD (Cash Discount) fields
+  cd_enabled?: boolean;
+  cd_percentage?: number;
+  cd_days?: number;
+  cd_settlement_mode?: 'direct' | 'credit_note';
 }
 
 export interface CustomerAddress {
@@ -108,7 +118,12 @@ export const customerService = {
           trn_number: customerData.trn_number,
           credit_period_days: customerData.credit_period_days || 0,
           credit_limit: customerData.credit_limit || 0,
-          current_credit: customerData.current_credit || 0
+          current_credit: customerData.current_credit || 0,
+          // CD fields
+          cd_enabled: customerData.cd_enabled || false,
+          cd_percentage: customerData.cd_percentage || 0,
+          cd_days: customerData.cd_days || 0,
+          cd_settlement_mode: customerData.cd_settlement_mode || 'direct',
         });
         
         console.log('Customer creation API response:', response.data);

@@ -235,12 +235,13 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
         const lineSubtotal = item.quantity * item.unit_price;
         const taxPct = item.tax_percentage || 0;
         const discPct = item.discount_percentage || 0;
-        const itemTax = parseFloat(((lineSubtotal * taxPct) / 100).toFixed(2));
         const itemDiscount = parseFloat(((lineSubtotal * discPct) / 100).toFixed(2));
+        const taxBase = lineSubtotal - itemDiscount;
+        const itemTax = parseFloat(((taxBase * taxPct) / 100).toFixed(2));
         // Store computed amounts on item so they are available for INSERT below
         item._computed_tax = itemTax;
         item._computed_discount = itemDiscount;
-        item._line_total = lineSubtotal + itemTax - itemDiscount;
+        item._line_total = taxBase + itemTax;
         po_subtotal += lineSubtotal;
         po_total_tax += itemTax;
         po_total_discount += itemDiscount;
@@ -253,7 +254,7 @@ export const createPurchaseOrder = async (req: Request, res: Response, next: Nex
         
       const sumLineTotals = Math.round((po_subtotal - po_total_discount + po_total_tax) * 100) / 100;
       const po_total_amount = Math.round((sumLineTotals - po_extra_disc_amt) * 100) / 100;
-      const headerTotalDiscount = Math.round((po_total_discount + po_extra_disc_amt) * 100) / 100;
+      const headerTotalDiscount = Math.round(po_total_discount * 100) / 100;
 
     // Create purchase order with retry logic to handle PO number race conditions
     let purchaseOrderResult: any;
@@ -826,9 +827,10 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
           const lineSubtotal = item.quantity * item.unit_price;
           const taxPct = tax_percentage || 0;
           const discPct = item.discount_percentage || 0;
-          const itemTax = parseFloat(((lineSubtotal * taxPct) / 100).toFixed(2));
           const itemDiscount = parseFloat(((lineSubtotal * discPct) / 100).toFixed(2));
-          const lineTotal = lineSubtotal + itemTax - itemDiscount;
+          const taxBase = lineSubtotal - itemDiscount;
+          const itemTax = parseFloat(((taxBase * taxPct) / 100).toFixed(2));
+          const lineTotal = taxBase + itemTax;
 
           po_subtotal += lineSubtotal;
           po_total_tax += itemTax;
@@ -878,7 +880,7 @@ export const updatePurchaseOrder = async (req: Request, res: Response, next: Nex
         }
 
         const po_total_amount = Math.round((sumLineTotals - finalExtraDiscAmt) * 100) / 100;
-        const headerTotalDiscount = Math.round((po_total_discount + finalExtraDiscAmt) * 100) / 100;
+        const headerTotalDiscount = Math.round(po_total_discount * 100) / 100;
 
         await adminClient
           .schema('procurement')

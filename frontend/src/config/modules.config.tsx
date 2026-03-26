@@ -139,6 +139,8 @@ export const modulesConfig: Record<string, ModuleConfig> = {
       { label: 'Quotations', route: '/sales/quotations', icon: FileText, permission: 'sales.read' },
       { label: 'Order Invoices', route: '/sales/invoices', icon: Receipt, permission: 'sales.read' },
       { label: 'Payments', route: '/sales/payments', icon: CreditCard, permission: 'sales.read' },
+      { label: 'Credit Notes', route: '/sales/credit-notes', icon: FileCheck, permission: 'sales.read' },
+      { label: 'Create Credit Note', route: '/sales/credit-notes/new', icon: Plus, permission: 'sales.write' },
       { label: 'Customers', route: '/sales/customers', icon: Users, permission: 'sales.read' },
       { label: 'Leads', route: '/sales/leads', icon: UserCheck, permission: 'sales.read' },
       { label: 'Credit Management', route: '/sales/credit-management', icon: CreditCard, permission: 'sales.read' },

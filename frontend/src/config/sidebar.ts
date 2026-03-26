@@ -232,6 +232,13 @@ const salesGroup: SidebarGroup = {
       ]
     },
     {
+      id: 'credit-notes',
+      label: 'Credit Notes',
+      icon: CreditCard,
+      path: '/sales/credit-notes',
+      roles: ['admin', 'sales']
+    },
+    {
       id: 'credit-management',
       label: 'Credit Management',
       icon: TrendingUp,

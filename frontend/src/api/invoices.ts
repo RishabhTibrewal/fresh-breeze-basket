@@ -29,7 +29,7 @@ export const invoicesService = {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `invoice-${orderId.substring(0, 8)}.pdf`;
+    link.download = `invoice-${orderId.substring(0, 8)}.html`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

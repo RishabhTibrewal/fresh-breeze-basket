@@ -15,15 +15,9 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { Badge } from '@/components/ui/badge';
 import { 
@@ -38,7 +32,9 @@ import {
   Clock,
   ShoppingCart,
   Receipt,
-  Link as LinkIcon
+  Search,
+  Link as LinkIcon,
+  Plus
 } from 'lucide-react';
 import { customerService } from '@/api/customer';
 import { ErrorMessage } from '@/components/ui/error-message';
@@ -48,6 +44,7 @@ export default function AdminCustomerDetails() {
   const { id: customerOrUserId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const [ledgerSearch, setLedgerSearch] = React.useState("");
   
   // Determine the back route based on current path
   const getBackRoute = () => {
@@ -91,6 +88,102 @@ export default function AdminCustomerDetails() {
     enabled: !!customer?.party_id,
   });
 
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'N/A';
+    return format(new Date(dateString), 'MMM d, yyyy');
+  };
+
+  const formatDateTime = (dateString: string | null) => {
+    if (!dateString) return 'N/A';
+    return format(new Date(dateString), 'MMM d, yyyy, h:mm a');
+  };
+
+  const sortedCreditPeriods = React.useMemo(() => {
+    if (!customer?.credit_periods) return [];
+    let periods = [...customer.credit_periods];
+    
+    if (ledgerSearch) {
+      const search = ledgerSearch.toLowerCase();
+      periods = periods.filter(p => 
+        (p.description?.toLowerCase() || '').includes(search) ||
+        (p.type?.toLowerCase() || '').includes(search) ||
+        p.amount?.toString().includes(search)
+      );
+    }
+    
+    return periods.sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  }, [customer?.credit_periods, ledgerSearch]);
+
+  const sortedPayments = React.useMemo(() => {
+    if (!customer?.payments) return [];
+    let payments = [...customer.payments];
+    
+    if (ledgerSearch) {
+      const search = ledgerSearch.toLowerCase();
+      payments = payments.filter(p => 
+        (p.payment_method?.toLowerCase() || '').includes(search) ||
+        (p.transaction_id?.toLowerCase() || '').includes(search) ||
+        (p.cheque_no?.toLowerCase() || '').includes(search) ||
+        (p.status?.toLowerCase() || '').includes(search) ||
+        p.amount?.toString().includes(search) ||
+        p.id.includes(search)
+      );
+    }
+    
+    return payments.sort((a, b) => {
+      const dateA = a.payment_date || a.created_at;
+      const dateB = b.payment_date || b.created_at;
+      return new Date(dateB).getTime() - new Date(dateA).getTime();
+    });
+  }, [customer?.payments, ledgerSearch]);
+
+  const sortedOrders = React.useMemo(() => {
+    if (!customer?.orders) return [];
+    let orders = [...customer.orders];
+    
+    if (ledgerSearch) {
+      const search = ledgerSearch.toLowerCase();
+      orders = orders.filter(o => 
+        o.id.toLowerCase().includes(search) ||
+        (o.status?.toLowerCase() || '').includes(search) ||
+        (o.payment_status?.toLowerCase() || '').includes(search) ||
+        o.total_amount?.toString().includes(search)
+      );
+    }
+    
+    return orders.sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  }, [customer?.orders, ledgerSearch]);
+
+  const sortedCreditNotes = React.useMemo(() => {
+    if (!customer?.credit_notes) return [];
+    let cns = [...customer.credit_notes];
+    
+    if (ledgerSearch) {
+      const search = ledgerSearch.toLowerCase();
+      cns = cns.filter(c => 
+        c.cn_number.toLowerCase().includes(search) ||
+        (c.reason?.toLowerCase() || '').includes(search) ||
+        (c.status?.toLowerCase() || '').includes(search) ||
+        c.total_amount?.toString().includes(search)
+      );
+    }
+    
+    return cns.sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  }, [customer?.credit_notes, ledgerSearch]);
+
+  const sortedPartyLedgerEntries = React.useMemo(() => {
+    if (!partyLedger?.entries) return [];
+    return [...partyLedger.entries].sort((a, b) => 
+      new Date(b.doc_date).getTime() - new Date(a.doc_date).getTime()
+    );
+  }, [partyLedger?.entries]);
+
   if (isLoading) {
     return (
       <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6">
@@ -126,16 +219,6 @@ export default function AdminCustomerDetails() {
       </div>
     );
   }
-
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return 'N/A';
-    return format(new Date(dateString), 'MMM d, yyyy');
-  };
-
-  const formatDateTime = (dateString: string | null) => {
-    if (!dateString) return 'N/A';
-    return format(new Date(dateString), 'MMM d, yyyy, h:mm a');
-  };
 
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-hidden px-2 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-3 sm:space-y-6">
@@ -421,8 +504,30 @@ export default function AdminCustomerDetails() {
         {/* Complete Ledger Tab */}
         <TabsContent value="ledger" className="w-full min-w-0">
           <div className="space-y-3 sm:space-y-6">
+            <div className="flex items-center space-x-2 mb-2">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Filter ledger entries..."
+                  value={ledgerSearch}
+                  onChange={(e) => setLedgerSearch(e.target.value)}
+                  className="pl-9 h-9"
+                />
+              </div>
+              {ledgerSearch && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setLedgerSearch("")}
+                  className="text-xs h-9"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+
             {/* Credit Periods Section (for wholesale customers) */}
-            {customer.isCustomerRecord && customer.credit_periods && customer.credit_periods.length > 0 && (
+            {customer.isCustomerRecord && sortedCreditPeriods && sortedCreditPeriods.length > 0 && (
               <Card className="w-full min-w-0 overflow-hidden">
                 <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
                   <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
@@ -436,7 +541,7 @@ export default function AdminCustomerDetails() {
                 <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
                   {/* Mobile Card View */}
                   <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
-                    {customer.credit_periods.map((period: any) => {
+                    {sortedCreditPeriods.map((period: any) => {
                       const isExpired = period.amount > 0 && new Date(period.end_date) < new Date();
                       const isActive = !isExpired && period.amount > 0;
                       
@@ -524,7 +629,7 @@ export default function AdminCustomerDetails() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {customer.credit_periods.map((period: any) => {
+                        {sortedCreditPeriods.map((period: any) => {
                           const isExpired = period.amount > 0 && new Date(period.end_date) < new Date();
                           const isActive = !isExpired && period.amount > 0;
                           
@@ -593,7 +698,7 @@ export default function AdminCustomerDetails() {
             )}
 
             {/* Payments Section (for both retail and wholesale customers) */}
-            {customer.payments && customer.payments.length > 0 && (
+            {sortedPayments && sortedPayments.length > 0 && (
               <Card className="w-full min-w-0 overflow-hidden">
                 <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
                   <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
@@ -607,7 +712,7 @@ export default function AdminCustomerDetails() {
                 <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
                   {/* Mobile Card View */}
                   <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
-                    {customer.payments.map((payment: any) => (
+                    {sortedPayments.map((payment: any) => (
                       <Card key={payment.id} className="p-3 w-full min-w-0 overflow-hidden">
                         <div className="space-y-2 min-w-0">
                           <div className="flex items-start justify-between gap-2 min-w-0">
@@ -677,7 +782,7 @@ export default function AdminCustomerDetails() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {customer.payments.map((payment: any) => (
+                        {sortedPayments.map((payment: any) => (
                           <TableRow key={payment.id}>
                             <TableCell className="px-2 py-2 text-xs sm:text-sm">
                               {payment.payment_date 
@@ -720,6 +825,105 @@ export default function AdminCustomerDetails() {
               </Card>
             )}
 
+            {/* Credit Notes Section */}
+            {sortedCreditNotes && sortedCreditNotes.length > 0 && (
+              <Card className="w-full min-w-0 overflow-hidden">
+                <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4 flex flex-row items-center justify-between space-y-0">
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                    <FileText className="h-4 w-4 sm:h-5 sm:w-5" />
+                    Credit Notes
+                  </CardTitle>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    className="h-8 text-xs border-orange-200 hover:bg-orange-50 text-orange-700"
+                    onClick={() => navigate(`/sales/credit-notes/new?customerId=${customerOrUserId}`)}
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    Create CN
+                  </Button>
+                </CardHeader>
+                <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+                  {/* Mobile Card View */}
+                  <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
+                    {sortedCreditNotes.map((cn: any) => (
+                      <Card key={cn.id} className="p-3 w-full min-w-0 overflow-hidden border-orange-100 bg-orange-50/20">
+                        <div className="space-y-2 min-w-0">
+                          <div className="flex items-start justify-between gap-2 min-w-0">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-base font-bold text-orange-600 mb-1">
+                                ₹ {cn.total_amount?.toFixed(2) || cn.amount?.toFixed(2) || '0.00'}
+                              </div>
+                              <div className="text-xs font-medium mb-1">
+                                {cn.cn_number}
+                              </div>
+                            </div>
+                            <Badge variant={
+                              cn.status === 'applied' ? 'default' :
+                              cn.status === 'issued' ? 'secondary' :
+                              cn.status === 'cancelled' ? 'destructive' : 'outline'
+                            } className="text-xs">
+                              {cn.status || 'draft'}
+                            </Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {formatDate(cn.cn_date || cn.created_at)}
+                          </div>
+                          {cn.reason && (
+                            <div className="text-xs italic truncate">
+                              Reason: {cn.reason}
+                            </div>
+                          )}
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+
+                  {/* Desktop Table View */}
+                  <div className="hidden md:block w-full min-w-0 overflow-x-auto">
+                    <Table className="min-w-[600px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="px-2">CN Number</TableHead>
+                          <TableHead className="px-2">Date</TableHead>
+                          <TableHead className="px-2">Reason</TableHead>
+                          <TableHead className="px-2">Amount</TableHead>
+                          <TableHead className="px-2">Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sortedCreditNotes.map((cn: any) => (
+                          <TableRow key={cn.id}>
+                            <TableCell className="px-2 py-2 font-medium text-xs sm:text-sm">
+                              {cn.cn_number}
+                            </TableCell>
+                            <TableCell className="px-2 py-2 text-xs sm:text-sm">
+                              {formatDate(cn.cn_date || cn.created_at)}
+                            </TableCell>
+                            <TableCell className="px-2 py-2 text-xs sm:text-sm capitalize">
+                              {cn.reason?.replace(/_/g, ' ') || 'N/A'}
+                            </TableCell>
+                            <TableCell className="px-2 py-2 font-bold text-orange-600">
+                              ₹ {cn.total_amount?.toFixed(2) || cn.amount?.toFixed(2) || '0.00'}
+                            </TableCell>
+                            <TableCell className="px-2 py-2">
+                              <Badge variant={
+                                cn.status === 'applied' ? 'default' :
+                                cn.status === 'issued' ? 'secondary' :
+                                cn.status === 'cancelled' ? 'destructive' : 'outline'
+                              } className="text-xs">
+                                {cn.status || 'draft'}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Orders Section (for both retail and wholesale customers) */}
             <Card className="w-full min-w-0 overflow-hidden">
               <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
@@ -734,11 +938,11 @@ export default function AdminCustomerDetails() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-                {customer.orders && customer.orders.length > 0 ? (
+                {sortedOrders && sortedOrders.length > 0 ? (
                   <>
                     {/* Mobile Card View */}
                     <div className="block md:hidden space-y-2.5 w-full min-w-0 overflow-hidden">
-                      {customer.orders.map((order: any) => (
+                      {sortedOrders.map((order: any) => (
                         <Card key={order.id} className="p-3 w-full min-w-0 overflow-hidden">
                           <div className="space-y-2 min-w-0">
                             <div className="flex items-start justify-between gap-2 min-w-0">
@@ -790,7 +994,7 @@ export default function AdminCustomerDetails() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {customer.orders.map((order: any) => (
+                          {sortedOrders.map((order: any) => (
                             <TableRow key={order.id}>
                               <TableCell className="px-2 py-2 text-xs sm:text-sm">
                                 {formatDateTime(order.created_at)}
@@ -897,7 +1101,7 @@ export default function AdminCustomerDetails() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {partyLedger.entries.map((entry) => (
+                          {sortedPartyLedgerEntries.map((entry) => (
                             <TableRow key={entry.doc_id}>
                               <TableCell className="px-2 py-2 text-xs sm:text-sm">
                                 {entry.doc_date ? format(new Date(entry.doc_date), 'MMM d, yyyy') : 'N/A'}

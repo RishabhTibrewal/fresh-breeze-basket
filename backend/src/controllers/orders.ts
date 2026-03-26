@@ -598,6 +598,14 @@ export const createOrder = async (req: Request, res: Response) => {
     const fulfillmentType: 'delivery' | 'pickup' =
       !!finalShippingAddressId ? 'delivery' : 'pickup';
 
+    // Fetch customer ID if it exists for this user in this company
+    const { data: customerData } = await (supabaseAdmin || supabase)
+      .from('customers')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('company_id', req.companyId)
+      .maybeSingle();
+
     // Create order using OrderService
     const result = await orderService.createOrder(
       {
@@ -608,6 +616,7 @@ export const createOrder = async (req: Request, res: Response) => {
         paymentStatus: finalPaymentStatus,
         totalAmount: total_amount,
         paymentIntentId: payment_intent_id || undefined,
+        customerId: customerData?.id || null
       },
       {
         userId,
@@ -616,6 +625,7 @@ export const createOrder = async (req: Request, res: Response) => {
         orderType: 'sales',
         orderSource: 'ecommerce',
         fulfillmentType,
+        customerId: customerData?.id || null
       }
     );
 
@@ -630,15 +640,8 @@ export const createOrder = async (req: Request, res: Response) => {
       console.log('Creating credit period for order:', result.id, 'request payment_status:', req_payment_status);
       const creditAmount = req_payment_status === 'full_credit' ? total_amount : (total_amount - (partial_payment_amount || 0));
       
-      // First get the customer ID for this user
-      const { data: customerData, error: customerError } = await (supabaseAdmin || supabase)
-        .from('customers')
-        .select('id')
-        .eq('user_id', userId)
-        .single();
-        
-      if (customerError) {
-        console.error('Error finding customer:', customerError);
+      if (!customerData) {
+        console.error('No customer found for credit period');
         // Rollback order creation
         await orderService.cancelOrder(result.id);
           

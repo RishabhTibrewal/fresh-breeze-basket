@@ -27,6 +27,7 @@ export interface CreateOrderContext {
   fulfillmentType?: 'delivery' | 'pickup' | 'cash_counter';
   // For return orders, link back to original order
   originalOrderId?: string | null;
+  customerId?: string | null;
 }
 
 export interface CreateOrderData {
@@ -38,6 +39,7 @@ export interface CreateOrderData {
   totalAmount?: number;
   notes?: string;
   paymentIntentId?: string;
+  customerId?: string | null;
 }
 
 /**
@@ -191,13 +193,14 @@ export class OrderService {
         .from('orders')
         .insert({
           user_id: userId,
+          customer_id: data.customerId || context.customerId || null,
           company_id: this.companyId,
           outlet_id: finalOutletId,
           order_type: orderType,
           industry_context: industryContext,
-           order_source: orderSource,
-           fulfillment_type: fulfillmentType,
-           original_order_id: orderType === 'return' ? originalOrderId : null,
+          order_source: orderSource,
+          fulfillment_type: fulfillmentType,
+          original_order_id: orderType === 'return' ? originalOrderId : null,
           total_amount: finalTotal,
           shipping_address_id: shippingAddressId || null,
           billing_address_id: billingAddressId || null,

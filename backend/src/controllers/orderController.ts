@@ -7,6 +7,7 @@ import { InventoryService } from '../services/core/InventoryService';
 import { PricingService } from '../services/core/PricingService';
 import { PaymentService } from '../services/core/PaymentService';
 import { hasAnyRole } from '../utils/roles';
+import { calculateOrderTotals, ExtraCharge, CDSettlementMode } from '../lib/orderCalculations';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -49,7 +50,13 @@ export const orderController = {
         cheque_no,
         payment_date,
         sales_executive_id: bodySalesExecutiveId,
-        quotation_id
+        quotation_id,
+        // CD + extra charges fields
+        cd_enabled: bodyCdEnabled,
+        cd_percentage: bodyCdPercentage,
+        cd_days: bodyCdDays,
+        cd_settlement_mode: bodyCdSettlementMode,
+        extra_charges: bodyExtraCharges,
       } = req.body;
 
       // Log the received payment_status from frontend
@@ -82,7 +89,7 @@ export const orderController = {
       // Verify the customer belongs to this sales executive
       const { data: customer, error: customerError } = await (supabaseAdmin || supabase)
         .from('customers')
-        .select('id, user_id, current_credit, credit_limit, sales_executive_id')
+        .select('id, user_id, current_credit, credit_limit, sales_executive_id, cd_enabled, cd_percentage, cd_days, cd_settlement_mode')
         .eq('id', customer_id)
         .eq('company_id', req.companyId)
         .single();
@@ -93,6 +100,21 @@ export const orderController = {
       }
 
       console.log('Customer found:', customer);
+
+      // Resolve CD settings: body overrides > customer defaults
+      const cdEnabled: boolean = bodyCdEnabled !== undefined ? Boolean(bodyCdEnabled) : Boolean(customer.cd_enabled);
+      const cdPercentage: number = bodyCdPercentage !== undefined ? Number(bodyCdPercentage) : Number(customer.cd_percentage || 0);
+      const cdDays: number = bodyCdDays !== undefined ? Number(bodyCdDays) : Number(customer.cd_days || 0);
+      const cdSettlementMode: CDSettlementMode = bodyCdSettlementMode || customer.cd_settlement_mode || 'direct';
+      const extraCharges: ExtraCharge[] = Array.isArray(bodyExtraCharges) ? bodyExtraCharges : [];
+
+      // cd_valid_until = order_date + cd_days (only when cdEnabled)
+      let cdValidUntil: string | null = null;
+      if (cdEnabled && cdDays > 0) {
+        const d = new Date();
+        d.setDate(d.getDate() + cdDays);
+        cdValidUntil = d.toISOString().split('T')[0];
+      }
 
       // Calculate order total amount and items total from frontend provided values
       // We sum up the line_total from items to use as the base for extra discount
@@ -227,6 +249,7 @@ export const orderController = {
       // Create order record data object for better logging
       const orderData = {
         user_id: customer.user_id,
+        customer_id: customer.id,
         company_id: req.companyId!,
         status: 'pending',
         shipping_address_id,
@@ -243,6 +266,17 @@ export const orderController = {
         order_type: 'sales',
         order_source: 'sales',
         fulfillment_type: fulfillmentType,
+        // CD fields
+        cd_enabled: cdEnabled,
+        cd_percentage: cdPercentage,
+        cd_amount: 0, // Recalculated after items
+        cd_days: cdDays,
+        cd_valid_until: cdValidUntil,
+        cd_settlement_mode: cdSettlementMode,
+        taxable_value: 0, // Recalculated after items
+        extra_charges: extraCharges, // Store raw array; sum recalculated after items
+        total_extra_charges: 0,
+        round_off_amount: 0,
         ...(orderSalesExecutiveId != null && { sales_executive_id: orderSalesExecutiveId }),
         ...(quotation_id && { quotation_id })
       };
@@ -403,32 +437,71 @@ export const orderController = {
       const calculatedTotalFromItems = orderItems.reduce((s, item) => s + Number(item.line_total), 0);
       const shipping_fee = 0; // For future implementation
       
-      // RE-CALCULATE extra discount amount based on ACTUAL calculated totals from items
+      // ── RECALCULATE using shared calculateOrderTotals utility ──────────────
+      // Resolve final extra-discount amount (same logic as before, but now used by the utility)
       const finalExtraDiscAmt = (orderExtraDiscPct > 0)
         ? parseFloat(((calculatedTotalFromItems * orderExtraDiscPct) / 100).toFixed(2))
         : Number(extra_discount_amount || 0);
 
-      const finalTotalAmount = calculatedTotalFromItems + shipping_fee - finalExtraDiscAmt;
-      
-      console.log('Calculated totals:', {
-        itemSubtotalSum,
-        itemTaxSum,
-        itemDiscountSum,
-        calculatedTotalFromItems,
+      // Build input items for the utility from the built orderItems array
+      const calcInputItems = orderItems.map(oi => ({
+        id: oi.order_id + oi.product_id, // surrogate key
+        unit_price: Number(oi.unit_price),
+        quantity: Number(oi.quantity),
+        discount_amount: Number(oi.discount_amount),
+        tax_percentage: Number(oi.tax_percentage),
+      }));
+
+      const totals = calculateOrderTotals(
+        calcInputItems,
         finalExtraDiscAmt,
-        finalTotalAmount
+        cdEnabled ? cdPercentage : 0,
+        cdEnabled ? cdSettlementMode : 'direct',
+        extraCharges,
+      );
+
+      // Mutate orderItems with the accurately calculated tax and line_total values
+      for (const item of orderItems) {
+        const calcItem = totals.items.find(i => i.id === (order.id + item.product_id));
+        if (calcItem) {
+          item.tax_amount = calcItem.tax_amount;
+          item.line_total = calcItem.line_total;
+        }
+      }
+
+      const finalTotalAmount = totals.total_amount;
+      
+      console.log('Calculated totals (via calculateOrderTotals):', {
+        subtotal: totals.subtotal,
+        taxable_value: totals.taxable_value,
+        cd_amount: totals.cd_amount,
+        total_tax: totals.total_tax,
+        total_extra_charges: totals.total_extra_charges,
+        round_off_amount: totals.round_off_amount,
+        total_amount: totals.total_amount,
       });
       
       // Update order with the calculated financial fields
       const { error: updateError } = await (supabaseAdmin || supabase)
         .from('orders')
         .update({
-          subtotal: itemSubtotalSum,
-          total_tax: itemTaxSum,
-          total_discount: Math.round((itemDiscountSum + finalExtraDiscAmt) * 100) / 100,
+          subtotal: totals.subtotal,
+          total_tax: totals.total_tax,
+          total_discount: totals.total_discount,
           extra_discount_percentage: orderExtraDiscPct,
-          extra_discount_amount: finalExtraDiscAmt,
-          total_amount: Math.round(finalTotalAmount * 100) / 100
+          extra_discount_amount: totals.extra_discount_amount,
+          total_amount: totals.total_amount,
+          // New CD + extra charges fields
+          cd_enabled: cdEnabled,
+          cd_percentage: cdEnabled ? cdPercentage : 0,
+          cd_amount: cdEnabled ? totals.cd_amount : 0,
+          cd_days: cdDays,
+          cd_valid_until: cdValidUntil,
+          cd_settlement_mode: cdSettlementMode,
+          taxable_value: totals.taxable_value,
+          extra_charges: extraCharges,
+          total_extra_charges: totals.total_extra_charges,
+          round_off_amount: totals.round_off_amount,
         })
         .eq('id', order.id)
         .eq('company_id', req.companyId);
@@ -436,7 +509,7 @@ export const orderController = {
       if (updateError) {
         console.error('Error updating order financial fields:', updateError);
       } else {
-        order.total_amount = Math.round(finalTotalAmount * 100) / 100;
+        order.total_amount = totals.total_amount;
       }
 
       // Preserve calculatedTotalAmount for following logic (if needed)

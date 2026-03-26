@@ -867,8 +867,7 @@ export default function AdminOrderDetails() {
                   variant="outline"
                   onClick={async () => {
                     try {
-                      const invoiceUrl = `${import.meta.env.VITE_API_URL || ''}/api/invoices/pos/${order.id}`;
-                      window.open(invoiceUrl, '_blank');
+                      await invoicesService.printPOSInvoice(order.id);
                     } catch (error) {
                       toast.error('Failed to open invoice');
                     }

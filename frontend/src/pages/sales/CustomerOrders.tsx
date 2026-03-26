@@ -149,11 +149,13 @@ export default function CustomerOrders() {
   // Process orders to add credit details if missing
   const processedOrders = orders.length > 0 ? addCreditDetailsFromPaymentInfo(orders) : [];
   
-  // Filter orders based on search
-  const filteredOrders = processedOrders.filter(order => 
-    (order.order_number?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-    (order.status?.toLowerCase() || '').includes(searchQuery.toLowerCase())
-  );
+  // Filter and sort orders based on search and date
+  const filteredOrders = processedOrders
+    .filter(order => 
+      (order.order_number?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+      (order.status?.toLowerCase() || '').includes(searchQuery.toLowerCase())
+    )
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   
   // Log the final filtered orders
   useEffect(() => {

@@ -1,6 +1,6 @@
 # Architecture State Document
 
-**Last Updated:** 2026-03-21 (15:50 IST)
+**Last Updated:** 2026-03-26 (02:22 IST)
 **Purpose:** Technical reference for current system architecture, routing patterns, and critical implementation details to prevent architectural mistakes. This document serves as the long-term memory and architectural blueprint for all future AI interactions.
 
 ---
@@ -444,6 +444,75 @@ fresh-breeze-basket/
 - ⚠️ Module defined in config
 - ⚠️ Basic structure in place
 - ⚠️ Full implementation pending
+
+### Recent Changes (2026-03-27) — Manual Credit Notes Implementation
+
+#### Manual Credit Note Creation
+- **Objective**: Allow administrators to issue credit notes manually to customers (e.g., for returns, goodwill, or price adjustments) outside of the automated cash discount workflow.
+- **Database Changes**: 
+  - Migrated `public.credit_notes.order_id` to be NULLABLE to allow CNs that aren't tied to a specific sales order.
+  - Updated table comments to reflect the broader use case.
+- **Backend Implementation (`creditNoteController.ts`)**:
+  - Added `createManualCreditNote` endpoint.
+  - Logic generates unique CN numbers (e.g., `CN-2026-0001`) and validates customer membership.
+  - Supports optional `order_id`, `reason`, `amount`, `tax_amount`, and `notes`.
+- **Frontend Implementation**:
+  - **`CreateCreditNote.tsx`**: New page with a searchable customer select (Combobox), optional order link, and automatic total calculation.
+  - **`CreditNotes.tsx`**: Added "Create Credit Note" button and a "Reason" column to the list view.
+  - **`AdminCustomerDetails.tsx`**: Added a quick-action "Create CN" button in the Credit Notes section, pre-populating the customer ID via URL params.
+  - **Sidebar**: Added "Create Credit Note" link under the Sales module.
+
+### Recent Changes (2026-03-27) — Party Ledger Data Integrity Fix
+
+#### The "Empty Ledger" Problem — Resolved
+- **Issue**: The `party_ledger` view joined `contact_parties` to `orders` via `customers.user_id = orders.user_id`. This failed for B2B customers without user accounts (where `user_id` is NULL) because NULL does not equal NULL in standard SQL joins.
+- **Architectural Change**: Decoupled the ledger link from user authentication by introducing a direct `customer_id` link.
+- **Database Migrations (`add_customer_id_to_orders`)**:
+  - Added `customer_id` column (UUID) to `public.orders` table referencing `public.customers(id)`.
+  - Backfilled `customer_id` for existing orders by matching `user_id`.
+  - Updated `public.party_ledger` view to join via `o.customer_id = c.id` and removed the `c.user_id IS NOT NULL` constraint.
+- **Backend Controller Updates**:
+  - **`orderController.ts`**: Updated to include `customer_id` when creating orders (Sales Executive flow).
+  - **`OrderService.ts`**: Enhanced to accept and store `customer_id` in the core order creation logic.
+  - **`orders.ts`**: Updated the ecommerce create flow to fetch the user's `customer_id` (if it exists) and pass it to the `OrderService`.
+  - **`customerController.ts`**: Updated `getCustomers`, `getCustomerById`, and `getCustomerByUserId` to use `customer_id` for order lookups and statistics, with a graceful fallback to `user_id` for legacy or retail-only orders.
+
+### Recent Changes (2026-03-26) — Customer Ledger Improvements & UX
+
+#### Customer Ledger — Credit Notes Integration
+- **Backend (`customerController.ts`)**: Updated `getCustomerById` and `getCustomerByUserId` to fetch and include `credit_notes` associated with the customer.
+- **Frontend (`AdminCustomerDetails.tsx`)**: 
+  - Added `sortedCreditNotes` useMemo logic for sorting & search filtering.
+  - Added a new "Credit Notes" section in the "Complete Ledger" tab, styled with orange accents to differentiate from payments.
+  - Supports mobile-friendly card views and desktop table views.
+
+#### Customer Ledger — Descending Sort (Backend)
+- **`backend/src/controllers/customerController.ts`** — Two endpoints updated:
+  - `getCustomerById` (line ~139): Added `created_at` to orders `select` and added `.order('created_at', { ascending: false })` so orders arrive pre-sorted newest-first.
+  - `getCustomerByUserId` (line ~336): Same `.order('created_at', { ascending: false })` applied to the wholesale-customer orders query (retail orders already had this).
+  - Both `credit_periods` and `payments` queries already had `order('created_at', { ascending: false })` — verified and left intact.
+  - **Party Ledger** (`partyController.ts` `getLedger`): Already ordered by `doc_date DESC` — no change needed.
+
+#### Customer Ledger — Global Search Filter (Frontend)
+- **`frontend/src/pages/admin/AdminCustomerDetails.tsx`** — "Complete Ledger" tab enhanced:
+  - Added `ledgerSearch` state (`React.useState<string>('')`).
+  - Added `Search` icon import from `lucide-react` and `Input` component import from `@/components/ui/input`.
+  - Rendered a search `<Input>` with left-aligned `Search` icon at the top of the ledger tab (above all sections).
+  - Applied `.filter()` to all four render sites (mobile card + desktop table for both **Credit Periods** and **Payments**, mobile card + desktop table for **Orders**):
+    - **Credit Periods**: searches `description`, `amount`, `type`.
+    - **Payments**: searches `payment_method`, `amount`, `status`, `transaction_id`, `cheque_no`.
+    - **Orders**: searches `id`, `total_amount`, `status`, `payment_status`.
+  - Filter is case-insensitive and optional (empty search = show all).
+
+#### Credit Notes — Full Implementation (Prior sessions, documented here for completeness)
+- Fixed `listCreditNotes` 500 error by removing non-existent `order_number` column from Supabase query.
+- Added dynamic order number fallback: `ORD-` + first 8 chars of order UUID.
+- Added Credit Notes to Order Document page (`OrderDocumentPage.tsx`) "Linked Documents" section.
+- Added Credit Notes entry to sidebar (`modules.config.tsx` under Sales module).
+
+#### Navigation UX Improvements (Prior sessions)
+- **`CreateOrder.tsx`**: Added "Back to Products" button at top of Checkout tab.
+- **`Checkout.tsx`**: Added "Back to Cart" button; also fixed JSX nesting errors that caused rendering issues.
 
 ### Recent Changes (2026-03-21) — Procurement Financial Logic & Discount Standardization
 

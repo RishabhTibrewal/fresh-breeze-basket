@@ -48,6 +48,7 @@ import { customerService } from '@/api/customer';
 import { creditPeriodService } from '@/api/creditPeriod';
 import { warehousesService } from '@/api/warehouses';
 import apiClient from '@/lib/apiClient';
+import { creditNotesService } from '@/api/creditNotes';
 
 // Order detail component
 export default function OrderDetail() {
@@ -566,14 +567,33 @@ export default function OrderDetail() {
                     </Dialog>
                   )}
                   
+                  {/* Raise Credit Note Button — shown when CD mode = credit_note and order is applicable */}
+                  {order.cd_enabled && order.cd_settlement_mode === 'credit_note' && order.status !== 'cancelled' && (
+                    <Button
+                      variant="outline"
+                      className="gap-2 text-xs sm:text-sm h-9 sm:h-10 border-blue-500 text-blue-600 hover:bg-blue-50"
+                      onClick={async () => {
+                        try {
+                          await creditNotesService.create(orderId!);
+                          toast.success('Credit note raised successfully');
+                          queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+                        } catch (err: any) {
+                          toast.error(err?.response?.data?.message || 'Failed to raise credit note');
+                        }
+                      }}
+                    >
+                      <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      Raise Credit Note
+                    </Button>
+                  )}
+                  
                   {/* Print Invoice Button */}
                   <Button
                     variant="outline"
                     className="gap-2 text-xs sm:text-sm h-9 sm:h-10"
                     onClick={async () => {
                       try {
-                        const invoiceUrl = `${import.meta.env.VITE_API_URL || ''}/api/invoices/pos/${orderId}`;
-                        window.open(invoiceUrl, '_blank');
+                        await invoicesService.printPOSInvoice(orderId!);
                       } catch (error) {
                         toast.error('Failed to open invoice');
                       }
@@ -907,6 +927,39 @@ export default function OrderDetail() {
                   <p className="text-xs sm:text-sm text-muted-foreground">Total Amount</p>
                   <p className="font-medium text-base sm:text-lg">${parseFloat(order.total_amount).toFixed(2)}</p>
                 </div>
+
+                {/* CD Financial Breakdown */}
+                {(order.cd_enabled || order.taxable_value || order.extra_charges) && (
+                  <div className="mt-4 pt-4 border-t space-y-1.5">
+                    <h4 className="text-sm font-semibold mb-2">Financial Breakdown</h4>
+                    {order.taxable_value != null && (
+                      <div className="flex justify-between text-xs sm:text-sm">
+                        <span className="text-muted-foreground">Taxable Value:</span>
+                        <span>${parseFloat(order.taxable_value).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {order.cd_enabled && order.cd_amount != null && (
+                      <div className="flex justify-between text-xs sm:text-sm">
+                        <span className="text-muted-foreground">
+                          CD ({order.cd_percentage}%{order.cd_settlement_mode === 'credit_note' ? ' — CN' : ''}):
+                        </span>
+                        <span className="text-blue-600">-${parseFloat(order.cd_amount).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {order.total_extra_charges != null && parseFloat(order.total_extra_charges) !== 0 && (
+                      <div className="flex justify-between text-xs sm:text-sm">
+                        <span className="text-muted-foreground">Extra Charges:</span>
+                        <span className="text-orange-600">+${parseFloat(order.total_extra_charges).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {order.round_off_amount != null && parseFloat(order.round_off_amount) !== 0 && (
+                      <div className="flex justify-between text-xs sm:text-sm">
+                        <span className="text-muted-foreground">Round Off:</span>
+                        <span>{parseFloat(order.round_off_amount) >= 0 ? '+' : ''}{parseFloat(order.round_off_amount).toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Credit Period Table */}
                 {creditPeriodData && (

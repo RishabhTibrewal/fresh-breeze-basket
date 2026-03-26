@@ -139,9 +139,11 @@ export default function CreateQuotation() {
 
   const calculateItemsLineTotalSum = () => {
     return items.reduce((total, item) => {
-      const lineTax = (item.quantity * item.unit_price * (item.tax_percentage || 0)) / 100;
-      const lineDisc = (item.quantity * item.unit_price * (item.discount_percentage || 0)) / 100;
-      return total + (item.quantity * item.unit_price) + lineTax - lineDisc;
+      const itemSubtotal = item.quantity * item.unit_price;
+      const lineDisc = (itemSubtotal * (item.discount_percentage || 0)) / 100;
+      const taxBase = itemSubtotal - lineDisc;
+      const lineTax = (taxBase * (item.tax_percentage || 0)) / 100;
+      return total + taxBase + lineTax;
     }, 0);
   };
 
@@ -186,11 +188,17 @@ export default function CreateQuotation() {
       terms_and_conditions: terms,
       extra_discount_percentage: extraDiscountPct,
       extra_discount_amount: extraDiscount,
-      items: items.map(({ ui_id, availableVariants, ...rest }) => ({
-        ...rest,
-        tax_amount: (rest.quantity * rest.unit_price * (rest.tax_percentage || 0)) / 100,
-        discount_amount: (rest.quantity * rest.unit_price * (rest.discount_percentage || 0)) / 100,
-      }))
+      items: items.map(({ ui_id, availableVariants, ...rest }) => {
+        const itemSubtotal = rest.quantity * rest.unit_price;
+        const discount_amount = (itemSubtotal * (rest.discount_percentage || 0)) / 100;
+        const taxBase = itemSubtotal - discount_amount;
+        const tax_amount = (taxBase * (rest.tax_percentage || 0)) / 100;
+        return {
+          ...rest,
+          discount_amount,
+          tax_amount,
+        };
+      })
     };
 
     createMutation.mutate(payload);
@@ -370,7 +378,13 @@ export default function CreateQuotation() {
                           <Input type="number" min="0" value={item.discount_percentage || 0} onChange={(e) => updateItem(item.ui_id, 'discount_percentage', Number(e.target.value))} />
                         </TableCell>
                         <TableCell className="text-right">
-                          ₹ {((item.quantity * item.unit_price) + ((item.quantity * item.unit_price * (item.tax_percentage || 0)) / 100) - ((item.quantity * item.unit_price * (item.discount_percentage || 0)) / 100)).toFixed(2)}
+                          ₹ {(() => {
+                            const subtotal = item.quantity * item.unit_price;
+                            const discAmt = (subtotal * (item.discount_percentage || 0)) / 100;
+                            const taxBase = subtotal - discAmt;
+                            const taxAmt = (taxBase * (item.tax_percentage || 0)) / 100;
+                            return (taxBase + taxAmt).toFixed(2);
+                          })()}
                         </TableCell>
                         <TableCell>
                           <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(item.ui_id)} className="text-red-500 hover:text-red-700">

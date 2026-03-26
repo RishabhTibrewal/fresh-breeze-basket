@@ -50,7 +50,7 @@ export const getCustomers = async (req: Request, res: Response) => {
     // Get all orders to calculate statistics (filtered by company_id)
     const { data: allOrders, error: ordersError } = await (supabaseAdmin || supabase)
       .from('orders')
-      .select('id, user_id, total_amount, created_at, status')
+      .select('id, user_id, customer_id, total_amount, created_at, status')
       .eq('company_id', req.companyId);
     
     if (ordersError) {
@@ -61,8 +61,10 @@ export const getCustomers = async (req: Request, res: Response) => {
     // Transform the data to include customer information with order statistics
     const transformedCustomers = (customers as Customer[]).map(customer => {
       // Filter orders for this customer, EXCLUDING cancelled orders
+      // Prefer customer_id if available, fallback to user_id (for retail/backward compatibility)
       const customerOrders = allOrders ? allOrders.filter(order => 
-        order.user_id === customer.user_id && order.status !== 'cancelled'
+        (order.customer_id === customer.id || (order.user_id === customer.user_id && !order.customer_id)) && 
+        order.status !== 'cancelled'
       ) : [];
       
       // Calculate order metrics
@@ -89,6 +91,11 @@ export const getCustomers = async (req: Request, res: Response) => {
         credit_period_days: customer.credit_period_days,
         credit_limit: customer.credit_limit,
         current_credit: customer.current_credit,
+        // CD (Cash Discount) fields
+        cd_enabled: (customer as any).cd_enabled || false,
+        cd_percentage: (customer as any).cd_percentage || 0,
+        cd_days: (customer as any).cd_days || 0,
+        cd_settlement_mode: (customer as any).cd_settlement_mode || 'direct',
         totalOrders,
         totalSpent,
         lastOrder: lastOrder || customer.last_order_date || null,
@@ -131,10 +138,11 @@ export const getCustomerById = async (req: Request, res: Response) => {
     if (!customer) throw new AppError('Customer not found', 404);
 
     // Then separately get the order information (filtered by company_id)
+    // Use customer.id instead of user_id for more reliable B2B link
     const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
       .from('orders')
-      .select('id, total_amount, status')
-      .eq('user_id', customer.user_id)
+      .select('id, total_amount, status, created_at, payment_status')
+      .eq('customer_id', customer.id)
       .eq('company_id', req.companyId);
     
     if (ordersError) {
@@ -171,6 +179,18 @@ export const getCustomerById = async (req: Request, res: Response) => {
       }
     }
 
+    // Get credit notes for the customer
+    const { data: creditNotes, error: cnError } = await (supabaseAdmin || supabase)
+      .from('credit_notes')
+      .select('*')
+      .eq('customer_id', id)
+      .eq('company_id', req.companyId)
+      .order('created_at', { ascending: false });
+
+    if (cnError) {
+      console.error('Error fetching credit notes:', cnError);
+    }
+
     // Calculate order metrics
     const filteredOrders = orders?.filter(order => order.status !== 'cancelled') || [];
     const totalOrders = filteredOrders.length;
@@ -191,12 +211,10 @@ export const getCustomerById = async (req: Request, res: Response) => {
       trn_number: customer.trn_number,
       totalOrders,
       totalSpent,
-      lastOrder: customer.last_order_date || null,
-      credit_limit: customer.credit_limit,
-      current_credit: customer.current_credit,
       credit_period_days: customer.credit_period_days,
       credit_periods: creditPeriods || [],
       orders: filteredOrders || [],
+      credit_notes: creditNotes || [],
       payments: payments || [],
       active_credit: activeCredit
     };
@@ -327,11 +345,11 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       });
     }
 
-    // Get order information (using user_id from customer)
+    // Get order information (using customer.id for B2B instead of user_id)
     const { data: orders, error: ordersError } = await adminClient
       .from('orders')
       .select('id, total_amount, status, created_at, payment_status')
-      .eq('user_id', customer.user_id)
+      .eq('customer_id', customer.id)
       .eq('company_id', req.companyId);
     
     if (ordersError) {
@@ -369,6 +387,18 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       } else {
         payments = paymentsData || [];
       }
+    }
+
+    // Get credit notes for the customer
+    const { data: creditNotes, error: cnError } = await adminClient
+      .from('credit_notes')
+      .select('*')
+      .eq('customer_id', customer.id)
+      .eq('company_id', req.companyId)
+      .order('created_at', { ascending: false });
+
+    if (cnError) {
+      console.error('Error fetching credit notes:', cnError);
     }
 
     // Calculate order metrics
@@ -411,6 +441,7 @@ export const getCustomerByUserId = async (req: Request, res: Response) => {
       credit_period_days: customer.credit_period_days,
       credit_periods: creditPeriods || [],
       orders: filteredOrders || [],
+      credit_notes: creditNotes || [],
       payments: payments || [],
       profile: b2bProfile,
       sales_executive_id: customer.sales_executive_id,
@@ -444,7 +475,11 @@ export const createCustomer = async (req: Request, res: Response) => {
       credit_period_days, 
       credit_limit, 
       current_credit,
-      user_id // New parameter passed from frontend
+      user_id, // New parameter passed from frontend
+      cd_enabled,
+      cd_percentage,
+      cd_days,
+      cd_settlement_mode,
     } = req.body;
 
     // Validate required fields
@@ -603,6 +638,11 @@ export const createCustomer = async (req: Request, res: Response) => {
       credit_period_days: credit_period_days || 0,
       credit_limit: credit_limit || 0,
       current_credit: current_credit || 0,
+      // CD fields
+      cd_enabled: cd_enabled || false,
+      cd_percentage: cd_percentage || 0,
+      cd_days: cd_days || 0,
+      cd_settlement_mode: cd_settlement_mode || 'direct',
       sales_executive_id,
       user_id: userId,
       company_id: req.companyId,
@@ -774,7 +814,11 @@ export const updateCustomer = async (req: Request, res: Response) => {
       trn_number, 
       credit_period_days, 
       credit_limit, 
-      current_credit 
+      current_credit,
+      cd_enabled,
+      cd_percentage,
+      cd_days,
+      cd_settlement_mode,
     } = req.body;
 
     if (!req.companyId) {
@@ -791,6 +835,11 @@ export const updateCustomer = async (req: Request, res: Response) => {
         credit_period_days,
         credit_limit,
         current_credit,
+        // CD fields (only update when explicitly provided)
+        ...(cd_enabled !== undefined && { cd_enabled }),
+        ...(cd_percentage !== undefined && { cd_percentage }),
+        ...(cd_days !== undefined && { cd_days }),
+        ...(cd_settlement_mode !== undefined && { cd_settlement_mode }),
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)

@@ -199,9 +199,10 @@ export const createInvoiceFromGRN = async (req: Request, res: Response, next: Ne
       const discountPercentage = poItem?.discount_percentage || 0;
 
       const itemSubtotal = quantity * unitPrice;
-      const taxAmount = Math.round(((itemSubtotal * taxPercentage) / 100) * 100) / 100;
       const discountAmount = Math.round(((itemSubtotal * discountPercentage) / 100) * 100) / 100;
-      const lineTotal = Math.round((itemSubtotal + taxAmount - discountAmount) * 100) / 100;
+      const taxBase = itemSubtotal - discountAmount;
+      const taxAmount = Math.round(((taxBase * taxPercentage) / 100) * 100) / 100;
+      const lineTotal = Math.round((taxBase + taxAmount) * 100) / 100;
 
       calculatedSubtotal += itemSubtotal;
       calculatedTax += taxAmount;
@@ -481,11 +482,13 @@ export const createPurchaseInvoice = async (req: Request, res: Response, next: N
         const grnItem = item.goods_receipt_item_id ? grnItemsMap.get(item.goods_receipt_item_id) : null;
         const quantity = item.quantity || 0;
         const unitPrice = item.unit_price || 0;
-        const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : (product?.tax || 0);
-        const taxAmount = Math.round(((quantity * unitPrice * taxPercentage) / 100) * 100) / 100;
+        const itemSubtotal = quantity * unitPrice;
         const discountPercentage = item.discount_percentage || 0;
-        const discountAmount = Math.round(((quantity * unitPrice * discountPercentage) / 100) * 100) / 100;
-        const lineTotal = Math.round(((quantity * unitPrice) + taxAmount - discountAmount) * 100) / 100;
+        const discountAmount = Math.round(((itemSubtotal * discountPercentage) / 100) * 100) / 100;
+        const taxBase = itemSubtotal - discountAmount;
+        const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : (product?.tax || 0);
+        const taxAmount = Math.round(((taxBase * taxPercentage) / 100) * 100) / 100;
+        const lineTotal = Math.round((taxBase + taxAmount) * 100) / 100;
 
         return {
           purchase_invoice_id: purchaseInvoice.id,
@@ -955,11 +958,13 @@ export const updatePurchaseInvoice = async (req: Request, res: Response, next: N
           const product = productsMap.get(item.product_id);
           const quantity = item.quantity || 0;
           const unitPrice = item.unit_price || 0;
-          const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : (product?.tax || 0);
-          const taxAmount = Math.round(((quantity * unitPrice * taxPercentage) / 100) * 100) / 100;
+          const itemSubtotal = quantity * unitPrice;
           const discountPercentage = item.discount_percentage || 0;
-          const discountAmount = Math.round(((quantity * unitPrice * discountPercentage) / 100) * 100) / 100;
-          const lineTotal = Math.round(((quantity * unitPrice) + taxAmount - discountAmount) * 100) / 100;
+          const discountAmount = Math.round(((itemSubtotal * discountPercentage) / 100) * 100) / 100;
+          const taxBase = itemSubtotal - discountAmount;
+          const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : (product?.tax || 0);
+          const taxAmount = Math.round(((taxBase * taxPercentage) / 100) * 100) / 100;
+          const lineTotal = Math.round((taxBase + taxAmount) * 100) / 100;
 
           return {
             purchase_invoice_id: id,

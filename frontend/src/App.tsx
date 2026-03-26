@@ -95,6 +95,7 @@ const RepackOrderCreate = lazy(() => import("./pages/repack/RepackOrderCreate"))
 const RecipeTemplateForm = lazy(() => import("./components/repack/RecipeTemplateForm"));
 const StockMovements = lazy(() => import("./pages/admin/StockMovements"));
 const PlaceholderPage = lazy(() => import("./pages/admin/PlaceholderPage"));
+const CompanySettings = lazy(() => import("./pages/settings/CompanySettings"));
 const SalesAnalysis = lazy(() => import("./pages/admin/SalesAnalysis"));
 const AdminCreditManagement = lazy(() => import("./pages/admin/CreditManagement"));
 const AdminCreatePOSOrder = lazy(() => import("./pages/admin/CreatePOSOrder"));
@@ -151,6 +152,8 @@ const SalesAnalytics = lazy(() => import("./pages/sales/SalesAnalytics"));
 const Leads = lazy(() => import("./pages/sales/Leads"));
 const Quotations = lazy(() => import("./pages/sales/Quotations"));
 const CreateQuotation = lazy(() => import("./pages/sales/CreateQuotation"));
+const SalesCreditNotes = lazy(() => import("./pages/sales/CreditNotes"));
+const CreateCreditNote = lazy(() => import("./pages/sales/CreateCreditNote"));
 const CreatePOSOrder = lazy(() => import("./pages/pos/CreatePOSOrder"));
 
 // Shared order pages
@@ -315,7 +318,7 @@ const App: React.FC = () => {
                       <Route path="reports/tax-gst" element={<PlaceholderPage />} />
                       <Route path="reports/aging" element={<PlaceholderPage />} />
                       <Route path="reports/custom" element={<PlaceholderPage />} />
-                      <Route path="settings/company" element={<PlaceholderPage />} />
+                      <Route path="settings/company" element={<CompanySettings />} />
                       <Route path="settings/users-roles" element={<PlaceholderPage />} />
                       <Route path="settings/payment-modes" element={<PlaceholderPage />} />
                       <Route path="settings/number-series" element={<PlaceholderPage />} />
@@ -385,6 +388,8 @@ const App: React.FC = () => {
                       <Route path="customers/:customerId/orders" element={<CustomerOrders />} />
                       <Route path="leads" element={<Leads />} />
                       <Route path="credit-management" element={<AdminCreditManagement />} />
+                      <Route path="credit-notes" element={<SalesCreditNotes />} />
+                      <Route path="credit-notes/new" element={<CreateCreditNote />} />
                       <Route path="analytics" element={<SalesAnalysis />} />
                     </Route>
                     
@@ -495,7 +500,7 @@ const App: React.FC = () => {
                     {/* Settings Module */}
                     <Route path="/settings" element={<ProtectedRoute><ModuleLayout /></ProtectedRoute>}>
                       <Route index element={<PlaceholderPage />} />
-                      <Route path="company" element={<PlaceholderPage />} />
+                      <Route path="company" element={<CompanySettings />} />
                       <Route path="users-roles" element={<AdminSettings />} />
                       <Route path="taxes" element={<TaxList />} />
                       <Route path="taxes/new" element={<TaxForm />} />

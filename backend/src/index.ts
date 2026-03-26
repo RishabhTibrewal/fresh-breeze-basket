@@ -83,6 +83,7 @@ import kpiRouter from './routes/kpi';
 import modifiersRouter from './routes/modifiers';
 import collectionsRouter from './routes/collections';
 import reportsRouter from './routes/reports';
+import creditNotesRouter from './routes/creditNotes';
 import { initMVRefreshScheduler } from './utils/refreshMaterialisedViews';
 import { exportRateLimiter } from './middleware/exportRateLimiter';
 
@@ -243,6 +244,7 @@ app.use('/api/kpis', kpiRouter);
 app.use('/api/modifiers', modifiersRouter);
 app.use('/api/collections', collectionsRouter);
 app.use('/api/quotations', quotationRoutes);
+app.use('/api/credit-notes', creditNotesRouter);
 // Reports — apply export rate limiter before the router
 app.use('/api/reports', exportRateLimiter, reportsRouter);
 

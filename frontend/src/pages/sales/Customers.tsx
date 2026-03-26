@@ -35,6 +35,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Plus, Search, Eye, Edit, ShoppingCart, ClipboardList, Mail, Phone, Calendar, DollarSign, Link as LinkIcon } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -75,6 +76,11 @@ interface Customer {
     is_customer: boolean;
     is_supplier: boolean;
   } | null;
+  // CD fields
+  cd_enabled?: boolean;
+  cd_percentage?: number;
+  cd_days?: number;
+  cd_settlement_mode?: string;
 }
 
 const customerFormSchema = z.object({
@@ -85,6 +91,11 @@ const customerFormSchema = z.object({
   credit_period_days: z.number().min(0, "Credit period days must be 0 or greater").nullable().optional(),
   credit_limit: z.number().min(0, "Credit limit must be 0 or greater").nullable().optional(),
   current_credit: z.number().min(0, "Current credit must be 0 or greater").nullable().optional(),
+  // CD fields
+  cd_enabled: z.boolean().optional().default(false),
+  cd_percentage: z.number().min(0).max(100).optional(),
+  cd_days: z.number().min(0).optional(),
+  cd_settlement_mode: z.enum(['direct', 'credit_note']).optional(),
 });
 
 // Use the imported CustomerFormValues type
@@ -117,7 +128,6 @@ export default function Customers() {
     },
   });
 
-  // Effect to populate edit form when selected customer changes
   useEffect(() => {
     if (selectedCustomer && isEditModalOpen) {
       editForm.reset({
@@ -127,7 +137,11 @@ export default function Customers() {
         trn_number: selectedCustomer.trn_number || "",
         credit_period_days: selectedCustomer.credit_period_days || 0,
         credit_limit: selectedCustomer.credit_limit || 0,
-        current_credit: selectedCustomer.current_credit || 0
+        current_credit: selectedCustomer.current_credit || 0,
+        cd_enabled: selectedCustomer.cd_enabled || false,
+        cd_percentage: selectedCustomer.cd_percentage || 0,
+        cd_days: selectedCustomer.cd_days || 0,
+        cd_settlement_mode: (selectedCustomer.cd_settlement_mode as 'direct' | 'credit_note') || 'direct',
       });
     }
   }, [selectedCustomer, isEditModalOpen, editForm]);
@@ -385,6 +399,84 @@ export default function Customers() {
                         </FormItem>
                       )}
                     />
+                    {/* Cash Discount Section */}
+                    <div className="rounded-lg border border-muted p-3 sm:p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs sm:text-sm font-semibold text-foreground">Cash Discount (CD)</p>
+                        <FormField
+                          control={form.control}
+                          name="cd_enabled"
+                          render={({ field }) => (
+                            <Switch
+                              checked={!!field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          )}
+                        />
+                      </div>
+                      {form.watch('cd_enabled') && (
+                        <div className="space-y-3">
+                          <FormField
+                            control={form.control}
+                            name="cd_percentage"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-xs sm:text-sm">CD % (Default Rate)</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type="number" min="0" max="100" step="0.1"
+                                    placeholder="2.0"
+                                    className="text-sm sm:text-base h-9 sm:h-10"
+                                    {...field}
+                                    onChange={e => field.onChange(e.target.value ? Number(e.target.value) : 0)}
+                                  />
+                                </FormControl>
+                                <FormMessage className="text-xs" />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="cd_days"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-xs sm:text-sm">CD Days (Payment Window)</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type="number" min="0"
+                                    placeholder="10"
+                                    className="text-sm sm:text-base h-9 sm:h-10"
+                                    {...field}
+                                    onChange={e => field.onChange(e.target.value ? Number(e.target.value) : 0)}
+                                  />
+                                </FormControl>
+                                <FormMessage className="text-xs" />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="cd_settlement_mode"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-xs sm:text-sm">Settlement Mode</FormLabel>
+                                <FormControl>
+                                  <select
+                                    className="flex h-9 sm:h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    value={field.value || 'direct'}
+                                    onChange={e => field.onChange(e.target.value)}
+                                  >
+                                    <option value="direct">Deduct on Invoice (Direct)</option>
+                                    <option value="credit_note">Credit Note After Payment</option>
+                                  </select>
+                                </FormControl>
+                                <FormMessage className="text-xs" />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      )}
+                    </div>
                     <DialogFooter className="flex-col sm:flex-row gap-2">
                       <Button type="submit" disabled={addCustomerMutation.isPending} className="w-full sm:w-auto text-sm">
                         {addCustomerMutation.isPending ? 'Adding...' : 'Add Customer'}
@@ -626,6 +718,84 @@ export default function Customers() {
                                   </FormItem>
                                 )}
                               />
+                              {/* Cash Discount Section */}
+                              <div className="rounded-lg border border-muted p-3 sm:p-4 space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-xs sm:text-sm font-semibold text-foreground">Cash Discount (CD)</p>
+                                  <FormField
+                                    control={editForm.control}
+                                    name="cd_enabled"
+                                    render={({ field }) => (
+                                      <Switch
+                                        checked={!!field.value}
+                                        onCheckedChange={field.onChange}
+                                      />
+                                    )}
+                                  />
+                                </div>
+                                {editForm.watch('cd_enabled') && (
+                                  <div className="space-y-3">
+                                    <FormField
+                                      control={editForm.control}
+                                      name="cd_percentage"
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel className="text-xs sm:text-sm">CD % (Default Rate)</FormLabel>
+                                          <FormControl>
+                                            <Input
+                                              type="number" min="0" max="100" step="0.1"
+                                              placeholder="2.0"
+                                              className="text-sm sm:text-base h-9 sm:h-10"
+                                              {...field}
+                                              onChange={e => field.onChange(e.target.value ? Number(e.target.value) : 0)}
+                                            />
+                                          </FormControl>
+                                          <FormMessage className="text-xs" />
+                                        </FormItem>
+                                      )}
+                                    />
+                                    <FormField
+                                      control={editForm.control}
+                                      name="cd_days"
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel className="text-xs sm:text-sm">CD Days (Payment Window)</FormLabel>
+                                          <FormControl>
+                                            <Input
+                                              type="number" min="0"
+                                              placeholder="10"
+                                              className="text-sm sm:text-base h-9 sm:h-10"
+                                              {...field}
+                                              onChange={e => field.onChange(e.target.value ? Number(e.target.value) : 0)}
+                                            />
+                                          </FormControl>
+                                          <FormMessage className="text-xs" />
+                                        </FormItem>
+                                      )}
+                                    />
+                                    <FormField
+                                      control={editForm.control}
+                                      name="cd_settlement_mode"
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel className="text-xs sm:text-sm">Settlement Mode</FormLabel>
+                                          <FormControl>
+                                            <select
+                                              className="flex h-9 sm:h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                              value={field.value || 'direct'}
+                                              onChange={e => field.onChange(e.target.value)}
+                                            >
+                                              <option value="direct">Deduct on Invoice (Direct)</option>
+                                              <option value="credit_note">Credit Note After Payment</option>
+                                            </select>
+                                          </FormControl>
+                                          <FormMessage className="text-xs" />
+                                        </FormItem>
+                                      )}
+                                    />
+                                  </div>
+                                )}
+                              </div>
                               <DialogFooter className="flex-col sm:flex-row gap-2">
                                 <Button type="submit" disabled={updateCustomerMutation.isPending} className="w-full sm:w-auto text-sm">
                                   {updateCustomerMutation.isPending ? 'Updating...' : 'Update Customer'}
@@ -882,6 +1052,68 @@ export default function Customers() {
                                       </FormItem>
                                     )}
                                   />
+                                  {/* Cash Discount Section */}
+                                  <div className="rounded-lg border border-muted p-3 sm:p-4 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-xs sm:text-sm font-semibold text-foreground">Cash Discount (CD)</p>
+                                      <FormField
+                                        control={editForm.control}
+                                        name="cd_enabled"
+                                        render={({ field }) => (
+                                          <Switch
+                                            checked={!!field.value}
+                                            onCheckedChange={field.onChange}
+                                          />
+                                        )}
+                                      />
+                                    </div>
+                                    {editForm.watch("cd_enabled") && (
+                                      <div className="space-y-3">
+                                        <FormField
+                                          control={editForm.control}
+                                          name="cd_percentage"
+                                          render={({ field }) => (
+                                            <FormItem>
+                                              <FormLabel className="text-xs sm:text-sm">CD % (Default Rate)</FormLabel>
+                                              <FormControl>
+                                                <Input type="number" min="0" max="100" step="0.1" placeholder="2.0" className="text-sm sm:text-base h-9 sm:h-10" {...field} onChange={e => field.onChange(e.target.value ? Number(e.target.value) : 0)} />
+                                              </FormControl>
+                                              <FormMessage className="text-xs" />
+                                            </FormItem>
+                                          )}
+                                        />
+                                        <FormField
+                                          control={editForm.control}
+                                          name="cd_days"
+                                          render={({ field }) => (
+                                            <FormItem>
+                                              <FormLabel className="text-xs sm:text-sm">CD Days (Payment Window)</FormLabel>
+                                              <FormControl>
+                                                <Input type="number" min="0" placeholder="10" className="text-sm sm:text-base h-9 sm:h-10" {...field} onChange={e => field.onChange(e.target.value ? Number(e.target.value) : 0)} />
+                                              </FormControl>
+                                              <FormMessage className="text-xs" />
+                                            </FormItem>
+                                          )}
+                                        />
+                                        <FormField
+                                          control={editForm.control}
+                                          name="cd_settlement_mode"
+                                          render={({ field }) => (
+                                            <FormItem>
+                                              <FormLabel className="text-xs sm:text-sm">Settlement Mode</FormLabel>
+                                              <FormControl>
+                                                <select className="flex h-9 sm:h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-sm" value={field.value || "direct"} onChange={e => field.onChange(e.target.value)}>
+                                                  <option value="direct">Deduct on Invoice (Direct)</option>
+                                                  <option value="credit_note">Credit Note After Payment</option>
+                                                </select>
+                                              </FormControl>
+                                              <FormMessage className="text-xs" />
+                                            </FormItem>
+                                          )}
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
                                   <DialogFooter className="flex-col sm:flex-row gap-2">
                                     <Button type="submit" disabled={updateCustomerMutation.isPending} className="w-full sm:w-auto text-sm">
                                       {updateCustomerMutation.isPending ? 'Updating...' : 'Update Customer'}

@@ -32,8 +32,10 @@ import {
   Printer,
   Download,
   RefreshCw,
+  CreditCard,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
+import { creditNotesService } from "@/api/creditNotes";
 import {
   Card,
   CardContent,
@@ -173,6 +175,22 @@ export default function OrderDocumentPage() {
       }
     },
     enabled: !!id,
+  });
+  
+  // Fetch credit notes for this order
+  const {
+    data: creditNote,
+  } = useQuery<any | null>({
+    queryKey: ["order-document-credit-note", id],
+    enabled: !!id,
+    queryFn: async () => {
+      if (!id) return null;
+      try {
+        return await creditNotesService.getForOrder(id);
+      } catch {
+        return null;
+      }
+    },
   });
 
   // Fetch customer details to show customer name
@@ -458,21 +476,18 @@ export default function OrderDocumentPage() {
               )}
             <Button
               variant="outline"
-                  size="sm"
+              size="sm"
               onClick={async () => {
                 try {
-                  const invoiceUrl = `${
-                    import.meta.env.VITE_API_URL || ""
-                  }/api/invoices/pos/${id}`;
-                  window.open(invoiceUrl, "_blank");
+                  await invoicesService.printPOSInvoice(id!);
                 } catch (error) {
                   toast.error("Failed to open invoice");
                 }
               }}
-                >
+            >
               <Printer className="h-4 w-4 mr-2" />
               Print Invoice
-                </Button>
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -487,6 +502,25 @@ export default function OrderDocumentPage() {
               <Download className="h-4 w-4 mr-2" />
               Download Invoice
             </Button>
+            {order.cd_enabled && order.cd_settlement_mode === 'credit_note' && order.status !== 'cancelled' && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-blue-500 text-blue-600 hover:bg-blue-50"
+                onClick={async () => {
+                  try {
+                    await creditNotesService.create(id!);
+                    toast.success('Credit note raised successfully');
+                    queryClient.invalidateQueries({ queryKey: ['order-document', id] });
+                  } catch (err: any) {
+                    toast.error(err?.response?.data?.message || 'Failed to raise credit note');
+                  }
+                }}
+              >
+                <CreditCard className="h-4 w-4 mr-2" />
+                Raise Credit Note
+              </Button>
+            )}
             {order.status !== "cancelled" && (
               <Dialog open={cancelOrderOpen} onOpenChange={setCancelOrderOpen}>
                 <DialogTrigger asChild>
@@ -556,6 +590,16 @@ export default function OrderDocumentPage() {
                       // Navigate to inventory module
                       navigate("/inventory/movements");
                     }
+                  : undefined
+              }
+            />
+            <LinkedDocumentCard
+              title="Credit Note"
+              count={creditNote ? 1 : 0}
+              description="Linked credit note for this order"
+              onClick={
+                creditNote
+                  ? () => navigate("/sales/credit-notes")
                   : undefined
               }
             />
@@ -728,21 +772,51 @@ export default function OrderDocumentPage() {
                       <TableCell colSpan={6} className="text-right font-medium">Subtotal (Sum of Items)</TableCell>
                       <TableCell className="text-right font-medium">₹ {(order.subtotal || 0).toFixed(2)}</TableCell>
                     </TableRow>
+                    {((order.total_discount || 0) > 0) && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-right text-muted-foreground">Total Discount (Item Level)</TableCell>
+                        <TableCell className="text-right text-muted-foreground text-red-500">-₹ {(order.total_discount || 0).toFixed(2)}</TableCell>
+                      </TableRow>
+                    )}
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-right text-muted-foreground">Taxable Amount</TableCell>
+                      <TableCell className="text-right text-muted-foreground">₹ {((order.subtotal || 0) - (order.total_discount || 0)).toFixed(2)}</TableCell>
+                    </TableRow>
                     <TableRow>
                       <TableCell colSpan={6} className="text-right text-muted-foreground">Total Item Tax</TableCell>
                       <TableCell className="text-right text-muted-foreground">₹ {(order.total_tax || 0).toFixed(2)}</TableCell>
                     </TableRow>
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-right text-muted-foreground">Total Discount (Incl. Extra)</TableCell>
-                      <TableCell className="text-right text-muted-foreground text-red-500">-₹ {(order.total_discount || 0).toFixed(2)}</TableCell>
+                    <TableRow className="bg-muted/30">
+                      <TableCell colSpan={6} className="text-right font-medium">Total</TableCell>
+                      <TableCell className="text-right font-medium">₹ {((order.subtotal || 0) - (order.total_discount || 0) + (order.total_tax || 0)).toFixed(2)}</TableCell>
                     </TableRow>
-                    {order.extra_discount_percentage > 0 && (
+                    {order.extra_discount_amount != null && order.extra_discount_amount > 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-right text-xs text-muted-foreground italic">Extra Discount ({order.extra_discount_percentage}%)</TableCell>
-                        <TableCell className="text-right text-xs text-muted-foreground italic">-₹ {(order.extra_discount_amount || 0).toFixed(2)}</TableCell>
+                        <TableCell colSpan={6} className="text-right text-muted-foreground">Extra Discount</TableCell>
+                        <TableCell className="text-right text-muted-foreground text-red-500">-₹ {order.extra_discount_amount.toFixed(2)}</TableCell>
                       </TableRow>
                     )}
-                    <TableRow className="font-bold text-lg">
+                    {order.cd_enabled && order.cd_amount != null && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-right text-blue-600">
+                          Cash Discount ({order.cd_percentage}%{order.cd_settlement_mode === 'credit_note' ? ' — CN' : ''})
+                        </TableCell>
+                        <TableCell className="text-right text-blue-600">-₹ {order.cd_amount.toFixed(2)}</TableCell>
+                      </TableRow>
+                    )}
+                    {order.total_extra_charges != null && order.total_extra_charges !== 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-right text-orange-600">Extra Charges</TableCell>
+                        <TableCell className="text-right text-orange-600">+₹ {order.total_extra_charges.toFixed(2)}</TableCell>
+                      </TableRow>
+                    )}
+                    {order.round_off_amount != null && order.round_off_amount !== 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-right text-muted-foreground">Round Off</TableCell>
+                        <TableCell className="text-right text-muted-foreground">{order.round_off_amount >= 0 ? '+' : ''}₹ {order.round_off_amount.toFixed(2)}</TableCell>
+                      </TableRow>
+                    )}
+                    <TableRow className="font-bold text-lg border-t-2">
                       <TableCell colSpan={6} className="text-right">Grand Total</TableCell>
                       <TableCell className="text-right">₹ {order.total_amount?.toFixed(2) ?? "0.00"}</TableCell>
                     </TableRow>
@@ -795,11 +869,44 @@ export default function OrderDocumentPage() {
                   </div>
                 </div>
               {order.tracking_number && (
-                  <div>
-                    <p className="text-muted-foreground">Tracking Number</p>
-                    <p className="font-medium">{order.tracking_number}</p>
-                  </div>
-                )}
+                <div>
+                  <p className="text-muted-foreground">Tracking Number</p>
+                  <p className="font-medium">{order.tracking_number}</p>
+                </div>
+              )}
+
+              {/* CD Financial Breakdown */}
+              {(order.cd_enabled || order.taxable_value != null || order.total_extra_charges != null) && (
+                <div className="col-span-1 md:col-span-2 mt-4 pt-4 border-t space-y-1.5">
+                  <h4 className="text-sm font-semibold mb-2">Financial Breakdown</h4>
+                  {order.taxable_value != null && (
+                    <div className="flex justify-between max-w-xs text-sm">
+                      <span className="text-muted-foreground">Taxable Value:</span>
+                      <span>₹ {order.taxable_value.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {order.cd_enabled && order.cd_amount != null && (
+                    <div className="flex justify-between max-w-xs text-sm">
+                      <span className="text-muted-foreground">
+                        Cash Discount ({order.cd_percentage}%{order.cd_settlement_mode === 'credit_note' ? ' — CN' : ''}):
+                      </span>
+                      <span className="text-blue-600">-₹ {order.cd_amount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {order.total_extra_charges != null && order.total_extra_charges !== 0 && (
+                    <div className="flex justify-between max-w-xs text-sm">
+                      <span className="text-muted-foreground">Extra Charges:</span>
+                      <span className="text-orange-600">+₹ {order.total_extra_charges.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {order.round_off_amount != null && order.round_off_amount !== 0 && (
+                    <div className="flex justify-between max-w-xs text-sm">
+                      <span className="text-muted-foreground">Round Off:</span>
+                      <span>{order.round_off_amount >= 0 ? '+' : ''}₹ {order.round_off_amount.toFixed(2)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               </div>
 
               {/* Payments Table */}
@@ -1226,6 +1333,99 @@ export default function OrderDocumentPage() {
                 )}
             </CardContent>
           </Card>
+
+            {/* Credit Notes Section */}
+            {order.cd_enabled && (order.cd_settlement_mode === 'credit_note' || creditNote) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base md:text-lg">
+                    Credit Notes
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    {creditNote ? "1" : "0"} credit note(s) linked to this order
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {creditNote ? (
+                    <div className="space-y-3">
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>CN Number</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Amount</TableHead>
+                              <TableHead>Date</TableHead>
+                              <TableHead className="text-right">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            <TableRow key={creditNote.id}>
+                              <TableCell className="font-medium">
+                                {creditNote.cn_number}
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant={
+                                    creditNote.status === "applied"
+                                      ? "default"
+                                      : creditNote.status === "cancelled"
+                                      ? "destructive"
+                                      : "outline"
+                                  }
+                                >
+                                  {creditNote.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                ₹ {creditNote.total_amount?.toFixed(2) || "0.00"}
+                              </TableCell>
+                              <TableCell>
+                                {format(
+                                  new Date(creditNote.cn_date || creditNote.created_at),
+                                  "MMM d, yyyy"
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => navigate("/sales/credit-notes")}
+                                >
+                                  View All
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-6">
+                      <p className="text-sm text-muted-foreground mb-4">
+                        No credit notes found for this order.
+                      </p>
+                      {order.cd_enabled && order.cd_settlement_mode === 'credit_note' && order.status !== 'cancelled' && (
+                        <Button
+                          variant="outline"
+                          onClick={async () => {
+                            try {
+                              await creditNotesService.create(id!);
+                              toast.success('Credit note raised successfully');
+                              queryClient.invalidateQueries({ queryKey: ["order-document-credit-note", id] });
+                            } catch (err: any) {
+                              toast.error(err?.response?.data?.message || 'Failed to raise credit note');
+                            }
+                          }}
+                        >
+                          Raise Credit Note
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
         </TabsContent>
 

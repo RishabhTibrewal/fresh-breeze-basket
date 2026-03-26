@@ -375,8 +375,8 @@ export const partyController = {
 
       const totalReceivable = receivables.reduce((sum, e) => {
         const amount = Number(e.amount) || 0;
-        // Treat incoming payments as reducing receivables
-        if (e.doc_type === 'payment_in') {
+        // Treat incoming payments and credit notes as reducing receivables
+        if (e.doc_type === 'payment_in' || e.doc_type === 'credit_note') {
           return sum - amount;
         }
         return sum + amount;
