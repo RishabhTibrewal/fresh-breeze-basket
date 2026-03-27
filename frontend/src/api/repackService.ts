@@ -47,12 +47,33 @@ export interface CreateRepackOrderPayload {
   outputs: RepackOrderOutput[];
 }
 
+// Helper: resolve company_id from JWT user_metadata first, then fall back to the profiles table.
+async function getCompanyId(userId: string): Promise<string> {
+  // 1. Try user_metadata (present when Supabase was seeded with it)
+  const { data: { user } } = await supabase.auth.getUser();
+  const metaCompanyId = user?.user_metadata?.company_id;
+  if (metaCompanyId) return metaCompanyId;
+
+  // 2. Fall back to the profiles table (always populated by backend)
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('company_id')
+    .eq('id', userId)
+    .single();
+
+  if (error || !profile?.company_id)
+    throw new Error('Could not determine company context');
+
+  return profile.company_id;
+}
+
 export const repackService = {
   async createRecipeTemplate(payload: CreateRecipeTemplatePayload) {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error("Not authenticated");
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) throw new Error("Not authenticated");
+    const user = userData.user;
     
-    const company_id = user.user.user_metadata.company_id;
+    const company_id = await getCompanyId(user.id);
     if (!company_id) throw new Error("Could not determine company context");
     
     // Attempt to get company_id from user metadata if possible, but the RLS policies
@@ -89,8 +110,9 @@ export const repackService = {
   },
 
   async updateRecipeTemplate(id: string, payload: CreateRecipeTemplatePayload) {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error("Not authenticated");
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) throw new Error("Not authenticated");
+    const user = userData.user;
     
     // Update header
     const { error: headerErr } = await supabase
@@ -108,7 +130,7 @@ export const repackService = {
     await supabase.from('packaging_recipe_inputs').delete().eq('recipe_id', id);
     await supabase.from('packaging_recipe_outputs').delete().eq('recipe_id', id);
 
-    const company_id = user.user.user_metadata.company_id;
+    const company_id = await getCompanyId(user.id);
 
     if (payload.inputs.length > 0) {
       const { error: inErr } = await supabase
@@ -158,12 +180,10 @@ export const repackService = {
   },
 
   async createRepackOrder(payload: CreateRepackOrderPayload) {
-    // Requires inserting main order via backend to handle created_by properly in v1
-    // Wait, the prompt implies creating the `repack_orders` directly via Supabase client,
-    // assuming RLS and DB defaults cover everything.
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error("Not authenticated");
-    const company_id = user.user.user_metadata.company_id;
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) throw new Error("Not authenticated");
+    const user = userData.user;
+    const company_id = await getCompanyId(user.id);
     if (!company_id) throw new Error("Could not determine company context");
 
     const { data: order, error: orderErr } = await supabase
@@ -174,7 +194,7 @@ export const repackService = {
         recipe_template_id: payload.recipe_template_id,
         notes: payload.notes,
         status: 'draft',
-        created_by: user.user.id
+        created_by: user.id
       })
       .select()
       .single();
@@ -199,8 +219,9 @@ export const repackService = {
   },
 
   async updateRepackOrder(id: string, payload: CreateRepackOrderPayload) {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error("Not authenticated");
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) throw new Error("Not authenticated");
+    const user = userData.user;
     
     // Check if it's draft first
     const { data: existing } = await supabase
@@ -229,7 +250,7 @@ export const repackService = {
     await supabase.from('repack_order_inputs').delete().eq('repack_order_id', id);
     await supabase.from('repack_order_outputs').delete().eq('repack_order_id', id);
 
-    const company_id = user.user.user_metadata.company_id;
+    const company_id = await getCompanyId(user.id);
 
     if (payload.inputs.length > 0) {
       const { error: inErr } = await supabase

@@ -70,7 +70,7 @@ export default function CreateQuotation() {
   const createMutation = useMutation({
     mutationFn: (data: CreateQuotationInput) => quotationsService.createQuotation(data),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['quotations'] });
+      queryClient.invalidateQueries({ queryKey: ['quotations'], exact: false });
       toast.success(`Quotation updated/created successfully!`);
       navigate('/sales/quotations');
     },
