@@ -105,7 +105,7 @@ export const orderController = {
       const cdEnabled: boolean = bodyCdEnabled !== undefined ? Boolean(bodyCdEnabled) : Boolean(customer.cd_enabled);
       const cdPercentage: number = bodyCdPercentage !== undefined ? Number(bodyCdPercentage) : Number(customer.cd_percentage || 0);
       const cdDays: number = bodyCdDays !== undefined ? Number(bodyCdDays) : Number(customer.cd_days || 0);
-      const cdSettlementMode: CDSettlementMode = bodyCdSettlementMode || customer.cd_settlement_mode || 'direct';
+      const cdSettlementMode: CDSettlementMode = 'credit_note'; // Force CD to always be via CN
       const extraCharges: ExtraCharge[] = Array.isArray(bodyExtraCharges) ? bodyExtraCharges : [];
 
       // cd_valid_until = order_date + cd_days (only when cdEnabled)

@@ -23,7 +23,7 @@ function numberToWords(num: number): string {
     return res.trim() + ' Only';
 }
 
-const generateInvoiceHTML = async (orderId: string, companyId: string) => {
+const generateInvoiceHTML = async (orderId: string, companyId: string, documentTitle: string = 'TAX INVOICE') => {
     // 1. Data Fetching
     const [companyRes, orderRes, creditPeriodRes] = await Promise.all([
       (supabaseAdmin || supabase).from('companies').select('*').eq('id', companyId).single(),
@@ -69,6 +69,19 @@ const generateInvoiceHTML = async (orderId: string, companyId: string) => {
     const custAddress = [address?.address_line1, address?.address_line2, address?.city, address?.state, address?.postal_code].filter(Boolean).join(', ');
     const custGST = customer?.trn_number || '';
     
+    const subtotal = Number(order.subtotal || 0);
+    const totalDiscount = Number(order.total_discount || 0);
+    const afterItemDisc = subtotal - totalDiscount;
+    const extraDiscount = Number(order.extra_discount_amount || 0);
+    const showExtraDisc = extraDiscount > 0;
+    
+    const cdAmount = Number(order.cd_amount || 0);
+    const totalTax = Number(order.total_tax || 0);
+    const taxBaseInvoiceLevel = Number(order.taxable_value || 0); // taxable value A or B depending on how logic sets it
+    const extraCharges = Number(order.total_extra_charges || 0);
+    const roundOff = Number(order.round_off_amount || 0);
+    const grandTotal = Number(order.total_amount || 0);
+
     // Calculate line items
     let itemsHTML = '';
     let totalQty = 0;
@@ -85,11 +98,17 @@ const generateInvoiceHTML = async (orderId: string, companyId: string) => {
         const price = Number(item.unit_price) || 0;
         const lineDiscount = Number(item.discount_amount || 0);
         
-        const taxableAmt = (price * qty) - lineDiscount;
+        const taxableAmtA = (price * qty) - lineDiscount;
+        let extraDiscShare = 0;
+        if (showExtraDisc && afterItemDisc > 0) {
+            extraDiscShare = (taxableAmtA / afterItemDisc) * extraDiscount;
+        }
+        const netTaxableB = taxableAmtA - extraDiscShare;
+        
         const taxRate = Number(item.tax_percentage || 0);
         const cgstSgstRate = taxRate / 2;
         const taxVal = Number(item.tax_amount || 0);
-        const totalLineAmount = taxableAmt + taxVal;
+        const totalLineAmount = netTaxableB + taxVal;
         
         totalLineAmounts += totalLineAmount;
         
@@ -98,20 +117,37 @@ const generateInvoiceHTML = async (orderId: string, companyId: string) => {
         const unit = item.variant?.unit_type || 'PCS';
         const discPct = Number(item.discount_percentage || 0);
 
-        itemsHTML += `
-            <tr class="item-row">
-                <td class="text-center">${idx + 1}</td>
-                <td>${desc}</td>
-                <td class="text-center">${hsn}</td>
-                <td class="text-right">${qty.toFixed(3)}</td>
-                <td class="text-center">${unit}</td>
-                <td class="text-right">${price.toFixed(2)}</td>
-                <td class="text-right">${discPct ? discPct + '%' : '-'}</td>
-                <td class="text-right">-</td>
-                <td class="text-right">${cgstSgstRate}% / ${cgstSgstRate}%</td>
-                <td class="text-right">${totalLineAmount.toFixed(2)}</td>
-            </tr>
-        `;
+        if (showExtraDisc) {
+            itemsHTML += `
+                <tr class="item-row">
+                    <td class="text-center">${idx + 1}</td>
+                    <td>${desc}</td>
+                    <td class="text-center">${hsn}</td>
+                    <td class="text-center">${qty.toFixed(3)} ${unit}</td>
+                    <td class="text-right">${price.toFixed(2)}</td>
+                    <td class="text-right">${discPct ? discPct + '%' : '-'}</td>
+                    <td class="text-right">${taxableAmtA.toFixed(2)}</td>
+                    <td class="text-right">${extraDiscShare.toFixed(2)}</td>
+                    <td class="text-right">${netTaxableB.toFixed(2)}</td>
+                    <td class="text-center">${taxRate}%</td>
+                    <td class="text-right">${totalLineAmount.toFixed(2)}</td>
+                </tr>
+            `;
+        } else {
+            itemsHTML += `
+                <tr class="item-row">
+                    <td class="text-center">${idx + 1}</td>
+                    <td>${desc}</td>
+                    <td class="text-center">${hsn}</td>
+                    <td class="text-center">${qty.toFixed(3)} ${unit}</td>
+                    <td class="text-right">${price.toFixed(2)}</td>
+                    <td class="text-right">${discPct ? discPct + '%' : '-'}</td>
+                    <td class="text-right">${taxableAmtA.toFixed(2)}</td>
+                    <td class="text-center">${taxRate}%</td>
+                    <td class="text-right">${totalLineAmount.toFixed(2)}</td>
+                </tr>
+            `;
+        }
         
         // Add to tax summary
         if (taxRate > 0) {
@@ -119,22 +155,50 @@ const generateInvoiceHTML = async (orderId: string, companyId: string) => {
             if (!taxSummary[key]) {
                 taxSummary[key] = { taxable: 0, taxRate, cgst: 0, sgst: 0 };
             }
-            taxSummary[key].taxable += taxableAmt;
+            taxSummary[key].taxable += netTaxableB;
             taxSummary[key].cgst += taxVal / 2;
             taxSummary[key].sgst += taxVal / 2;
         }
     });
 
+    // Add extra charges to tax summary
+    if (order.extra_charges && Array.isArray(order.extra_charges)) {
+        order.extra_charges.forEach((ec: any) => {
+            const taxRate = Number(ec.tax_percent) || 0;
+            if (taxRate > 0) {
+                const amount = Number(ec.amount) || 0;
+                const taxVal = amount * taxRate / 100;
+                
+                const key = taxRate.toString();
+                if (!taxSummary[key]) {
+                    taxSummary[key] = { taxable: 0, taxRate, cgst: 0, sgst: 0 };
+                }
+                taxSummary[key].taxable += amount;
+                taxSummary[key].cgst += taxVal / 2;
+                taxSummary[key].sgst += taxVal / 2;
+            }
+        });
+    }
+
     // Fill remaining rows to ensure full page height if few items
     const minRows = 12;
     const emptyRowsCount = Math.max(0, minRows - order.order_items.length);
     for (let i = 0; i < emptyRowsCount; i++) {
-        itemsHTML += `
-            <tr class="item-row empty-row">
-                <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
-                <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
-            </tr>
-        `;
+        if (showExtraDisc) {
+            itemsHTML += `
+                <tr class="item-row empty-row">
+                    <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
+                    <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
+                </tr>
+            `;
+        } else {
+            itemsHTML += `
+                <tr class="item-row empty-row">
+                    <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
+                    <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
+                </tr>
+            `;
+        }
     }
     
     let taxSummaryHTML = '';
@@ -156,17 +220,6 @@ const generateInvoiceHTML = async (orderId: string, companyId: string) => {
         `;
     }
 
-    const subtotal = Number(order.subtotal || 0);
-    const totalDiscount = Number(order.total_discount || 0);
-    const taxableValue = subtotal - totalDiscount;
-    const totalTax = Number(order.total_tax || 0);
-    const total = taxableValue + totalTax;
-
-    const roundOff = Number(order.round_off_amount || 0);
-    const extraDiscount = Number(order.extra_discount_amount || 0);
-    const cdAmount = Number(order.cd_amount || 0);
-    const extraCharges = Number(order.total_extra_charges || 0);
-
     let totalsSummaryHTML = '';
 
     totalsSummaryHTML += `
@@ -184,6 +237,9 @@ const generateInvoiceHTML = async (orderId: string, companyId: string) => {
             </div>
         `;
     }
+
+    const taxableValue = afterItemDisc;
+    const total = taxableValue + totalTax;
 
     totalsSummaryHTML += `
         <div class="totals-row border-bottom">
@@ -215,20 +271,20 @@ const generateInvoiceHTML = async (orderId: string, companyId: string) => {
         `;
     }
 
-    if (order.cd_enabled && cdAmount > 0) {
-        const cdLabelSuffix = order.cd_settlement_mode === 'credit_note' ? ' — CN' : '';
-        totalsSummaryHTML += `
-            <div class="totals-row border-bottom">
-                <div class="totals-label" style="color:#2563eb;">Less: Cash Discount (${order.cd_percentage}%${cdLabelSuffix}) (-)</div>
-                <div class="totals-value" style="color:#2563eb;">-${cdAmount.toFixed(2)}</div>
-            </div>
-        `;
-    }
-
     if (extraCharges > 0) {
+        // Find if we have specific extra charges formatted to list their tax
+        let chargeDetails = 'Extra Charges';
+        if (order.extra_charges && Array.isArray(order.extra_charges) && order.extra_charges.length > 0) {
+            const names = order.extra_charges.map((ec: any) => {
+                const taxStr = ec.tax_percent ? ` @ ${ec.tax_percent}% GST` : '';
+                return `${ec.name}${taxStr}`;
+            });
+            chargeDetails = `Extra Charges (${names.join(', ')})`;
+        }
+
         totalsSummaryHTML += `
             <div class="totals-row border-bottom">
-                <div class="totals-label" style="color:#ea580c;">Add: Extra Charges (+)</div>
+                <div class="totals-label" style="color:#ea580c;">Add: ${chargeDetails} (+)</div>
                 <div class="totals-value" style="color:#ea580c;">+${extraCharges.toFixed(2)}</div>
             </div>
         `;
@@ -243,7 +299,6 @@ const generateInvoiceHTML = async (orderId: string, companyId: string) => {
         `;
     }
 
-    const grandTotal = Number(order.total_amount || 0);
     const amountInWords = 'Rupees ' + numberToWords(Math.round(grandTotal));
     
     // Bank Details HTML
@@ -414,7 +469,7 @@ const generateInvoiceHTML = async (orderId: string, companyId: string) => {
     <div class="invoice-box">
         <div class="header-top">
             <div>GSTIN : ${companyGST}</div>
-            <div style="text-decoration: underline; font-size: 14px;">TAX INVOICE</div>
+            <div style="text-decoration: underline; font-size: 14px;">${documentTitle}</div>
             <div>Original Copy</div>
         </div>
         
@@ -460,18 +515,33 @@ const generateInvoiceHTML = async (orderId: string, companyId: string) => {
         <div class="items-section">
             <table class="items-table">
                 <thead>
+                    ${showExtraDisc ? `
+                    <tr>
+                        <th style="width: 3%;">S.N.</th>
+                        <th style="width: 25%;">Description of Goods</th>
+                        <th style="width: 8%;">HSN/SAC</th>
+                        <th style="width: 7%;">Qty</th>
+                        <th style="width: 6%;">Price</th>
+                        <th style="width: 6%;">Disc%</th>
+                        <th style="width: 10%;">Taxable Value (A)</th>
+                        <th style="width: 8%;">Extra Disc</th>
+                        <th style="width: 9%;">Net Taxable (B)</th>
+                        <th style="width: 6%;">GST%</th>
+                        <th style="width: 12%;">Total(₹)</th>
+                    </tr>
+                    ` : `
                     <tr>
                         <th style="width: 4%;">S.N.</th>
                         <th style="width: 35%;">Description of Goods</th>
                         <th style="width: 10%;">HSN/SAC</th>
-                        <th style="width: 8%;">Qty.</th>
-                        <th style="width: 6%;">Unit</th>
+                        <th style="width: 10%;">Qty</th>
                         <th style="width: 8%;">Price</th>
-                        <th style="width: 6%;">Disc.</th>
-                        <th style="width: 7%;">IGST</th>
-                        <th style="width: 8%;">CGST/SGST</th>
-                        <th style="width: 8%;">Amount(₹)</th>
+                        <th style="width: 7%;">Disc%</th>
+                        <th style="width: 10%;">Taxable Value (A)</th>
+                        <th style="width: 6%;">GST%</th>
+                        <th style="width: 10%;">Total(₹)</th>
                     </tr>
+                    `}
                 </thead>
                 <tbody>
                     ${itemsHTML}
@@ -571,6 +641,206 @@ export const getCustomerBill = async (req: Request, res: Response, next: NextFun
     // Send as attachment to force download in browser
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Content-Disposition', `attachment; filename="Invoice_${orderId.substring(0,8).toUpperCase()}.html"`);
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Generates and streams a Quotation document (QUOTATION header).
+ * GET /api/invoices/quotations/:quotationId?download=true
+ */
+export const getQuotationDocument = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { quotationId } = req.params;
+    const companyId = req.companyId;
+    if (!companyId) throw new ApiError(400, 'Company context is required');
+
+    // Fetch quotation & items
+    const { data: quotation, error: qErr } = await (supabaseAdmin || supabase)
+      .from('quotations')
+      .select('*, quotation_items(*, variant:product_variants(*), product:products(*)), customers(*), leads(*)')
+      .eq('id', quotationId)
+      .eq('company_id', companyId)
+      .single();
+
+    if (qErr || !quotation) throw new ApiError(404, 'Quotation not found');
+
+    const { data: company } = await (supabaseAdmin || supabase)
+      .from('companies').select('*').eq('id', companyId).single();
+
+    const companyName = company?.name || 'Your Company';
+    const companyGST = company?.gstin || '';
+    const companyAddress = [company?.address, company?.city, company?.state, company?.postal_code].filter(Boolean).join(', ');
+    const companyPhone = company?.phone || '';
+    const companyEmail = company?.email || '';
+
+    const docNo = quotation.quotation_number || `QUO-${quotation.id.substring(0, 8).toUpperCase()}`;
+    const docDate = new Date(quotation.created_at).toLocaleDateString('en-IN');
+    const validUntil = quotation.valid_until ? new Date(quotation.valid_until).toLocaleDateString('en-IN') : 'N/A';
+    const custName = quotation.customers?.name || quotation.leads?.company_name || quotation.leads?.contact_name || 'Prospective Customer';
+    const custGST = quotation.customers?.trn_number || '';
+
+    const subtotal = Number(quotation.subtotal || 0);
+    const totalDiscount = Number(quotation.total_discount || 0);
+    const afterItemDisc = subtotal - totalDiscount;
+    const extraDiscount = Number(quotation.extra_discount_amount || 0);
+    const showExtraDisc = extraDiscount > 0;
+    const totalTax = Number(quotation.total_tax || 0);
+    const grandTotal = Number(quotation.total_amount || 0);
+    const rawExtraCharges: any[] = Array.isArray(quotation.extra_charges) ? quotation.extra_charges : [];
+    const totalExtraCharges = Number(quotation.total_extra_charges || 0);
+    const roundOff = Number(quotation.round_off_amount || 0);
+
+    const taxSummary: Record<string, { taxable: number; taxRate: number; cgst: number; sgst: number }> = {};
+    let itemsHTML = '';
+
+    (quotation.quotation_items || []).forEach((item: any, idx: number) => {
+      const qty = Number(item.quantity) || 0;
+      const price = Number(item.unit_price) || 0;
+      const lineDiscount = Number(item.discount_amount || 0);
+      const taxableAmtA = (price * qty) - lineDiscount;
+      let extraDiscShare = 0;
+      if (showExtraDisc && afterItemDisc > 0) extraDiscShare = (taxableAmtA / afterItemDisc) * extraDiscount;
+      const netTaxableB = taxableAmtA - extraDiscShare;
+      const taxRate = Number(item.tax_percentage || 0);
+      const cgstSgstRate = taxRate / 2;
+      const taxVal = Number(item.tax_amount || 0);
+      const totalLineAmount = netTaxableB + taxVal;
+      const desc = item.variant?.name || item.product?.name || 'Item';
+      const hsn = item.variant?.hsn || '-';
+      const unit = item.variant?.unit_type || 'PCS';
+      const discPct = Number(item.discount_percentage || 0);
+
+      const key = `${taxRate}`;
+      if (!taxSummary[key]) taxSummary[key] = { taxable: 0, taxRate, cgst: 0, sgst: 0 };
+      taxSummary[key].taxable += netTaxableB;
+      taxSummary[key].cgst += (netTaxableB * cgstSgstRate) / 100;
+      taxSummary[key].sgst += (netTaxableB * cgstSgstRate) / 100;
+
+      if (showExtraDisc) {
+        itemsHTML += `<tr class="item-row"><td class="text-center">${idx + 1}</td><td>${desc}</td><td class="text-center">${hsn}</td><td class="text-center">${qty.toFixed(3)} ${unit}</td><td class="text-right">${price.toFixed(2)}</td><td class="text-right">${discPct ? discPct + '%' : '-'}</td><td class="text-right">${taxableAmtA.toFixed(2)}</td><td class="text-right">${extraDiscShare.toFixed(2)}</td><td class="text-right">${netTaxableB.toFixed(2)}</td><td class="text-center">${taxRate}%</td><td class="text-right">${totalLineAmount.toFixed(2)}</td></tr>`;
+      } else {
+        itemsHTML += `<tr class="item-row"><td class="text-center">${idx + 1}</td><td>${desc}</td><td class="text-center">${hsn}</td><td class="text-center">${qty.toFixed(3)} ${unit}</td><td class="text-right">${price.toFixed(2)}</td><td class="text-right">${discPct ? discPct + '%' : '-'}</td><td class="text-right">${taxableAmtA.toFixed(2)}</td><td class="text-center">${taxRate}%</td><td class="text-right">${totalLineAmount.toFixed(2)}</td></tr>`;
+      }
+    });
+
+    const taxSummaryHTML = Object.values(taxSummary).map(t => {
+      const igst = t.cgst + t.sgst;
+      return `<tr><td>${t.taxRate}%</td><td class="text-right">${t.taxable.toFixed(2)}</td><td class="text-right">${t.cgst.toFixed(2)}</td><td class="text-right">${t.sgst.toFixed(2)}</td><td class="text-right">${igst.toFixed(2)}</td></tr>`;
+    }).join('');
+
+    const extraChargesHTML = rawExtraCharges.map((ec: any) => {
+      const taxPct = Number(ec.tax_percent || 0);
+      const total = ec.amount + (ec.amount * taxPct / 100);
+      const colSpan = showExtraDisc ? 10 : 8;
+      return `<tr><td colspan="${colSpan}" class="text-right" style="color:#2563eb;">${ec.name}${taxPct > 0 ? ` (incl. ${taxPct}% tax)` : ''}</td><td class="text-right">${total.toFixed(2)}</td></tr>`;
+    }).join('');
+
+    const amountInWords = numberToWords(Math.round(grandTotal));
+
+    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Quotation ${docNo}</title><style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; font-size: 11px; padding: 10px; background: #f9f9f9; }
+      .invoice-box { max-width: 900px; margin: auto; background: #fff; border: 2px solid #000; }
+      .header-top { display: flex; justify-content: space-between; align-items: center; padding: 5px 10px; border-bottom: 1px solid #000; font-size: 11px; font-weight: bold; }
+      .header-main { text-align: center; padding: 10px; border-bottom: 1px solid #000; }
+      .header-main h1 { color: #d32f2f; margin: 5px 0; font-size: 24px; }
+      .header-main p { margin: 2px 0; font-size: 10px; }
+      .logo-placeholder { position: absolute; left: 20px; top: 20px; width: 80px; height: 80px; object-fit: contain; }
+      .meta-section { display: flex; border-bottom: 1px solid #000; }
+      .meta-col { flex: 1; padding: 5px 10px; }
+      .meta-col:first-child { border-right: 1px solid #000; }
+      .meta-table { width: 100%; font-size: 10px; }
+      .meta-table td { padding: 2px 0; vertical-align: top; }
+      .meta-table td:first-child { width: 110px; }
+      .items-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+      .items-table th, .items-table td { border-right: 1px solid #000; padding: 5px; }
+      .items-table th { border-bottom: 1px solid #000; text-align: center; font-weight: bold; }
+      .items-table th:last-child, .items-table td:last-child { border-right: none; }
+      .item-row td { border-bottom: none; }
+      .totals-section { border-top: 1px solid #000; }
+      .totals-row { display: flex; }
+      .totals-left { flex: 1; padding: 10px; border-right: 1px solid #000; }
+      .totals-right { width: 260px; }
+      .total-line { display: flex; justify-content: space-between; padding: 3px 10px; font-size: 10px; }
+      .total-line.grand { font-weight: bold; font-size: 12px; border-top: 2px solid #000; background: #f5f5f5; }
+      .tax-summary-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+      .tax-summary-table th, .tax-summary-table td { border: 1px solid #000; padding: 4px; text-align: center; }
+      .amount-words { padding: 8px 10px; font-size: 10px; border-top: 1px solid #000; }
+      .text-right { text-align: right; } .text-center { text-align: center; }
+      @media print { body { padding: 0; } .invoice-box { border: 2px solid #000; box-shadow: none; } }
+    </style></head><body>
+    <div class="invoice-box">
+      <div class="header-top">
+        <div>GSTIN : ${companyGST}</div>
+        <div style="text-decoration: underline; font-size: 14px;">QUOTATION</div>
+        <div>Copy</div>
+      </div>
+      <div class="header-main" style="position:relative;">
+        ${company?.logo_url ? `<img src="${company.logo_url}" class="logo-placeholder" alt="Logo">` : ''}
+        <h1>${companyName.toUpperCase()}</h1>
+        <p><strong>WORK :</strong> ${companyAddress}</p>
+        <p><strong>Tel.:</strong> ${companyPhone}${companyEmail ? ` &nbsp;|&nbsp; <strong>Email :</strong> ${companyEmail}` : ''}</p>
+      </div>
+      <div class="meta-section">
+        <div class="meta-col">
+          <table class="meta-table"><tbody>
+            <tr><td><strong>Quotation No.</strong></td><td>: ${docNo}</td></tr>
+            <tr><td><strong>Date</strong></td><td>: ${docDate}</td></tr>
+            <tr><td><strong>Valid Until</strong></td><td>: ${validUntil}</td></tr>
+          </tbody></table>
+        </div>
+        <div class="meta-col">
+          <table class="meta-table"><tbody>
+            <tr><td><strong>Customer</strong></td><td>: ${custName}</td></tr>
+            ${custGST ? `<tr><td><strong>GSTIN</strong></td><td>: ${custGST}</td></tr>` : ''}
+            <tr><td><strong>Status</strong></td><td>: ${(quotation.status || '').toUpperCase()}</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+      <div style="border-bottom: 1px solid #000;">
+        <table class="items-table">
+          <thead><tr>
+            ${showExtraDisc
+              ? `<th>#</th><th>Description</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Disc%</th><th>Taxable(A)</th><th>Extra Disc</th><th>Net Taxable(B)</th><th>GST%</th><th>Total</th>`
+              : `<th>#</th><th>Description</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Disc%</th><th>Taxable Value</th><th>GST%</th><th>Total</th>`}
+          </tr></thead>
+          <tbody>${itemsHTML}${extraChargesHTML}</tbody>
+        </table>
+      </div>
+      <div class="totals-section">
+        <div class="totals-row">
+          <div class="totals-left">
+            <table class="tax-summary-table">
+              <thead><tr><th>GST%</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>Total Tax</th></tr></thead>
+              <tbody>${taxSummaryHTML}</tbody>
+            </table>
+          </div>
+          <div class="totals-right">
+            <div class="total-line"><span>Subtotal</span><span>&#8377; ${subtotal.toFixed(2)}</span></div>
+            ${totalDiscount > 0 ? `<div class="total-line"><span>Item Discount</span><span>-&#8377; ${totalDiscount.toFixed(2)}</span></div>` : ''}
+            ${showExtraDisc ? `<div class="total-line"><span>Extra Discount</span><span>-&#8377; ${extraDiscount.toFixed(2)}</span></div>` : ''}
+            <div class="total-line"><span>Total Tax</span><span>&#8377; ${totalTax.toFixed(2)}</span></div>
+            ${totalExtraCharges > 0 ? `<div class="total-line"><span>Extra Charges</span><span>&#8377; ${totalExtraCharges.toFixed(2)}</span></div>` : ''}
+            ${roundOff !== 0 ? `<div class="total-line"><span>Round Off</span><span>${roundOff > 0 ? '+' : ''}${roundOff.toFixed(2)}</span></div>` : ''}
+            <div class="total-line grand"><span>Grand Total</span><span>&#8377; ${grandTotal.toFixed(2)}</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="amount-words"><strong>Amount in Words:</strong> ${amountInWords} Rupees</div>
+      ${quotation.notes ? `<div style="padding:8px 10px;font-size:10px;border-top:1px solid #000;"><strong>Notes:</strong> ${quotation.notes}</div>` : ''}
+      ${quotation.terms_and_conditions ? `<div style="padding:8px 10px;font-size:10px;border-top:1px solid #000;"><strong>Terms &amp; Conditions:</strong> ${quotation.terms_and_conditions}</div>` : ''}
+      <div style="padding:10px;text-align:right;border-top:1px solid #000;font-size:10px;">For ${companyName}<br><br><br>Authorised Signatory</div>
+    </div>
+    </body></html>`;
+
+    const isDownload = req.query.download === 'true';
+    res.setHeader('Content-Type', 'text/html');
+    if (isDownload) {
+      res.setHeader('Content-Disposition', `attachment; filename="Quotation_${docNo}.html"`);
+    }
     res.send(html);
   } catch (error) {
     next(error);

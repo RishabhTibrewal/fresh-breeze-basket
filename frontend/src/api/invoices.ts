@@ -1,4 +1,5 @@
 import apiClient from '@/lib/apiClient';
+import html2pdf from 'html2pdf.js';
 
 export const invoicesService = {
   /**
@@ -12,28 +13,41 @@ export const invoicesService = {
   },
 
   /**
-   * Get customer bill (PDF)
+   * Get customer bill HTML text
    */
-  async getCustomerBill(orderId: string): Promise<Blob> {
+  async getCustomerBillHTML(orderId: string): Promise<string> {
     const response = await apiClient.get(`/invoices/customer/${orderId}`, {
-      responseType: 'blob',
+      responseType: 'text',
     });
     return response.data;
   },
 
   /**
-   * Download customer bill
+   * Download customer bill as PDF
    */
   async downloadCustomerBill(orderId: string): Promise<void> {
-    const blob = await this.getCustomerBill(orderId);
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `invoice-${orderId.substring(0, 8)}.html`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
+    const htmlString = await this.getCustomerBillHTML(orderId);
+    
+    // Create an invisible container for html2pdf to parse
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlString;
+    tempDiv.style.position = 'absolute';
+    tempDiv.style.top = '-9999px';
+    document.body.appendChild(tempDiv);
+
+    const opt = {
+      margin:       10,
+      filename:     `invoice-${orderId.substring(0, 8)}.pdf`,
+      image:        { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
+    };
+
+    // Render and download as PDF
+    await html2pdf().from(tempDiv).set(opt).save();
+
+    // Clean up
+    document.body.removeChild(tempDiv);
   },
 
   /**

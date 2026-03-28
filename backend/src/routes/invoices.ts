@@ -1,7 +1,8 @@
 import express from 'express';
 import {
   getPOSInvoice,
-  getCustomerBill
+  getCustomerBill,
+  getQuotationDocument
 } from '../controllers/invoices';
 import { protect } from '../middleware/auth';
 
@@ -13,5 +14,6 @@ router.use(protect);
 // Invoice routes
 router.get('/pos/:orderId', getPOSInvoice);
 router.get('/customer/:orderId', getCustomerBill);
+router.get('/quotations/:quotationId', getQuotationDocument);
 
 export default router;

@@ -33,6 +33,7 @@ import { quotationsService, CreateQuotationInput, QuotationItem } from '@/api/qu
 import { leadsService } from '@/api/leads';
 import { productsService } from '@/api/products';
 import { ordersService } from '@/api/orders';
+import { calculateOrderTotals, ExtraCharge } from '@/lib/orderCalculations';
 import apiClient from '@/lib/apiClient';
 
 export default function CreateQuotation() {
@@ -50,6 +51,7 @@ export default function CreateQuotation() {
   const [extraDiscount, setExtraDiscount] = useState<number>(0);
   const [extraDiscountPct, setExtraDiscountPct] = useState<number>(0);
   const [salesExecutiveId, setSalesExecutiveId] = useState<string>('');
+  const [extraCharges, setExtraCharges] = useState<ExtraCharge[]>([]);
 
   const [items, setItems] = useState<(QuotationItem & { ui_id: number; availableVariants: any[] })[]>([]);
   const [nextUiId, setNextUiId] = useState(1);
@@ -137,21 +139,24 @@ export default function CreateQuotation() {
     }));
   };
 
-  const calculateItemsLineTotalSum = () => {
-    return items.reduce((total, item) => {
-      const itemSubtotal = item.quantity * item.unit_price;
-      const lineDisc = (itemSubtotal * (item.discount_percentage || 0)) / 100;
-      const taxBase = itemSubtotal - lineDisc;
-      const lineTax = (taxBase * (item.tax_percentage || 0)) / 100;
-      return total + taxBase + lineTax;
-    }, 0);
-  };
+  const baseItemsTotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+  const extraDiscountAmtForCalc = extraDiscountPct > 0 
+    ? (baseItemsTotal * extraDiscountPct) / 100 
+    : extraDiscount;
 
-  const calculateGrandTotal = () => {
-    const itemsTotal = calculateItemsLineTotalSum();
-    const pctDiscount = (itemsTotal * (extraDiscountPct || 0)) / 100;
-    return Math.max(0, itemsTotal - pctDiscount - (extraDiscount || 0));
-  };
+  const orderTotals = calculateOrderTotals(
+    items.map(i => ({
+      id: i.ui_id.toString(),
+      unit_price: i.unit_price,
+      quantity: i.quantity,
+      discount_amount: (i.quantity * i.unit_price * (i.discount_percentage || 0)) / 100,
+      tax_percentage: i.tax_percentage || 0
+    })),
+    extraDiscountAmtForCalc,
+    0, // CD not enabled for quotes
+    'credit_note', // N/A
+    extraCharges
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -187,7 +192,8 @@ export default function CreateQuotation() {
       notes,
       terms_and_conditions: terms,
       extra_discount_percentage: extraDiscountPct,
-      extra_discount_amount: extraDiscount,
+      extra_discount_amount: extraDiscountAmtForCalc,
+      extra_charges: extraCharges,
       items: items.map(({ ui_id, availableVariants, ...rest }) => {
         const itemSubtotal = rest.quantity * rest.unit_price;
         const discount_amount = (itemSubtotal * (rest.discount_percentage || 0)) / 100;
@@ -377,14 +383,8 @@ export default function CreateQuotation() {
                         <TableCell className="w-[100px]">
                           <Input type="number" min="0" value={item.discount_percentage || 0} onChange={(e) => updateItem(item.ui_id, 'discount_percentage', Number(e.target.value))} />
                         </TableCell>
-                        <TableCell className="text-right">
-                          ₹ {(() => {
-                            const subtotal = item.quantity * item.unit_price;
-                            const discAmt = (subtotal * (item.discount_percentage || 0)) / 100;
-                            const taxBase = subtotal - discAmt;
-                            const taxAmt = (taxBase * (item.tax_percentage || 0)) / 100;
-                            return (taxBase + taxAmt).toFixed(2);
-                          })()}
+                        <TableCell className="text-right font-medium">
+                          ₹ {orderTotals.items.find(t => t.id === item.ui_id.toString())?.line_total.toFixed(2) || '0.00'}
                         </TableCell>
                         <TableCell>
                           <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(item.ui_id)} className="text-red-500 hover:text-red-700">
@@ -396,19 +396,28 @@ export default function CreateQuotation() {
                   )}
                   {items.length > 0 && (
                     <>
-                      <TableRow className="border-t-2">
-                        <TableCell colSpan={6} className="text-right font-medium">Items Total (Incl. Tax & Disc)</TableCell>
-                        <TableCell colSpan={2} className="text-right font-medium">
-                          ₹ {calculateItemsLineTotalSum().toFixed(2)}
+                      <TableRow className="border-t-2 bg-muted/30">
+                        <TableCell colSpan={6} className="text-right font-medium">Subtotal (Without Item Discount)</TableCell>
+                        <TableCell colSpan={2} className="text-right font-medium text-muted-foreground">
+                          ₹ {orderTotals.subtotal.toFixed(2)}
                         </TableCell>
                       </TableRow>
                       
+                      {orderTotals.total_discount > 0 && (
+                         <TableRow>
+                          <TableCell colSpan={6} className="text-right text-muted-foreground">Total Item Discount</TableCell>
+                          <TableCell colSpan={2} className="text-right text-red-500 font-medium">
+                            -₹ {orderTotals.total_discount.toFixed(2)}
+                          </TableCell>
+                         </TableRow>
+                      )}
+
                       <TableRow>
                         <TableCell colSpan={6} className="text-right">
                           Extra Discount (%)
                           {extraDiscountPct > 0 && (
                             <span className="ml-2 text-xs text-red-500 font-normal">
-                              (-₹ {((calculateItemsLineTotalSum() * extraDiscountPct) / 100).toFixed(2)})
+                              (-₹ {orderTotals.extra_discount_amount.toFixed(2)})
                             </span>
                           )}
                         </TableCell>
@@ -447,10 +456,105 @@ export default function CreateQuotation() {
                         </TableCell>
                       </TableRow>
 
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-right text-muted-foreground">Total Tax</TableCell>
+                        <TableCell colSpan={2} className="text-right text-muted-foreground font-medium">
+                          ₹ {orderTotals.total_tax.toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+
+                      {/* EXTRA CHARGES WIDGET */}
+                      <TableRow className="bg-muted/30 border-t">
+                        <TableCell colSpan={8} className="p-0">
+                          <div className="p-4 space-y-4">
+                            <div className="flex justify-between items-center">
+                              <h4 className="font-semibold text-sm">Extra Charges</h4>
+                              <Button 
+                                type="button" 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => setExtraCharges([...extraCharges, { name: '', amount: 0, tax_percent: 0 }])}
+                              >
+                                <Plus className="h-3 w-3 mr-1" /> Add Charge
+                              </Button>
+                            </div>
+                            
+                            {extraCharges.length > 0 && (
+                              <div className="space-y-2">
+                                {extraCharges.map((charge, idx) => (
+                                  <div key={idx} className="flex gap-2 items-center">
+                                    <Input 
+                                      placeholder="Charge Name (e.g. Shipping)" 
+                                      value={charge.name}
+                                      onChange={(e) => {
+                                        const newArr = [...extraCharges];
+                                        newArr[idx].name = e.target.value;
+                                        setExtraCharges(newArr);
+                                      }}
+                                      className="flex-1"
+                                    />
+                                    <Input 
+                                      type="number" 
+                                      placeholder="Amount" 
+                                      value={charge.amount || ''}
+                                      onChange={(e) => {
+                                        const newArr = [...extraCharges];
+                                        newArr[idx].amount = Number(e.target.value);
+                                        setExtraCharges(newArr);
+                                      }}
+                                      className="w-24 text-right"
+                                    />
+                                    <Input 
+                                      type="number" 
+                                      placeholder="Tax %" 
+                                      value={charge.tax_percent || ''}
+                                      onChange={(e) => {
+                                        const newArr = [...extraCharges];
+                                        newArr[idx].tax_percent = Number(e.target.value);
+                                        setExtraCharges(newArr);
+                                      }}
+                                      className="w-20 text-right"
+                                    />
+                                    <div className="w-24 text-right text-sm">
+                                      ₹ {(charge.amount + ((charge.amount * (charge.tax_percent || 0)) / 100)).toFixed(2)}
+                                    </div>
+                                    <Button 
+                                      type="button" 
+                                      variant="ghost" 
+                                      size="icon" 
+                                      className="text-destructive h-8 w-8"
+                                      onClick={() => {
+                                        const newArr = [...extraCharges];
+                                        newArr.splice(idx, 1);
+                                        setExtraCharges(newArr);
+                                      }}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                ))}
+                                <div className="text-right text-sm font-medium pt-2">
+                                  Total Extra Charges: <span className="ml-2">₹ {orderTotals.total_extra_charges.toFixed(2)}</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+
+                      {orderTotals.round_off_amount !== 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-right text-muted-foreground">Round Off</TableCell>
+                          <TableCell colSpan={2} className="text-right text-muted-foreground font-medium">
+                            {orderTotals.round_off_amount > 0 ? '+' : ''}{orderTotals.round_off_amount.toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      )}
+
                       <TableRow className="bg-muted/50 border-t-2">
                         <TableCell colSpan={6} className="text-right font-bold text-lg">Grand Total</TableCell>
                         <TableCell colSpan={2} className="text-right font-bold text-xl text-green-600">
-                          ₹ {calculateGrandTotal().toFixed(2)}
+                          ₹ {orderTotals.total_amount.toFixed(2)}
                         </TableCell>
                       </TableRow>
                     </>

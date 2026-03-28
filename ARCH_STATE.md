@@ -1,6 +1,6 @@
 # Architecture State Document
 
-**Last Updated:** 2026-03-26 (02:22 IST)
+**Last Updated:** 2026-03-28 (03:40 IST)
 **Purpose:** Technical reference for current system architecture, routing patterns, and critical implementation details to prevent architectural mistakes. This document serves as the long-term memory and architectural blueprint for all future AI interactions.
 
 ---
@@ -20,11 +20,14 @@
    - Low stock alerts
 
 2. **Point of Sale (POS)**
-   - Retail-focused checkout interface
-   - Optional customer capture (name/phone)
-   - Multiple payment methods
-   - Real-time inventory updates
-   - Receipt generation
+   - **Multi-View SPA Architecture**: Integrated terminal for Sales, History, Customers, Reports, and Settings
+   - Retail-focused checkout interface with variant-based product catalog
+   - Real-time customer identification and linking
+   - Advanced payment processing: Cash (with change), UPI, and **Split Payments**
+   - Fulfillment support: Dine-In (Table #), Take Away, Delivery (Address capture)
+   - Variant-level product modifiers and add-ons
+   - Real-time inventory deduction via OrderService
+   - Thermal-printer ready receipt generation
 
 3. **Order Management**
    - Sales order creation and tracking
@@ -398,12 +401,14 @@ fresh-breeze-basket/
   - Frontend: React-Hook-Form dynamic array builders (M:1, 1:M, M:M) in Edit/Create + History with wastage reporting
 
 **Sales Module:**
-- ✅ Sales Orders
+- ✅ Sales Orders (with extra charges, round-off, proportional extra discount, no CD outside CN)
 - ✅ Order Status Workflow
-- ✅ Invoices
+- ✅ Invoices (Tax Invoice HTML; extra charges tax included in summary)
 - ✅ Customer Management
 - ✅ Lead Management
 - ✅ Payment Collection
+- ✅ Credit Notes (manual + automated via sales flow)
+- ✅ **Quotations** (fully standardized — see Recent Changes 2026-03-28)
 
 **Product Module:**
 - ✅ Products with Variants
@@ -413,10 +418,16 @@ fresh-breeze-basket/
 - ✅ HSN Code Management
 
 **POS Module:**
-- ✅ POS Order Creation
-- ✅ Optional Customer Capture
-- ✅ Multiple Payment Methods
-- ✅ Receipt Generation
+   - ✅ **Multi-View SPA Framework**: Internal view-switching logic for zero-latency module transitions.
+   - ✅ **Variant-Based Product Catalog**: Products are browsed and added as specific variants.
+   - ✅ **Integrated Sidebar**: Persistent navigation for administrative tasks (History, Customers, etc.) without leaving POS.
+   - ✅ **Customer Management**: In-line customer search, creation, and order linking.
+   - ✅ **Financial Engine**: Standardized `Subtotal - Discount + Tax` logic with round-off support.
+   - ✅ **Advanced Payments**: Cash tendered/change calculation, UPI reference tracking, and **Split Payments** (Multi-method).
+   - ✅ **Fulfillment Types**: Context-aware UI for Dine-In (Table #), Take-Away, and Delivery (Address).
+   - ✅ **Product Modifiers**: Support for variant-level add-ons with automated price adjustments.
+   - ✅ **Stock Integration**: Direct linkage to `OrderService` for cross-outlet inventory reservation.
+   - ✅ **Receipt System**: Auto-generated custom receipt numbering (`POS-XXXXXX`) and thermal-ready HTML.
 
 **Admin Dashboard:**
 - ✅ Multi-module Dashboard with KPIs
@@ -444,6 +455,115 @@ fresh-breeze-basket/
 - ⚠️ Module defined in config
 - ⚠️ Basic structure in place
 - ⚠️ Full implementation pending
+
+### Recent Changes (2026-03-28) — Quotation Financial Standardization & PDF Generation
+
+#### Objective
+Standardize the Quotation module so its financial logic, UI, and document output exactly matches the Sales Order module. Remove all CD (Cash Discount) from quotation flows (CD is CN-only policy).
+
+#### Database Migration (`20260328_001_quotation_financials.sql`)
+- Added four new columns to `public.quotations`:
+  - `taxable_value NUMERIC(12,2)` — value after all discounts, before tax
+  - `extra_charges JSONB` — array of `{name, amount, tax_percent}` objects
+  - `total_extra_charges NUMERIC(12,2)` — sum of all extra charge totals (incl. tax)
+  - `round_off_amount NUMERIC(10,4)` — rounding delta applied to arrive at grand total
+
+#### Backend: Shared Calculation Engine (`backend/src/controllers/quotationController.ts`)
+- Now imports and calls `calculateOrderTotals()` from `backend/src/lib/orderCalculations.ts` — **the same engine used by Sales Orders** (single source of truth for financial math).
+- **Calculation sequence enforced:**
+  1. Sum line subtotals (qty × price)
+  2. Apply per-item line discounts
+  3. Distribute extra discount proportionally across lines
+  4. Compute per-line tax on `netTaxable` (after all discounts)
+  5. Apply extra charges (each with own tax %)
+  6. Apply round-off
+  7. Grand total
+- CD is explicitly **excluded** — passes `0` and `'credit_note'` (dummy mode) to the engine.
+- All new columns (`extra_charges`, `total_extra_charges`, `round_off_amount`, `taxable_value`) are persisted on insert.
+
+#### Backend: Invoice/Quotation PDF (`backend/src/controllers/invoices.ts`)
+- `generateInvoiceHTML()` now accepts an optional `documentTitle` parameter (defaults to `'TAX INVOICE'`).
+- Added new exported function `getQuotationDocument`:  
+  - Route: `GET /api/invoices/quotations/:quotationId?download=true`
+  - Fetches quotation + items from DB, renders an HTML document with **"QUOTATION"** header.
+  - Conditional column layout: shows extra Extra Discount columns only when `extra_discount_amount > 0`.
+  - Renders extra charges as line items with tax-inclusive totals labeled `(incl. X% tax)`.
+  - Shows tax summary (CGST/SGST), round-off, and grand total.
+  - `?download=true` triggers `Content-Disposition: attachment` for browser download.
+- Route registered in `backend/src/routes/invoices.ts`.
+
+#### Frontend: Create Quotation (`frontend/src/pages/sales/CreateQuotation.tsx`)
+- Imports `calculateOrderTotals` and `ExtraCharge` from `frontend/src/lib/orderCalculations.ts`.
+- Added `extraCharges: ExtraCharge[]` state.
+- **Extra Charges widget**: users can add named charges with amount + tax %, sees tax-inclusive total per line.
+- **Totals table** now shows: Subtotal → Item Discounts → Extra Discount (% or fixed) → Total Tax → Extra Charges → Round-off → Grand Total — all driven by `calculateOrderTotals()` live preview.
+- Per-item line total cell reads from `orderTotals.items` for consistency with the engine.
+- **No CD fields** — intentionally excluded.
+
+#### Frontend: Quotations List + View (`frontend/src/pages/sales/Quotations.tsx`)
+- **Print** and **Download** icon buttons added per table row (alongside View).
+- Both buttons also available in the View modal footer.
+- Both use authenticated `apiClient` fetch → Blob URL approach (avoids opening unauthenticated bare URLs).
+  - Print: fetches HTML blob → `createObjectURL` → `window.open` → `win.print()`
+  - Download: fetches with `?download=true` → blob → `<a download>` trigger → `revokeObjectURL`
+- **View modal scrollable**: `max-h-[90vh] flex flex-col` on `DialogContent`; content div has `overflow-y-auto flex-1` so header + footer stay pinned.
+- **Extra charges rendered in view modal**: Each charge shown in blue with `(incl. X% tax)` label and tax-inclusive total. Total Extra Charges row and Round-off row added before Grand Total.
+
+#### Frontend: API Type (`frontend/src/api/quotations.ts`)
+- Added `extra_charges`, `total_extra_charges`, `round_off_amount`, `taxable_value` to `Quotation` interface.
+- Added `extra_charges` to `CreateQuotationInput` interface.
+
+#### Policy Enforced
+- **CD (Cash Discount) is strictly excluded from Quotations.** Cash Discount is only applied via Credit Notes.
+- Quotation financial math is now identical to Sales Order math — single shared library.
+
+---
+
+### Recent Changes (2026-03-28) — POS Module Comprehensive Upgrade
+
+#### Frontend: Advanced POS Terminal SPA (`frontend/src/pages/pos/CreatePOSOrder.tsx`)
+- **Multi-View Architecture**: Refactored the entire POS into a Single Page Application (SPA). Used an `activeView` state machine to toggle between:
+  - `sale`: The primary checkout terminal with product catalog and cart.
+  - `history`: Order history with receipt search and status tracking.
+  - `customers`: Customer directory with quick-view stats.
+  - `reports`: Daily POS analytics and sales metrics.
+  - `settings`: Terminal configuration (printer IP, theme).
+- **New Modular Sidebar**: Persistent navigation sidebar with User Profile section and module switching.
+- **Refined Cart Panel**: Relocated receipt number and customer selection for a cleaner layout.
+- **Financial Logic Standardization**: Fixed core calculation flow to `Subtotal - Discount + Tax`. Added tax display in product cards.
+- **Payment & Fulfillment**: 
+  - Complete implementation of Cash (tendered/change), UPI (ref code), and **Split Payments**.
+  - Support for Dine-In (table selection), Take Away, and Delivery (address capture).
+  - Interactive modal for selecting product add-ons/modifiers.
+- **UI Polish**: Updated category tabs to match primary button aesthetics (sharp corners), added shadow depth to active elements.
+
+#### Backend: POS Processing Engine (`backend/src/controllers/pos.ts`)
+- **Unified Creation Logic**: `createPOSOrder` now serves as the primary gateway for POS transactions.
+- **Financial Persistence**:
+  - Handles **Split Payments** by inserting multiple rows into the `payments` table.
+  - Persists `cash_tendered` and `change_given` for cash accounting.
+  - Links unique `receipt_number` and handles `extra_discount_percentage`.
+- **Relational Integrity**: 
+  - Automatically maps fulfillment types to core system categories (`cash_counter`, `pickup`, `delivery`).
+  - Persists item-level modifiers in `order_item_modifiers` for kitchen/production visibility.
+- **Inventory Symmetery**: Leverages `OrderService` for atomic stock reservation across multiple outlets/warehouses.
+
+---
+
+### Recent Changes (2026-03-28) — Repack Company Context & Quotation UX Fixes
+
+#### Robust Company ID Fallback (Repack Service)
+- **Objective**: Resolve "Could not determine company context" errors in the Packaging Recipes and Repack Orders modules when standard tenant resolution headers were missing.
+- **Frontend / API Fix (`frontend/src/api/repackService.ts`)**: 
+  - Enhanced the company context resolution locally. If the company ID is not available from the current user session context (e.g., JWT metadata), it proactively fetches the user's `profile` from the database to extract the correct `company_id`.
+  - Ensures reliable API calls for RLS-protected queries in the Repack module without failing silently or producing contextual errors.
+
+#### Quotation List Auto-Refresh Fix
+- **Objective**: Ensure the newly created quotations appear immediately in the list view.
+- **Frontend Fix (`frontend/src/pages/sales/CreateQuotation.tsx`)**:
+  - Relaxed the TanStack Query invalidation parameters (`queryClient.invalidateQueries`) after successful quotation creation to guarantee the `Quotations` list queries refresh automatically without a manual page reload.
+
+---
 
 ### Recent Changes (2026-03-27) — Manual Credit Notes Implementation
 

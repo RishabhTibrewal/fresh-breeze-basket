@@ -162,7 +162,7 @@ export default function CreateOrder() {
   const [cdEnabled, setCdEnabled] = useState(false);
   const [cdPercentage, setCdPercentage] = useState<number>(0);
   const [cdDays, setCdDays] = useState<number>(0);
-  const [cdSettlementMode, setCdSettlementMode] = useState<CDSettlementMode>('direct');
+  const [cdSettlementMode, setCdSettlementMode] = useState<CDSettlementMode>('credit_note');
   const [extraCharges, setExtraCharges] = useState<ExtraCharge[]>([]);
   
   // State to store variants for each product
@@ -317,7 +317,7 @@ export default function CreateOrder() {
     const finalExtraDiscAmt = extraDiscountAmt !== undefined
       ? extraDiscountAmt
       : extraDiscountPct !== undefined
-        ? (calcItems.reduce((s, i) => s + (i.unit_price * i.quantity - i.discount_amount + ((i.unit_price * i.quantity - i.discount_amount) * i.tax_percentage / 100)), 0) * extraDiscountPct / 100)
+        ? (calcItems.reduce((s, i) => s + (i.unit_price * i.quantity - i.discount_amount), 0) * extraDiscountPct / 100)
         : 0;
 
     const totals = calculateOrderTotals(
@@ -366,7 +366,8 @@ export default function CreateOrder() {
       if (selectedCustomer.cd_enabled !== undefined) setCdEnabled(Boolean(selectedCustomer.cd_enabled));
       if (selectedCustomer.cd_percentage !== undefined) setCdPercentage(Number(selectedCustomer.cd_percentage));
       if (selectedCustomer.cd_days !== undefined) setCdDays(Number(selectedCustomer.cd_days));
-      if (selectedCustomer.cd_settlement_mode) setCdSettlementMode(selectedCustomer.cd_settlement_mode as CDSettlementMode);
+      // Force cdSettlementMode to credit_note since direct is no longer supported
+      setCdSettlementMode('credit_note');
     }
   }, [selectedCustomer]);
   
@@ -828,7 +829,7 @@ export default function CreateOrder() {
         cd_enabled: cdEnabled,
         cd_percentage: cdEnabled ? cdPercentage : 0,
         cd_days: cdEnabled ? cdDays : 0,
-        cd_settlement_mode: cdEnabled ? cdSettlementMode : 'direct',
+        cd_settlement_mode: 'credit_note',
         extra_charges: extraCharges,
         ...(quotationId ? { quotation_id: quotationId } : {})
       };
@@ -1215,9 +1216,9 @@ export default function CreateOrder() {
                                 </TableHeader>
                                 <TableBody>
                                   {items.map((item) => {
-                                    const taxAmount = item.product_id ? (item.quantity * item.unit_price * (item.tax_percentage || 0)) / 100 : 0;
-                                    // Use line_total from item to ensure consistency
-                                    const totalWithTax = item.line_total || 0;
+                                    // Use line_total from orderTotals (which apportions extra discount) or fallback to item
+                                    const calcItem = orderTotals?.items?.find((i: any) => i.id === item.id);
+                                    const totalWithTax = calcItem ? calcItem.line_total : (item.line_total || 0);
                                     return (
                                       <TableRow key={item.id}>
                                         <TableCell className="text-sm">
@@ -1463,12 +1464,12 @@ export default function CreateOrder() {
                             <div className="space-y-2 min-w-[300px]">
                               <div className="flex justify-between text-sm text-muted-foreground">
                                 <span>Items Total (Incl. Tax & Disc)</span>
-                                <span>₹{items.reduce((sum, item) => sum + item.line_total, 0).toFixed(2)}</span>
+                                <span>₹{(orderTotals?.items?.reduce((sum: number, item: any) => sum + item.line_total, 0) || items.reduce((sum, item) => sum + item.line_total, 0)).toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between text-sm py-1 border-b">
                                 <span>Extra Discount (%) - {extraDiscountPct || 0}%</span>
                                 <span className="text-red-500">
-                                  -₹{((items.reduce((sum, item) => sum + item.line_total, 0) * (extraDiscountPct || 0)) / 100).toFixed(2)}
+                                  -₹{(orderTotals?.extra_discount_amount || 0).toFixed(2)}
                                 </span>
                               </div>
                               <div className="flex justify-between text-sm py-1 border-b">
@@ -1540,17 +1541,6 @@ export default function CreateOrder() {
                                         />
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-xs">Mode:</span>
-                                      <select
-                                        className="flex-1 h-7 rounded-md border border-input bg-background px-2 text-xs"
-                                        value={cdSettlementMode}
-                                        onChange={e => setCdSettlementMode(e.target.value as CDSettlementMode)}
-                                      >
-                                        <option value="direct">Deduct on Invoice</option>
-                                        <option value="credit_note">Credit Note Post-Payment</option>
-                                      </select>
-                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -1564,7 +1554,7 @@ export default function CreateOrder() {
                                     variant="outline"
                                     size="sm"
                                     className="h-7 text-xs px-2"
-                                    onClick={() => setExtraCharges(prev => [...prev, { name: '', amount: 0 }])}
+                                    onClick={() => setExtraCharges(prev => [...prev, { name: '', amount: 0, tax_percent: 0 }])}
                                   >
                                     + Add
                                   </Button>
@@ -1579,15 +1569,29 @@ export default function CreateOrder() {
                                       )}
                                       className="h-7 text-xs flex-1"
                                     />
-                                    <Input
-                                      type="number" min="0" step="0.01"
-                                      placeholder="₹0"
-                                      value={ec.amount || ''}
-                                      onChange={e => setExtraCharges(prev =>
-                                        prev.map((c, i) => i === idx ? { ...c, amount: parseFloat(e.target.value) || 0 } : c)
-                                      )}
-                                      className="h-7 text-xs w-24"
-                                    />
+                                    <div className="flex bg-muted/30 rounded border pl-2 items-center text-xs">₹
+                                      <Input
+                                        type="number" min="0" step="0.01"
+                                        placeholder="Amt"
+                                        value={ec.amount || ''}
+                                        onChange={e => setExtraCharges(prev =>
+                                          prev.map((c, i) => i === idx ? { ...c, amount: parseFloat(e.target.value) || 0 } : c)
+                                        )}
+                                        className="h-7 text-xs w-20 border-0 bg-transparent focus-visible:ring-0 shadow-none px-1"
+                                      />
+                                    </div>
+                                    <div className="flex bg-muted/30 rounded border items-center text-xs pr-2">
+                                      <Input
+                                        type="number" min="0" step="0.1"
+                                        placeholder="Tax"
+                                        value={ec.tax_percent || ''}
+                                        onChange={e => setExtraCharges(prev =>
+                                          prev.map((c, i) => i === idx ? { ...c, tax_percent: parseFloat(e.target.value) || 0 } : c)
+                                        )}
+                                        className="h-7 text-xs w-16 text-right border-0 bg-transparent focus-visible:ring-0 shadow-none px-1"
+                                      />
+                                      %
+                                    </div>
                                     <Button
                                       type="button" variant="ghost" size="sm"
                                       className="h-7 w-7 p-0 text-red-500"
@@ -1600,7 +1604,7 @@ export default function CreateOrder() {
                                 {extraCharges.length > 0 && (
                                   <div className="flex justify-between text-xs text-muted-foreground pt-1 border-t">
                                     <span>Total Extra Charges</span>
-                                    <span>+₹{extraCharges.reduce((s, c) => s + (c.amount || 0), 0).toFixed(2)}</span>
+                                    <span>+₹{extraCharges.reduce((s, c) => s + (c.amount + (c.amount * (c.tax_percent || 0) / 100)), 0).toFixed(2)}</span>
                                   </div>
                                 )}
                               </div>
@@ -1618,28 +1622,24 @@ export default function CreateOrder() {
                                       <span className="text-red-500">-₹{orderTotals.total_discount.toFixed(2)}</span>
                                     </div>
                                   )}
-                                  <div className="flex justify-between text-muted-foreground">
-                                    <span>Taxable Amount</span>
-                                    <span>₹{orderTotals.taxable_value.toFixed(2)}</span>
-                                  </div>
-                                  <div className="flex justify-between text-muted-foreground">
-                                    <span>Total Item Tax</span>
-                                    <span>₹{orderTotals.total_tax.toFixed(2)}</span>
-                                  </div>
-                                  <div className="flex justify-between font-medium border-t pt-1 bg-muted/30 px-1 rounded">
-                                    <span>Total</span>
-                                    <span>₹{(orderTotals.taxable_value + orderTotals.total_tax).toFixed(2)}</span>
-                                  </div>
                                   {orderTotals.extra_discount_amount > 0 && (
                                     <div className="flex justify-between text-muted-foreground">
                                       <span>Extra Discount</span>
                                       <span className="text-red-500">-₹{orderTotals.extra_discount_amount.toFixed(2)}</span>
                                     </div>
                                   )}
+                                  <div className="flex justify-between text-muted-foreground">
+                                    <span>Taxable Amount (After Ext Disc)</span>
+                                    <span>₹{orderTotals.taxable_value.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between text-muted-foreground">
+                                    <span>Total Item Tax</span>
+                                    <span>₹{orderTotals.total_tax.toFixed(2)}</span>
+                                  </div>
                                   {cdEnabled && orderTotals.cd_amount > 0 && (
                                     <div className="flex justify-between text-blue-600">
-                                      <span>Cash Discount ({orderTotals.cd_percentage}%{cdSettlementMode === 'credit_note' ? ' — CN' : ''})</span>
-                                      <span>-₹{orderTotals.cd_amount.toFixed(2)}</span>
+                                      <span>Cash Discount Eligibility ({orderTotals.cd_percentage}% — via CN)</span>
+                                      <span>₹{orderTotals.cd_amount.toFixed(2)}</span>
                                     </div>
                                   )}
                                   {orderTotals.total_extra_charges > 0 && (
@@ -1651,9 +1651,13 @@ export default function CreateOrder() {
                                   {orderTotals.round_off_amount !== 0 && (
                                     <div className="flex justify-between text-muted-foreground">
                                       <span>Round Off</span>
-                                      <span>{orderTotals.round_off_amount >= 0 ? '+' : ''}₹{orderTotals.round_off_amount.toFixed(2)}</span>
+                                      <span>{orderTotals.round_off_amount > 0 ? '+' : ''}₹{orderTotals.round_off_amount.toFixed(2)}</span>
                                     </div>
                                   )}
+                                  <div className="flex justify-between font-medium border-t pt-1 bg-muted/30 px-1 rounded">
+                                    <span>Total</span>
+                                    <span>₹{orderTotals.total_amount.toFixed(2)}</span>
+                                  </div>
                                 </div>
                               )}
 

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { 
-  FileText, Plus, Search, Filter, ArrowRight, Eye, CheckCircle, XCircle 
+  FileText, Plus, Search, Filter, ArrowRight, Eye, CheckCircle, XCircle, Printer, Download
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,8 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { quotationsService, Quotation } from '@/api/quotations';
 import { useNavigate } from 'react-router-dom';
+import apiClient from '@/lib/apiClient';
+
 
 export default function Quotations() {
   const { toast } = useToast();
@@ -114,6 +116,33 @@ export default function Quotations() {
     }
   };
 
+  const handlePrintQuotation = async (id: string) => {
+    try {
+      const response = await apiClient.get(`/invoices/quotations/${id}`, { responseType: 'blob' });
+      const blob = new Blob([response.data], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank');
+      if (win) win.onload = () => { win.print(); };
+    } catch (err: any) {
+      toast({ title: 'Error', description: 'Could not load quotation document.', variant: 'destructive' });
+    }
+  };
+
+  const handleDownloadQuotation = async (id: string, quotationNumber?: string) => {
+    try {
+      const response = await apiClient.get(`/invoices/quotations/${id}?download=true`, { responseType: 'blob' });
+      const blob = new Blob([response.data], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Quotation_${quotationNumber || id.substring(0, 8).toUpperCase()}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast({ title: 'Error', description: 'Could not download quotation document.', variant: 'destructive' });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -184,13 +213,32 @@ export default function Quotations() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => handleViewQuotation(quotation.id)}
-                        >
-                          <Eye className="h-4 w-4 mr-1" /> View
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleViewQuotation(quotation.id)}
+                            title="View"
+                          >
+                            <Eye className="h-4 w-4 mr-1" /> View
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handlePrintQuotation(quotation.id)}
+                            title="Print Quotation"
+                          >
+                            <Printer className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDownloadQuotation(quotation.id, quotation.quotation_number)}
+                            title="Download Quotation"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
@@ -203,7 +251,7 @@ export default function Quotations() {
 
       {/* View/Action Modal */}
       <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Quotation {selectedQuotation?.quotation_number}</DialogTitle>
             <DialogDescription>
@@ -212,7 +260,7 @@ export default function Quotations() {
           </DialogHeader>
           
           {selectedQuotation && (
-            <div className="space-y-6">
+            <div className="space-y-6 overflow-y-auto flex-1 pr-1">
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-muted-foreground">Customer/Lead</p>
@@ -298,6 +346,36 @@ export default function Quotations() {
                           <TableCell className="text-right text-xs text-muted-foreground italic">-₹ {(selectedQuotation.extra_discount_amount || 0).toFixed(2)}</TableCell>
                         </TableRow>
                       )}
+                      {/* Extra Charges */}
+                      {(selectedQuotation.extra_charges || []).length > 0 && (
+                        <>
+                          {(selectedQuotation.extra_charges || []).map((charge, idx) => {
+                            const taxPct = charge.tax_percent || 0;
+                            const total = charge.total_amount ?? (charge.amount + (charge.amount * taxPct / 100));
+                            return (
+                              <TableRow key={`ec-${idx}`}>
+                                <TableCell colSpan={5} className="text-right text-blue-600 text-sm">
+                                  {charge.name}{taxPct > 0 ? ` (incl. ${taxPct}% tax)` : ''}
+                                </TableCell>
+                                <TableCell className="text-right text-blue-600 font-medium">₹ {total.toFixed(2)}</TableCell>
+                              </TableRow>
+                            );
+                          })}
+                          <TableRow>
+                            <TableCell colSpan={5} className="text-right text-muted-foreground text-xs">Total Extra Charges</TableCell>
+                            <TableCell className="text-right text-muted-foreground font-medium">₹ {(selectedQuotation.total_extra_charges || 0).toFixed(2)}</TableCell>
+                          </TableRow>
+                        </>
+                      )}
+                      {/* Round Off */}
+                      {(selectedQuotation.round_off_amount !== 0 && selectedQuotation.round_off_amount !== undefined) && (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-right text-muted-foreground text-xs">Round Off</TableCell>
+                          <TableCell className="text-right text-muted-foreground font-medium">
+                            {selectedQuotation.round_off_amount > 0 ? '+' : ''}{selectedQuotation.round_off_amount.toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      )}
                       <TableRow className="font-bold text-lg">
                         <TableCell colSpan={5} className="text-right">Grand Total</TableCell>
                         <TableCell className="text-right text-green-600">₹ {selectedQuotation.total_amount?.toFixed(2)}</TableCell>
@@ -317,6 +395,22 @@ export default function Quotations() {
               >
                 Close
               </Button>
+              {selectedQuotation && (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => handlePrintQuotation(selectedQuotation.id)}
+                  >
+                    <Printer className="mr-2 h-4 w-4" /> Print
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleDownloadQuotation(selectedQuotation.id)}
+                  >
+                    <Download className="mr-2 h-4 w-4" /> Download
+                  </Button>
+                </>
+              )}
             </div>
             <div className="flex gap-2">
               {selectedQuotation?.status === 'draft' || selectedQuotation?.status === 'sent' ? (

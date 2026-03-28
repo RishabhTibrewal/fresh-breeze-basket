@@ -170,7 +170,8 @@ export class OrderService {
       }
 
       // Reserve stock for sales orders (retail baseline)
-      if (orderType === 'sales' && industryContext === 'retail') {
+      // POS orders skip reservation and directly subtract stock later
+      if (orderType === 'sales' && industryContext === 'retail' && orderSource !== 'pos') {
         for (const item of validatedItems) {
           const itemOutletId = item.outletId || finalOutletId;
           if (itemOutletId && item.variantId) {
@@ -179,7 +180,8 @@ export class OrderService {
                 item.productId,
                 itemOutletId,
                 item.quantity,
-                item.variantId // Now required
+                item.variantId,
+                false // eCommerce follows strict stock checks
               );
             } catch (error: any) {
               throw new Error(`Stock reservation failed: ${error.message}`);
@@ -209,7 +211,7 @@ export class OrderService {
           payment_intent_id: paymentIntentId || null,
           status: 'pending',
           notes: notes || null,
-          inventory_updated: false,
+          inventory_updated: orderSource === 'pos',
         })
         .select('id')
         .single();
@@ -251,7 +253,7 @@ export class OrderService {
       if (itemsError) {
         // Rollback order and stock reservations
         await supabaseAdmin.from('orders').delete().eq('id', order.id);
-        if (orderType === 'sales' && industryContext === 'retail') {
+        if (orderType === 'sales' && industryContext === 'retail' && orderSource !== 'pos') {
           for (const item of validatedItems) {
             const itemOutletId = item.outletId || finalOutletId;
             if (itemOutletId && item.variantId) {
@@ -259,12 +261,23 @@ export class OrderService {
                 item.productId,
                 itemOutletId,
                 item.quantity,
-                item.variantId // Now required
+                item.variantId
               );
             }
           }
         }
         throw new Error(`Failed to create order items: ${itemsError.message}`);
+      }
+
+      // POS orders: record stock movement immediately (direct subtraction)
+      if (orderSource === 'pos' && orderType === 'sales' && industryContext === 'retail') {
+        const movementItems = validatedItems.map(item => ({
+          productId: item.productId,
+          variantId: item.variantId as string,
+          outletId: item.outletId || (finalOutletId as string),
+          quantity: item.quantity,
+        }));
+        await this.inventoryService.handleOrderStockMovement(order.id, 'sales', movementItems);
       }
 
       // Process payment if payment_intent_id is provided

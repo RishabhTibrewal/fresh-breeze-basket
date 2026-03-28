@@ -15,12 +15,16 @@ export interface OrderItemInput {
 export interface ExtraCharge {
   name: string;
   amount: number;
+  tax_percent?: number;
+  total_amount?: number;
 }
 
 export type CDSettlementMode = 'direct' | 'credit_note';
 
 export interface OrderItemResult extends OrderItemInput {
   item_taxable_base: number;
+  extra_discount_share: number;
+  net_taxable_base: number;
   item_cd_share: number;
   tax_amount: number;
   line_total: number;
@@ -29,13 +33,13 @@ export interface OrderItemResult extends OrderItemInput {
 export interface OrderTotals {
   subtotal: number;
   total_discount: number;
-  taxable_base: number;           // subtotal − item discounts (what tax is levied on)
+  taxable_base: number;
   extra_discount_amount: number;
   after_extra_disc: number;
   cd_percentage: number;
   cd_amount: number;
   cd_settlement_mode: CDSettlementMode;
-  taxable_value: number;          // after_extra_disc − cd_amount (accounting field)
+  taxable_value: number;
   total_tax: number;
   extra_charges: ExtraCharge[];
   total_extra_charges: number;
@@ -49,13 +53,9 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
  * Calculate all order financial totals including CD, extra charges, and round-off.
- *
- * MODE: direct
- *   CD is deducted BEFORE tax. taxable_value = after_extra_disc − cd_amount
- *
- * MODE: credit_note
- *   CD is NOT deducted from the invoice. taxable_value = after_extra_disc
- *   cd_amount is stored on the order but only used when raising the CN later.
+ * 
+ * Extra Discount is distributed proportionally to items, lowering the taxable base (Net Taxable)
+ * before GST is calculated. 
  */
 export function calculateOrderTotals(
   items: OrderItemInput[],
@@ -74,67 +74,83 @@ export function calculateOrderTotals(
   // ③ Extra discount
   const afterExtraDisc = r2(afterItemDisc - extraDiscountAmount);
 
-  // ④ Total Tax calculated on (Price * Qty - Item Discount)
-  const itemResults_pre = items.map(i => {
-    const taxBase = r2(r2(i.unit_price * i.quantity) - i.discount_amount);
-    const taxAmt = r2(taxBase * i.tax_percentage / 100);
-    return { ...i, tax_amount: taxAmt, taxBase };
+  // ④ Distribute Extra Discount and calculate Item Tax based on Net Taxable (B)
+  const itemResults = items.map(i => {
+    // Taxable Value (A)
+    const base = r2(r2(i.unit_price * i.quantity) - i.discount_amount);
+    
+    // Proportional Extra Discount Share
+    const edShare = afterItemDisc > 0
+      ? r2(base / afterItemDisc * extraDiscountAmount)
+      : 0;
+    
+    // Net Taxable (B)
+    const netTaxable = r2(base - edShare);
+    
+    // Tax Amount on Net Taxable (B)
+    const taxAmt = r2(netTaxable * i.tax_percentage / 100);
+
+    return { 
+      // Need ...i after casting or defining
+      id: i.id,
+      unit_price: i.unit_price,
+      quantity: i.quantity,
+      discount_amount: i.discount_amount,
+      tax_percentage: i.tax_percentage,
+      item_taxable_base: base,
+      extra_discount_share: edShare,
+      net_taxable_base: netTaxable,
+      tax_amount: taxAmt, 
+      line_total: r2(netTaxable + taxAmt),
+      item_cd_share: 0 // Will assign later
+    } as OrderItemResult;
   });
-  const totalTax = r2(itemResults_pre.reduce((s, i) => s + i.tax_amount, 0));
+
+  const totalTax = r2(itemResults.reduce((s, i) => s + i.tax_amount, 0));
 
   // ⑤ CD Base = After Extra Discount + Total Tax
   const cdBase = r2(afterExtraDisc + totalTax);
   const cdAmount = r2(cdBase * cdPercentage / 100);
 
-  // ⑥ Taxable value = afterItemDisc (what GST is levied on per invoice)
-  // The post-extra-discount, post-CD value is derivable from stored fields:
-  //   accounting_value = afterExtraDisc − cdAmount (if direct)
-  //                    = afterExtraDisc (if credit_note)
-  const taxableValue = afterItemDisc; // GST taxable value on the invoice
-
-  // ⑦ Final Per-item results
-  const itemResults: OrderItemResult[] = itemResults_pre.map(i => {
-    const base = i.taxBase;
-    
-    const edShare = afterItemDisc > 0
-      ? r2(base / afterItemDisc * extraDiscountAmount)
-      : 0;
-    const afterED = r2(base - edShare);
-
-    // CD share for internal tracking (allocated proportionally)
-    const cdShare = (cdSettlementMode === 'direct' && cdBase > 0)
-      ? r2((base + i.tax_amount) / cdBase * cdAmount)
-      : 0;
-
-    return {
-      ...i,
-      item_taxable_base: base,
-      item_cd_share: cdShare,
-      line_total: r2(base + i.tax_amount),
-    };
+  // Calculate CD share per item for internal tracking (Now always 0 since CD is via CN only)
+  itemResults.forEach(i => {
+     i.item_cd_share = 0;
   });
 
-  // ⑦ Totals
-  const totalExtraCharges = r2(extraCharges.reduce((s, c) => s + c.amount, 0));
+  // ⑥ Taxable value = afterExtraDisc (GST taxable value on the invoice)
+  const taxableValue = afterExtraDisc; 
 
-  // ⑧ Round off — base = taxable_value (GST base) + tax − extra_disc − cd − extra_charges
-  // Grand total chain: afterItemDisc − extraDisc − CD + tax + extraCharges
-  const netBeforeRound = r2(afterExtraDisc - (cdSettlementMode === 'direct' ? cdAmount : 0) + totalTax + totalExtraCharges);
+  // ⑦ Extra Charges
+  // Compute total_amount for extra charges if tax_percent is provided
+  const processedExtraCharges = extraCharges.map(ec => {
+    const taxPct = ec.tax_percent || 0;
+    const taxAmt = r2(ec.amount * taxPct / 100);
+    return {
+      ...ec,
+      total_amount: r2(ec.amount + taxAmt)
+    };
+  });
+  
+  const totalExtraCharges = r2(processedExtraCharges.reduce((s, c) => s + (c.total_amount || c.amount), 0));
+
+  // ⑧ Round off
+  // Grand total chain: afterExtraDisc + totalTax + totalExtraCharges (CD is always via CN now)
+  const netBeforeRound = r2(afterExtraDisc + totalTax + totalExtraCharges);
   const roundOff = r2(Math.round(netBeforeRound) - netBeforeRound);
   const totalAmount = Math.round(netBeforeRound);
 
   return {
     subtotal,
     total_discount: r2(totalDiscount),
-    taxable_base: afterItemDisc,    // the base on which item tax is levied
+    taxable_base: afterExtraDisc,    
     extra_discount_amount: r2(extraDiscountAmount),
     after_extra_disc: afterExtraDisc,
     cd_percentage: cdPercentage,
     cd_amount: cdAmount,
     cd_settlement_mode: cdSettlementMode,
-    taxable_value: r2(taxableValue), // post-extra-discount, post-CD (accounting)
+    taxable_value: r2(taxableValue), 
     total_tax: totalTax,
-    extra_charges: extraCharges,
+    extra_charges: processedExtraCharges,
     total_extra_charges: totalExtraCharges,
     round_off_amount: roundOff,
     total_amount: totalAmount,

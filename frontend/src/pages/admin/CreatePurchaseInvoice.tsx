@@ -254,9 +254,9 @@ export default function CreatePurchaseInvoice() {
   };
 
   const calculateGrandTotal = () => {
-    const itemsTotal = subtotal + taxAmount - discountAmount;
-    const extraPctAmt = Math.round(((itemsTotal * (extraDiscountPct || 0)) / 100) * 100) / 100;
-    return Math.max(0, itemsTotal - extraPctAmt - (extraDiscount || 0));
+    const itemsPreTax = subtotal - discountAmount;
+    const extraPctAmt = Math.round(((itemsPreTax * (extraDiscountPct || 0)) / 100) * 100) / 100;
+    return Math.max(0, itemsPreTax - extraPctAmt - (extraDiscount || 0) + taxAmount);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -274,9 +274,9 @@ export default function CreatePurchaseInvoice() {
       due_date: dueDate || undefined,
       subtotal,
       total_tax: taxAmount,
-      total_discount: Math.round((discountAmount + (extraDiscountPct > 0 ? (subtotal + taxAmount - discountAmount) * extraDiscountPct / 100 : extraDiscount)) * 100) / 100,
+      total_discount: Math.round((discountAmount + (extraDiscountPct > 0 ? (subtotal - discountAmount) * extraDiscountPct / 100 : extraDiscount)) * 100) / 100,
       extra_discount_percentage: extraDiscountPct,
-      extra_discount_amount: extraDiscountPct > 0 ? Math.round(((subtotal + taxAmount - discountAmount) * extraDiscountPct / 100) * 100) / 100 : extraDiscount,
+      extra_discount_amount: extraDiscountPct > 0 ? Math.round(((subtotal - discountAmount) * extraDiscountPct / 100) * 100) / 100 : extraDiscount,
       total_amount: Math.round(calculateGrandTotal() * 100) / 100,
       notes: notes || undefined,
     };
@@ -654,7 +654,7 @@ export default function CreatePurchaseInvoice() {
                     </span>
                     <span>
                       -₹{extraDiscountPct > 0 
-                        ? (( (subtotal + taxAmount - discountAmount) * extraDiscountPct) / 100).toFixed(2)
+                        ? (( (subtotal - discountAmount) * extraDiscountPct) / 100).toFixed(2)
                         : extraDiscount.toFixed(2)}
                     </span>
                   </div>

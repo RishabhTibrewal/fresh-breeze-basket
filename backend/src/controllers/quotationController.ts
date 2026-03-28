@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
+import { calculateOrderTotals, ExtraCharge } from '../lib/orderCalculations';
 
 // Get all quotations for the company
 export const getQuotations = async (req: Request, res: Response) => {
@@ -118,12 +119,10 @@ export const createQuotation = async (req: Request, res: Response) => {
       throw new AppError('At least one item is required for a quotation', 400);
     }
 
-    // ─── Per-line calculations ───────────────────────────────────────────────
-    let subtotal = 0;
-    let totalTax = 0;
-    let totalDiscount = 0;
+    const extraCharges: ExtraCharge[] = Array.isArray(req.body.extra_charges) ? req.body.extra_charges : [];
 
-    const itemInserts = items.map((item: any) => {
+    // ─── Per-line calculations for input to generic math ───────────────────────────────────────────────
+    const calcInputItems = items.map((item: any, idx: number) => {
       const qty          = Number(item.quantity)         || 0;
       const unitPrice    = Number(item.unit_price)       || 0;
       const taxPct       = Number(item.tax_percentage)   || 0;
@@ -131,13 +130,37 @@ export const createQuotation = async (req: Request, res: Response) => {
 
       const lineSubtotal  = qty * unitPrice;
       const discAmt       = parseFloat(((lineSubtotal * discPct) / 100).toFixed(2));
-      const taxBase       = lineSubtotal - discAmt;
-      const taxAmt        = parseFloat(((taxBase * taxPct)  / 100).toFixed(2));
-      const lineTotal     = taxBase + taxAmt;
 
-      subtotal      = Math.round((subtotal + lineSubtotal) * 100) / 100;
-      totalTax      = Math.round((totalTax + taxAmt) * 100) / 100;
-      totalDiscount = Math.round((totalDiscount + discAmt) * 100) / 100;
+      return {
+        id: idx.toString(),
+        unit_price: unitPrice,
+        quantity: qty,
+        tax_percentage: taxPct,
+        discount_amount: discAmt,
+      };
+    });
+
+    const sumLineTotals = calcInputItems.reduce((acc: number, i: any) => acc + (i.unit_price * i.quantity), 0);
+    const extraDiscPct = Number(extra_discount_percentage) || 0;
+    const finalExtraDiscAmt = (extraDiscPct > 0)
+      ? parseFloat(((sumLineTotals * extraDiscPct) / 100).toFixed(2))
+      : Number(extra_discount_amount || 0);
+
+    const totals = calculateOrderTotals(
+      calcInputItems,
+      finalExtraDiscAmt,
+      0, // CD disabled for quotes
+      'credit_note', // CD not applicable
+      extraCharges
+    );
+
+    const itemInserts = items.map((item: any, idx: number) => {
+      const qty          = Number(item.quantity)         || 0;
+      const unitPrice    = Number(item.unit_price)       || 0;
+      const taxPct       = Number(item.tax_percentage)   || 0;
+      const discPct      = Number(item.discount_percentage) || 0;
+      
+      const calcItem = totals.items.find(i => i.id === idx.toString());
 
       return {
         company_id:           req.companyId,
@@ -147,22 +170,12 @@ export const createQuotation = async (req: Request, res: Response) => {
         unit_price:           unitPrice,
         tax_percentage:       taxPct,
         discount_percentage:  discPct,
-        tax_amount:           taxAmt,
-        discount_amount:      discAmt,
-        line_total:           lineTotal,
+        tax_amount:           calcItem?.tax_amount || 0,
+        discount_amount:      parseFloat((qty * unitPrice * discPct / 100).toFixed(2)),
+        line_total:           calcItem?.line_total || 0,
         notes:                item.notes || null,
       };
     });
-
-    // ─── Header calculations ─────────────────────────────────────────────────
-    const sumLineTotals = Math.round((subtotal - totalDiscount + totalTax) * 100) / 100;
-    const extraDiscPct = Number(extra_discount_percentage) || 0;
-    const extraDiscAmt = (extraDiscPct > 0)
-      ? Math.round(((sumLineTotals * extraDiscPct) / 100) * 100) / 100
-      : Number(extra_discount_amount || 0);
-    
-    const totalAmount  = Math.round((sumLineTotals - extraDiscAmt) * 100) / 100;
-    const headerTotalDiscount = Math.round(totalDiscount * 100) / 100;
 
     // ─── Insert quotation header ─────────────────────────────────────────────
     const { data: quotation, error: qError } = await (supabaseAdmin || supabase)
@@ -176,12 +189,16 @@ export const createQuotation = async (req: Request, res: Response) => {
         notes:                    notes || null,
         terms_and_conditions:     terms_and_conditions || null,
         valid_until:              valid_until || null,
-        subtotal,
-        total_tax:                totalTax,
-        total_discount:           headerTotalDiscount,
+        subtotal:                 totals.subtotal,
+        total_tax:                totals.total_tax,
+        total_discount:           totals.total_discount,
         extra_discount_percentage: extraDiscPct,
-        extra_discount_amount:    extraDiscAmt,
-        total_amount:             totalAmount,
+        extra_discount_amount:    totals.extra_discount_amount,
+        taxable_value:            totals.taxable_value,
+        extra_charges:            extraCharges,
+        total_extra_charges:      totals.total_extra_charges,
+        round_off_amount:         totals.round_off_amount,
+        total_amount:             totals.total_amount,
         created_by:               req.user?.id
       })
       .select()

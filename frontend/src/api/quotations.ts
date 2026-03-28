@@ -32,6 +32,10 @@ export interface Quotation {
   total_discount?: number;
   extra_discount_percentage?: number;
   extra_discount_amount?: number;
+  extra_charges?: { name: string; amount: number; tax_percent?: number; total_amount?: number }[];
+  total_extra_charges?: number;
+  round_off_amount?: number;
+  taxable_value?: number;
   total_amount: number;
   notes?: string;
   terms_and_conditions?: string;
@@ -56,6 +60,7 @@ export interface CreateQuotationInput {
   terms_and_conditions?: string;
   extra_discount_amount?: number;
   extra_discount_percentage?: number;
+  extra_charges?: { name: string; amount: number; tax_percent?: number }[];
   items: QuotationItem[];
 }
 
