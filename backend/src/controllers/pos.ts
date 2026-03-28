@@ -25,6 +25,7 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
       transaction_id,
       split_payments,
       customer_id,
+      pos_session_id,
     } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -66,8 +67,9 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
       {
         items: orderItems,
         paymentMethod: payment_method,
-        paymentStatus: payment_method === 'cash' ? 'paid' : 'pending',
+        paymentStatus: 'paid', // POS orders are always paid at the counter
         notes: orderNotes,
+        extraDiscountPercentage: parseFloat(extra_discount_percentage) || 0,
       },
       {
         userId: null,
@@ -77,6 +79,7 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
         orderSource: 'pos',
         fulfillmentType: mappedFulfillment,
         customerId: customer_id || null,
+        status: req.body.status || null,
       }
     );
 
@@ -91,6 +94,10 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
     }
     if (delivery_address) {
       patchData.delivery_address = delivery_address;
+    }
+
+    if (pos_session_id) {
+      patchData.pos_session_id = pos_session_id;
     }
 
     await supabaseAdmin
@@ -169,5 +176,113 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
     next(error instanceof ApiError || error instanceof ValidationError
       ? error
       : new ApiError(500, error.message || 'Failed to create POS order'));
+  }
+};
+
+/**
+ * Get active POS session for current user
+ * GET /api/pos/sessions/active
+ */
+export const getActiveSession = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) throw new ValidationError('User ID is required');
+    if (!req.companyId) throw new ValidationError('Company context is required');
+
+    const { data: session, error } = await supabaseAdmin
+      .from('pos_sessions')
+      .select('*')
+      .eq('company_id', req.companyId)
+      .eq('cashier_id', userId)
+      .eq('status', 'open')
+      .order('opened_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw new ApiError(500, 'Failed to fetch active session');
+
+    res.json({ success: true, data: session });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Start POS session
+ * POST /api/pos/sessions
+ */
+export const startSession = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) throw new ValidationError('User ID is required');
+    if (!req.companyId) throw new ValidationError('Company context is required');
+
+    const { outlet_id, opening_cash = 0 } = req.body;
+    if (!outlet_id) throw new ValidationError('Outlet ID is required');
+
+    // Check if already open
+    const { data: existing } = await supabaseAdmin
+      .from('pos_sessions')
+      .select('*')
+      .eq('company_id', req.companyId)
+      .eq('cashier_id', userId)
+      .eq('status', 'open')
+      .maybeSingle();
+
+    if (existing) {
+      throw new ApiError(400, 'An active session already exists for this user.');
+    }
+
+    const { data: newSession, error } = await supabaseAdmin
+      .from('pos_sessions')
+      .insert({
+        company_id: req.companyId,
+        cashier_id: userId,
+        outlet_id: outlet_id,
+        status: 'open',
+        opened_at: new Date().toISOString(),
+        opening_cash: parseFloat(opening_cash),
+      })
+      .select('*')
+      .single();
+
+    if (error) throw new ApiError(500, 'Failed to start session');
+
+    res.status(201).json({ success: true, data: newSession });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Close POS session
+ * POST /api/pos/sessions/:id/close
+ */
+export const closeSession = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+    const { closing_cash = 0, closing_notes } = req.body;
+    if (!userId) throw new ValidationError('User ID is required');
+    if (!req.companyId) throw new ValidationError('Company context is required');
+
+    // Aggregate totals for the session using orders table since we linked pos_session_id
+    const { data: sessionDetails, error } = await supabaseAdmin
+      .from('pos_sessions')
+      .update({
+        status: 'closed',
+        closed_at: new Date().toISOString(),
+        closing_cash,
+      })
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .select('*')
+      .single();
+
+    if (error) throw new ApiError(500, 'Failed to close session');
+
+    res.json({ success: true, data: sessionDetails });
+  } catch (error) {
+    next(error);
   }
 };

@@ -25,6 +25,7 @@ export const getOrders = async (req: Request, res: Response) => {
       order_source,
       fulfillment_type,
       original_order_id,
+      pos_session_id,
     } = req.query as {
       status?: string;
       from_date?: string;
@@ -35,6 +36,7 @@ export const getOrders = async (req: Request, res: Response) => {
       order_source?: string;
       fulfillment_type?: string;
       original_order_id?: string;
+      pos_session_id?: string;
     };
     const userId = req.user.id;
     const userRoles = req.user?.roles || [];
@@ -73,6 +75,9 @@ export const getOrders = async (req: Request, res: Response) => {
     if (original_order_id) {
       countQuery = countQuery.eq('original_order_id', original_order_id);
     }
+    if (pos_session_id) {
+      countQuery = countQuery.eq('pos_session_id', pos_session_id);
+    }
     
     const { count: totalCount } = await countQuery;
     
@@ -80,6 +85,7 @@ export const getOrders = async (req: Request, res: Response) => {
       .from('orders')
       .select(`
         *,
+        customer:customers(*),
         order_items (
           *,
           products (*),
@@ -130,6 +136,9 @@ export const getOrders = async (req: Request, res: Response) => {
     }
     if (original_order_id) {
       query = query.eq('original_order_id', original_order_id);
+    }
+    if (pos_session_id) {
+      query = query.eq('pos_session_id', pos_session_id);
     }
     
     // Apply sorting
@@ -282,6 +291,7 @@ export const getOrderById = async (req: Request, res: Response) => {
       .from('orders')
       .select(`
         *,
+        customer:customers(*),
         order_items (
           *,
           product:products (
@@ -1423,7 +1433,15 @@ export const getSalesOrders = async (req: Request, res: Response) => {
     }
 
     // Get all orders for these customers
-    const customerUserIds = customers.map(c => c.user_id);
+    const customerUserIds = customers
+      .map(c => c.user_id)
+      .filter((id): id is string => !!id);
+      
+    if (customerUserIds.length === 0) {
+      console.log('No customers with valid user IDs found');
+      return res.json([]);
+    }
+
     console.log('Fetching orders for customer user IDs:', customerUserIds);
 
     const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
@@ -1562,7 +1580,19 @@ export const getSalesDashboardStats = async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Failed to fetch customers' });
     }
     const totalCustomers = customers?.length || 0;
-    const customerUserIds = customers.map(c => c.user_id);
+    const customerUserIds = (customers || [])
+      .map(c => c.user_id)
+      .filter((id): id is string => !!id);
+
+    if (customerUserIds.length === 0) {
+      return res.json({
+        totalCustomers,
+        totalOrders: 0,
+        totalCredit: customers?.reduce((sum, c) => sum + (parseFloat(c.current_credit) || 0), 0) || 0,
+        recentOrders: []
+      });
+    }
+
     // Get all orders for these customers (filtered by company_id)
     const { data: orders, error: ordersError } = await (supabaseAdmin || supabase)
       .from('orders')
@@ -1638,7 +1668,9 @@ export const getSalesAnalytics = async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Failed to fetch customers' });
     }
 
-    const customerUserIds = customers?.map(c => c.user_id) || [];
+    const customerUserIds = (customers || [])
+      .map(c => c.user_id)
+      .filter((id): id is string => !!id);
 
     if (customerUserIds.length === 0) {
       return res.json({

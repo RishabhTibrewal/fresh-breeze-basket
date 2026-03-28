@@ -30,6 +30,9 @@ const ReportQuerySchema = z.object({
   currency: z.string().length(3).optional().default('AED'),
   // Optional single string search
   search: z.string().optional(),
+  // POS filtering
+  order_source: z.string().optional(),
+  pos_session_id: z.string().uuid().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -46,6 +49,8 @@ export type ReportQuery = {
   export: 'pdf' | 'excel' | 'none';
   currency: string;
   search?: string;
+  order_source?: string;
+  pos_session_id?: string;
 };
 
 // Extend Express Request to carry the parsed query
@@ -94,6 +99,8 @@ export const validateReportQuery = (req: Request, res: Response, next: NextFunct
       export: data.export,
       currency: data.currency,
       search: data.search,
+      order_source: data.order_source,
+      pos_session_id: data.pos_session_id,
     };
 
     next();

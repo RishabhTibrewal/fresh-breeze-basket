@@ -163,6 +163,7 @@ export interface ProductImage {
 export interface Order {
   id: string;
   user_id: string | null;
+  customer_id: string | null;
   company_id: string;
   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
   // Business semantics
@@ -188,6 +189,7 @@ export interface Order {
   updated_at: string;
   inventory_updated?: boolean;
   sales_executive_id?: string | null;
+  pos_session_id?: string | null;
 }
 
 export interface OrderItem {
@@ -219,8 +221,8 @@ export interface Payment {
 
 export interface Customer {
   id: string;
-  user_id: string;
-  sales_executive_id: string;
+  user_id: string | null;
+  sales_executive_id: string | null;
   name: string;
   email: string | null;
   phone: string | null;
@@ -228,6 +230,7 @@ export interface Customer {
   credit_period_days: number;
   credit_limit: number;
   current_credit: number;
+  source: 'erp' | 'pos';
   created_at: string;
   updated_at: string;
 }

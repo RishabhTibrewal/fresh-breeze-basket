@@ -47,8 +47,9 @@ import { useNavigate } from 'react-router-dom';
 interface Customer {
   id: string;
   name: string;
-  email: string;
-  phone: string;
+  email: string | null;
+  phone: string | null;
+  source: 'erp' | 'pos';
   trn_number?: string;
   credit_period_days?: number;
   credit_limit?: number;
@@ -166,7 +167,7 @@ export default function Customers() {
         throw new Error('Name is required');
       }
       console.log('Submitting customer form with data:', data);
-      const response = await customerService.createCustomer(data);
+      const response = await customerService.createCustomer({ ...data, source: 'erp' });
       console.log('Full customer creation response:', response);
       
       // Handle the case where a user was created but not a customer

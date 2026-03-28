@@ -53,8 +53,9 @@ export async function getSalesOrderSummary(q: ReportQuery, companyId: string) {
       order_source,
       outlet_id,
       user_id,
+      customer_id,
       warehouses:outlet_id(name),
-      customers:user_id(id, first_name, last_name, email),
+      customers:customer_id(id, name, email),
       order_items(tax_amount)
     `, { count: 'exact' })
     .eq('company_id', companyId)
@@ -62,6 +63,13 @@ export async function getSalesOrderSummary(q: ReportQuery, companyId: string) {
     .neq('status', 'cancelled')
     .gte('created_at', q.from_date)
     .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.order_source) {
+    query = query.eq('order_source', q.order_source);
+  }
+  if (q.pos_session_id) {
+    query = query.eq('pos_session_id', q.pos_session_id);
+  }
 
   if (q.branch_ids?.length) {
     query = query.in('outlet_id', q.branch_ids);
@@ -78,13 +86,16 @@ export async function getSalesOrderSummary(q: ReportQuery, companyId: string) {
   query = query.range(from, from + q.page_size - 1);
 
   const { data, count, error } = await query;
-  if (error) throw error;
+  if (error) {
+    console.error('Main query error:', error);
+    throw new Error(`Main query failed: ${error.message} (${error.code})`);
+  }
 
   const rows: SalesOrderSummaryRow[] = (data ?? []).map((o: any) => {
     const taxSum = (o.order_items ?? []).reduce((s: number, i: any) => s + Number(i.tax_amount || 0), 0);
     const customer = o.customers;
     const customerName = customer
-      ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() || customer.email
+      ? customer.name || customer.email
       : 'N/A';
     return {
       order_id: o.id,
@@ -102,14 +113,27 @@ export async function getSalesOrderSummary(q: ReportQuery, companyId: string) {
   });
 
   // Summary (re-query without pagination for aggregates)
-  const { data: aggData } = await db()
+  let aggQuery = db()
     .from('orders')
-    .select('total_amount, order_items(tax_amount)')
+    .select('id, total_amount, order_items(tax_amount)')
     .eq('company_id', companyId)
     .eq('order_type', 'sales')
     .neq('status', 'cancelled')
     .gte('created_at', q.from_date)
     .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.order_source) {
+    aggQuery = aggQuery.eq('order_source', q.order_source);
+  }
+  if (q.pos_session_id) {
+    aggQuery = aggQuery.eq('pos_session_id', q.pos_session_id);
+  }
+
+  const { data: aggData, error: aggError } = await aggQuery;
+  if (aggError) {
+    console.error('Aggregate query error:', aggError);
+    throw new Error(`Aggregate query failed: ${aggError.message} (${aggError.code})`);
+  }
 
   const totalRevenue = (aggData ?? []).reduce((s: number, o: any) => s + Number(o.total_amount), 0);
   const totalTax = (aggData ?? []).reduce((s: number, o: any) =>

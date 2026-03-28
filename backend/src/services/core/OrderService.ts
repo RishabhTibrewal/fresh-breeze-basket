@@ -28,6 +28,7 @@ export interface CreateOrderContext {
   // For return orders, link back to original order
   originalOrderId?: string | null;
   customerId?: string | null;
+  status?: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | null;
 }
 
 export interface CreateOrderData {
@@ -40,6 +41,7 @@ export interface CreateOrderData {
   notes?: string;
   paymentIntentId?: string;
   customerId?: string | null;
+  extraDiscountPercentage?: number;
 }
 
 /**
@@ -89,6 +91,7 @@ export class OrderService {
         orderSource = 'ecommerce',
         fulfillmentType = 'delivery',
         originalOrderId = null,
+        status = null,
       } = context;
 
       if (!items || items.length === 0) {
@@ -152,7 +155,13 @@ export class OrderService {
         });
       }
 
-      const finalTotal = totalAmount || calculatedSubtotal + calculatedTax;
+      const extraDiscountPct = data.extraDiscountPercentage || 0;
+      const discountFactor = (1 - extraDiscountPct / 100);
+      const calculatedDiscount = Math.round((calculatedSubtotal * (extraDiscountPct / 100)) * 100) / 100;
+      
+      const sub = Math.round(calculatedSubtotal * 100) / 100;
+      const tax = Math.round((calculatedTax * discountFactor) * 100) / 100;
+      const finalTotal = totalAmount || Math.round((sub - calculatedDiscount + tax) * 100) / 100;
 
       // Get default outlet if not provided
       let finalOutletId = outletId;
@@ -204,12 +213,17 @@ export class OrderService {
           fulfillment_type: fulfillmentType,
           original_order_id: orderType === 'return' ? originalOrderId : null,
           total_amount: finalTotal,
+          subtotal: sub,
+          total_tax: tax,
+          extra_discount_percentage: extraDiscountPct,
+          extra_discount_amount: calculatedDiscount,
+          total_discount: 0, // Item-level discounts are already reflected in item prices
           shipping_address_id: shippingAddressId || null,
           billing_address_id: billingAddressId || null,
           payment_method: paymentMethod,
           payment_status: paymentStatus,
           payment_intent_id: paymentIntentId || null,
-          status: 'pending',
+          status: status || (['cash_counter', 'pickup'].includes(fulfillmentType) ? 'delivered' : 'pending'),
           notes: notes || null,
           inventory_updated: orderSource === 'pos',
         })
@@ -242,7 +256,7 @@ export class OrderService {
         variant_id: item.variantId, // Now required (DEFAULT variant if not provided)
         quantity: item.quantity,
         unit_price: item.unitPrice,
-        tax_amount: item.taxAmount,
+        tax_amount: Math.round((item.taxAmount * (1 - extraDiscountPct / 100)) * 100) / 100,
         warehouse_id: item.outletId || finalOutletId,
       }));
 

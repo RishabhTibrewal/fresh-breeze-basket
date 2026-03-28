@@ -3,14 +3,15 @@ import { supabase } from '@/integrations/supabase/client';
 
 export interface CustomerDetails {
   id: string;
-  user_id: string;
+  user_id: string | null;
   name: string;
-  email: string;
-  phone: string;
-  trn_number: string;
-  credit_period_days: number;
-  credit_limit: number;
-  current_credit: number;
+  email: string | null;
+  phone: string | null;
+  trn_number: string | null;
+  source: 'erp' | 'pos';
+  credit_period_days: number | null;
+  credit_limit: number | null;
+  current_credit: number | null;
   // CD (Cash Discount) fields
   cd_enabled: boolean;
   cd_percentage: number;
@@ -71,6 +72,7 @@ export interface CustomerFormValues {
   cd_percentage?: number;
   cd_days?: number;
   cd_settlement_mode?: 'direct' | 'credit_note';
+  source?: 'erp' | 'pos';
 }
 
 export interface CustomerAddress {

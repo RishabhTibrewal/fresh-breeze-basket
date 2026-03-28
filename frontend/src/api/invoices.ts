@@ -55,13 +55,75 @@ export const invoicesService = {
    */
   async printPOSInvoice(orderId: string): Promise<void> {
     const html = await this.getPOSInvoice(orderId);
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(html);
-      printWindow.document.close();
-      printWindow.onload = () => {
-        printWindow.print();
-      };
-    }
+    this.printHTML(html);
   },
+
+  /**
+   * Get Kitchen KOT (Thermal HTML)
+   */
+  async getKitchenKOTHTML(orderId: string): Promise<string> {
+    const response = await apiClient.get(`/invoices/kot/kitchen/${orderId}`, {
+      responseType: 'text',
+    });
+    return response.data;
+  },
+
+  /**
+   * Get Customer KOT/Bill (Thermal HTML)
+   */
+  async getCustomerKOTHTML(orderId: string): Promise<string> {
+    const response = await apiClient.get(`/invoices/kot/customer/${orderId}`, {
+      responseType: 'text',
+    });
+    return response.data;
+  },
+
+  /**
+   * Helper to print HTML content using a hidden iframe.
+   * Hardened to prevents "disconnected port" errors common with browser extensions.
+   */
+  async printHTML(html: string): Promise<void> {
+    const iframe = document.createElement('iframe');
+    
+    // Position it off-screen instead of display:none for better browser support
+    Object.assign(iframe.style, {
+      position: 'fixed',
+      right: '0',
+      bottom: '0',
+      width: '0',
+      height: '0',
+      border: '0',
+      zIndex: '-1',
+      visibility: 'hidden'
+    });
+    
+    document.body.appendChild(iframe);
+    
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+      
+      const printAndCleanup = () => {
+        if (!iframe.contentWindow) return;
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        
+        // Increase cleanup timeout to prevent "disconnected port" errors from browser extensions
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 5000); 
+      };
+
+      // Ensure doc is loaded before printing
+      if (doc.readyState === 'complete') {
+        printAndCleanup();
+      } else {
+        iframe.onload = printAndCleanup;
+      }
+    }
+  }
 };

@@ -11,12 +11,13 @@ interface Customer {
   credit_period_days: number | null;
   credit_limit: number | null;
   current_credit: number | null;
-  user_id: string;
+  user_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
   last_order_date: string | null;
-  orders: {
+  source: 'erp' | 'pos';
+  orders?: {
     count: number;
     total_amount: number;
   }[];
@@ -43,6 +44,18 @@ export const getCustomers = async (req: Request, res: Response) => {
       `)
       .eq('company_id', req.companyId);
 
+    // Apply source filter if provided
+    const source = req.query.source as string;
+    if (source) {
+      query.eq('source', source);
+    } else {
+      // By default, if no filter provided, hide POS customers from the main ERP list 
+      // as per user request "no" to seeing them in main ERP customers list.
+      // query.neq('source', 'pos'); // Actually, let's make it explicit in the frontend.
+      // But user said "no", so let's default to 'erp' if no source is specified.
+      query.eq('source', 'erp');
+    }
+
     const { data: customers, error } = await query;
 
     if (error) throw error;
@@ -63,7 +76,7 @@ export const getCustomers = async (req: Request, res: Response) => {
       // Filter orders for this customer, EXCLUDING cancelled orders
       // Prefer customer_id if available, fallback to user_id (for retail/backward compatibility)
       const customerOrders = allOrders ? allOrders.filter(order => 
-        (order.customer_id === customer.id || (order.user_id === customer.user_id && !order.customer_id)) && 
+        order.customer_id === customer.id && 
         order.status !== 'cancelled'
       ) : [];
       
@@ -480,6 +493,7 @@ export const createCustomer = async (req: Request, res: Response) => {
       cd_percentage,
       cd_days,
       cd_settlement_mode,
+      source = 'erp'
     } = req.body;
 
     // Validate required fields
@@ -523,45 +537,50 @@ export const createCustomer = async (req: Request, res: Response) => {
         throw new AppError('Service role key not configured. Cannot create users.', 500);
       }
 
-      if (!email) {
+      if (!email && source !== 'pos') {
         throw new AppError('Email is required when user_id is not provided', 400);
       }
 
-      console.log('Creating user with Supabase Auth Admin API...');
-      
-      const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password: '123456', // Default password for customers
-        email_confirm: true, // Auto-confirm email so user can login immediately
-        user_metadata: {
-          name,
-          phone,
-          company_id: req.companyId,
-          role: 'user', // Primary role for backward compatibility
-          roles: ['user'] // Default role for customers
-        }
-      });
-
-      if (createUserError || !newUser.user) {
-        // If user already exists, get the existing user
-        if (createUserError?.message?.includes('already exists') || createUserError?.message?.includes('User already registered')) {
-          console.log('User already exists, fetching existing user...');
-          const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
-          const existingUser = existingUsers?.users.find(u => u.email === email);
-          
-          if (!existingUser) {
-            throw new AppError('User exists but could not be retrieved', 500);
+      if (email) {
+        console.log('Creating user with Supabase Auth Admin API...');
+        
+        const { data: newUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+          email,
+          password: '123456', // Default password for customers
+          email_confirm: true, // Auto-confirm email so user can login immediately
+          user_metadata: {
+            name,
+            phone,
+            company_id: req.companyId,
+            role: 'user', // Primary role for backward compatibility
+            roles: ['user'] // Default role for customers
           }
-          
-          userId = existingUser.id;
-          console.log('Using existing user with ID:', userId);
+        });
+
+        if (createUserError || !newUser.user) {
+          // If user already exists, get the existing user
+          if (createUserError?.message?.includes('already exists') || createUserError?.message?.includes('User already registered')) {
+            console.log('User already exists, fetching existing user...');
+            const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+            const existingUser = existingUsers?.users.find(u => u.email === email);
+            
+            if (!existingUser) {
+              throw new AppError('User exists but could not be retrieved', 500);
+            }
+            
+            userId = existingUser.id;
+            console.log('Using existing user with ID:', userId);
+          } else {
+            console.error('Error creating user:', createUserError);
+            throw new AppError(`Failed to create user: ${createUserError?.message || 'Unknown error'}`, 500);
+          }
         } else {
-          console.error('Error creating user:', createUserError);
-          throw new AppError(`Failed to create user: ${createUserError?.message || 'Unknown error'}`, 500);
+          userId = newUser.user.id;
+          console.log('User created successfully with ID:', userId);
         }
       } else {
-        userId = newUser.user.id;
-        console.log('User created successfully with ID:', userId);
+        console.log('Skipping Auth User creation for POS customer (no email)');
+        userId = null as any; 
       }
     }
 
@@ -571,62 +590,65 @@ export const createCustomer = async (req: Request, res: Response) => {
 
     const adminClient = supabaseAdmin;
 
-    if (!resolvedEmail) {
-      throw new AppError('Email is required to create a customer profile', 400);
-    }
-
-    // Ensure profile exists and belongs to this company
-    const { data: existingProfile, error: profileCheckError } = await adminClient
-      .from('profiles')
-      .select('id, company_id')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (profileCheckError) {
-      console.error('Error checking profile:', profileCheckError);
-    }
-
-    if (existingProfile && existingProfile.company_id !== req.companyId) {
-      const { error: profileUpdateError } = await adminClient
-        .from('profiles')
-        .update({ company_id: req.companyId })
-        .eq('id', userId);
-
-      if (profileUpdateError) {
-        console.error('Error updating profile company_id:', profileUpdateError);
+    // Only ensure profile/membership if we have a userId
+    if (userId) {
+      if (!resolvedEmail) {
+        throw new AppError('Email is required to create a customer profile', 400);
       }
-    }
 
-    if (!existingProfile) {
-      const { error: profileError } = await adminClient
+      // Ensure profile exists and belongs to this company
+      const { data: existingProfile, error: profileCheckError } = await adminClient
         .from('profiles')
-        .insert({
-          id: userId,
-          email: resolvedEmail,
-          role: 'user', // Set role to 'user' for customers
-          company_id: req.companyId
+        .select('id, company_id')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (profileCheckError) {
+        console.error('Error checking profile:', profileCheckError);
+      }
+
+      if (existingProfile && existingProfile.company_id !== req.companyId) {
+        const { error: profileUpdateError } = await adminClient
+          .from('profiles')
+          .update({ company_id: req.companyId })
+          .eq('id', userId);
+
+        if (profileUpdateError) {
+          console.error('Error updating profile company_id:', profileUpdateError);
+        }
+      }
+
+      if (!existingProfile) {
+        const { error: profileError } = await adminClient
+          .from('profiles')
+          .insert({
+            id: userId,
+            email: resolvedEmail,
+            role: 'user', // Set role to 'user' for customers
+            company_id: req.companyId
+          });
+
+        if (profileError) {
+          console.error('Error creating profile:', profileError);
+          // Continue anyway as profile might have been created by trigger
+        }
+      }
+      
+      const { error: membershipError } = await adminClient
+        .from('company_memberships')
+        .upsert({
+          user_id: userId,
+          company_id: req.companyId,
+          role: 'user',
+          is_active: true
+        }, {
+          onConflict: 'user_id,company_id'
         });
 
-      if (profileError) {
-        console.error('Error creating profile:', profileError);
-        // Continue anyway as profile might have been created by trigger
+      if (membershipError) {
+        console.error('Error creating company membership:', membershipError);
+        throw new AppError('Failed to create company membership', 500);
       }
-    }
-    
-    const { error: membershipError } = await adminClient
-      .from('company_memberships')
-      .upsert({
-        user_id: userId,
-        company_id: req.companyId,
-        role: 'user',
-        is_active: true
-      }, {
-        onConflict: 'user_id,company_id'
-      });
-
-    if (membershipError) {
-      console.error('Error creating company membership:', membershipError);
-      throw new AppError('Failed to create company membership', 500);
     }
 
     // Create customer payload
@@ -644,8 +666,9 @@ export const createCustomer = async (req: Request, res: Response) => {
       cd_days: cd_days || 0,
       cd_settlement_mode: cd_settlement_mode || 'direct',
       sales_executive_id,
-      user_id: userId,
+      user_id: userId || null,
       company_id: req.companyId,
+      source,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };

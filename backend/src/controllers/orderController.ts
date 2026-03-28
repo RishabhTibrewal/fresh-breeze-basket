@@ -264,7 +264,8 @@ export const orderController = {
         notes,
         payment_status: orderPaymentStatus,
         order_type: 'sales',
-        order_source: 'sales',
+        order_source: req.body.order_source || 'sales',
+        pos_session_id: req.body.pos_session_id || null,
         fulfillment_type: fulfillmentType,
         // CD fields
         cd_enabled: cdEnabled,

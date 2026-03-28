@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import {
   Banknote, Layers, CheckCircle2, Tag,
   MapPin, Package, Pencil, ChevronDown,
   SlidersHorizontal, Receipt, BarChart3, User,
+  Loader2, Play, Calendar, Download, Utensils
 } from "lucide-react";
 import { toast } from "sonner";
 import apiClient from '@/lib/apiClient';
@@ -95,6 +96,7 @@ export default function CreatePOSOrder() {
 
   // ── order type ──
   const [orderType, setOrderType] = useState<OrderType>('take_away');
+  const [orderStatus, setOrderStatus] = useState<'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled'>('delivered');
   const [tableNumber, setTableNumber] = useState('');
 
   // ── modals ──
@@ -114,10 +116,28 @@ export default function CreatePOSOrder() {
   const [selectedOutletId, setSelectedOutletId] = useState<string>('');
   const [outletDropdownOpen, setOutletDropdownOpen] = useState(false);
 
+  // ── settings ──
+  const [settings, setSettings] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('pos_settings') || '{"autoPrint":true,"theme":"dark"}');
+    } catch {
+      return { autoPrint: true, theme: 'dark' };
+    }
+  });
+  const updateSetting = (key: string, val: any) => {
+    const newOpts = { ...settings, [key]: val };
+    setSettings(newOpts);
+    localStorage.setItem('pos_settings', JSON.stringify(newOpts));
+  };
+
   // ── customer ──
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [customerModal, setCustomerModal] = useState(false);
   const [customerSearch, setCustomerSearch] = useState('');
+  
+  // ── add customer modal ──
+  const [addCustomerModal, setAddCustomerModal] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '' });
 
   // ── receipt number (generated per session, changes on new order) ──
   const [receiptNumber, setReceiptNumber] = useState(() => {
@@ -136,6 +156,29 @@ export default function CreatePOSOrder() {
   ]);
 
   // ─── Data Fetching ──────────────────────────────────────────────────────────
+
+  const { data: activeSession, refetch: refetchSession } = useQuery({
+    queryKey: ['pos-active-session'],
+    queryFn: async () => {
+      const res = await apiClient.get('/pos/sessions/active');
+      return res.data?.data || null;
+    },
+  });
+
+  const { data: posOrders = [], isLoading: posOrdersLoading } = useQuery({
+    queryKey: ['pos-history', activeSession?.id],
+    queryFn: async () => {
+      const res = await apiClient.get('/orders', {
+        params: {
+          order_source: 'pos',
+          pos_session_id: activeSession?.id,
+          limit: 100
+        }
+      });
+      return res.data?.data || [];
+    },
+    enabled: !!activeSession?.id
+  });
 
   const { data: variants = [], isLoading: productsLoading } = useQuery({
     queryKey: ['pos-variants'],
@@ -197,10 +240,33 @@ export default function CreatePOSOrder() {
   const { data: customers = [] } = useQuery({
     queryKey: ['pos-customers'],
     queryFn: async () => {
-      const res = await apiClient.get('/customers', { params: { limit: 200 } });
+      const res = await apiClient.get('/customers', { params: { limit: 200, source: 'pos' } });
       return res.data?.data || res.data || [];
     },
+    staleTime: 30000,
   });
+
+  const topSellingItems = useMemo(() => {
+    const stats: Record<string, { name: string, sold: number, revenue: number }> = {};
+    const orders = Array.isArray(posOrders) ? posOrders : [];
+    
+    orders.forEach((order: any) => {
+      const items = order.order_items || [];
+      items.forEach((item: any) => {
+        // Use variant name or product name
+        const name = item.variant?.name || item.product?.name || item.products?.name || 'Unknown Item';
+        if (!stats[name]) {
+          stats[name] = { name, sold: 0, revenue: 0 };
+        }
+        stats[name].sold += Number(item.quantity || 0);
+        stats[name].revenue += Number(item.subtotal || 0);
+      });
+    });
+
+    return Object.values(stats)
+      .sort((a, b) => b.sold - a.sold)
+      .slice(0, 5);
+  }, [posOrders]);
 
   const { data: modifierGroups = [] } = useQuery<ModifierGroup[]>({
     queryKey: ['modifier-groups-with-modifiers'],
@@ -209,6 +275,50 @@ export default function CreatePOSOrder() {
       return res.data?.data || res.data || [];
     },
   });
+
+  const handleDownloadReport = async (period: 'daily' | 'weekly' | 'monthly' | 'session') => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      let fromDate = today;
+      let toDate = today;
+      let params: any = { export: 'excel', order_source: 'pos' };
+
+      if (period === 'weekly') {
+        fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      } else if (period === 'monthly') {
+        fromDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      } else if (period === 'session' && activeSession) {
+        params.pos_session_id = activeSession.id;
+      }
+
+      if (period !== 'session') {
+        params.from_date = fromDate;
+        params.to_date = toDate;
+      }
+
+      toast.loading(`Preparing ${period} report...`, { id: 'report-download' });
+
+      const response = await apiClient.get('/reports/sales/order-summary', {
+        params,
+        responseType: 'blob'
+      });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      const filename = `pos_report_${period}_${today}.xlsx`;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success(`${period.charAt(0).toUpperCase() + period.slice(1)} report downloaded`, { id: 'report-download' });
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error('Failed to download report', { id: 'report-download' });
+    }
+  };
 
   // ─── Computed ───────────────────────────────────────────────────────────────
 
@@ -226,11 +336,12 @@ export default function CreatePOSOrder() {
     const modifierAdj = item.selected_modifiers.reduce((a, m) => a + m.price_adjust, 0);
     return s + (item.unit_price + modifierAdj) * item.quantity;
   }, 0);
-  const taxAmount = cartItems.reduce((s, item) => {
+  const rawTax = cartItems.reduce((s, item) => {
     const modifierAdj = item.selected_modifiers.reduce((a, m) => a + m.price_adjust, 0);
     const base = (item.unit_price + modifierAdj) * item.quantity;
     return s + base * (item.tax_percentage / 100);
   }, 0);
+  const taxAmount = parseFloat((rawTax * (1 - effectiveDiscount / 100)).toFixed(2));
   const discountAmount = parseFloat((subtotal * (effectiveDiscount / 100)).toFixed(2));
   const grandTotal = parseFloat((subtotal - discountAmount + taxAmount).toFixed(2));
 
@@ -262,9 +373,13 @@ export default function CreatePOSOrder() {
       : modifierGroups.filter(g => g.modifiers?.length > 0);
 
     setCartItems(prev => {
-      // Merge if same variant is already in cart with no modifiers
-      const existing = prev.find(i => i.variant_id === variant.variant_id && i.selected_modifiers.length === 0);
-      if (existing && variantModifierGroups.length === 0) {
+      // Merge if same variant is already in cart with same price and NO modifiers selected
+      const existing = prev.find(i => 
+        i.variant_id === variant.variant_id && 
+        i.unit_price === price && // Ensure price matches (important for custom prices)
+        i.selected_modifiers.length === 0
+      );
+      if (existing) {
         return prev.map(i => i.id === existing.id
           ? { ...i, quantity: i.quantity + 1, subtotal: (i.quantity + 1) * i.unit_price }
           : i
@@ -309,6 +424,7 @@ export default function CreatePOSOrder() {
     setDiscountPct(0);
     setCustomDiscount('');
     setOrderType('take_away');
+    setOrderStatus('delivered');
     setTableNumber('');
     setDeliveryAddress({ name: '', phone: '', address: '', city: '', notes: '' });
   };
@@ -337,6 +453,37 @@ export default function CreatePOSOrder() {
   };
 
   // ─── Order Mutation ─────────────────────────────────────────────────────────
+
+  const startSessionMutation = useMutation({
+    mutationFn: async (openingCash: number) => {
+      const res = await apiClient.post('/pos/sessions', {
+        outlet_id: warehouses[0]?.id || selectedOutletId,
+        opening_cash: openingCash
+      });
+      return res.data.data;
+    },
+    onSuccess: () => {
+      toast.success('Session started');
+      refetchSession();
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to start session')
+  });
+
+  const createCustomerMutation = useMutation({
+    mutationFn: async (data: { name: string; phone: string }) => {
+      const res = await apiClient.post('/customers', { ...data, source: 'pos' });
+      return res.data?.data || res.data;
+    },
+    onSuccess: (newCust) => {
+      toast.success('Customer added');
+      queryClient.invalidateQueries({ queryKey: ['pos-customers'] });
+      setSelectedCustomer(newCust);
+      setAddCustomerModal(false);
+      setNewCustomer({ name: '', phone: '' });
+      if (!activeView || activeView === 'sale') setCustomerModal(false);
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to add customer')
+  });
 
   const createOrderMutation = useMutation({
     mutationFn: async () => {
@@ -368,6 +515,8 @@ export default function CreatePOSOrder() {
         outlet_id: defaultWarehouseId || null,
         table_number: orderType === 'dine_in' ? tableNumber : null,
         delivery_address: orderType === 'delivery' ? deliveryAddress : null,
+        pos_session_id: activeSession?.id || null,
+        status: orderStatus,
       };
 
       if (paymentMethod === 'cash') {
@@ -387,6 +536,10 @@ export default function CreatePOSOrder() {
       const receiptNo = data?.data?.receipt_number || `RCP-${Date.now().toString().slice(-6)}`;
       setPaymentSuccess({ orderId, receiptNumber: receiptNo, change: changeDue });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['pos-history'] });
+      queryClient.invalidateQueries({ queryKey: ['pos-variants'] });
+      queryClient.invalidateQueries({ queryKey: ['pos-customers'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
     },
     onError: (err: any) => {
       toast.error(err.response?.data?.error || 'Failed to create order');
@@ -401,10 +554,24 @@ export default function CreatePOSOrder() {
     createOrderMutation.mutate();
   };
 
-  const handlePrint = async () => {
+  const handlePrintKitchenKOT = async () => {
     if (!paymentSuccess?.orderId) return;
-    try { await invoicesService.printPOSInvoice(paymentSuccess.orderId); }
-    catch { toast.error('Could not open invoice'); }
+    try {
+      const html = await invoicesService.getKitchenKOTHTML(paymentSuccess.orderId);
+      await invoicesService.printHTML(html);
+    } catch {
+      toast.error('Could not open Kitchen KOT');
+    }
+  };
+
+  const handlePrintCustomerBill = async () => {
+    if (!paymentSuccess?.orderId) return;
+    try {
+      const html = await invoicesService.getCustomerKOTHTML(paymentSuccess.orderId);
+      await invoicesService.printHTML(html);
+    } catch {
+      toast.error('Could not open Customer Bill');
+    }
   };
 
   const handleNewOrder = () => {
@@ -722,7 +889,12 @@ export default function CreatePOSOrder() {
                 key={tab.key}
                 onClick={() => {
                   setOrderType(tab.key);
-                  if (tab.key === 'delivery') setDeliveryModal(true);
+                  if (tab.key === 'delivery') {
+                    setOrderStatus('pending');
+                    setDeliveryModal(true);
+                  } else {
+                    setOrderStatus('delivered');
+                  }
                 }}
                 className={`flex items-center justify-center gap-1 py-1.5 rounded-md text-[11px] font-medium transition-all
                   ${orderType === tab.key ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}
@@ -890,12 +1062,6 @@ export default function CreatePOSOrder() {
                 <h2 className="text-2xl font-bold">Order History</h2>
                 <p className="text-gray-500 text-sm">Review recent POS transactions</p>
               </div>
-              <div className="flex gap-2">
-                <input 
-                  type="date" 
-                  className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-indigo-500" 
-                />
-              </div>
             </header>
             
             <div className="bg-[#1a1d27] border border-white/10 rounded-2xl overflow-hidden">
@@ -910,13 +1076,34 @@ export default function CreatePOSOrder() {
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-white/5">
-                   <tr className="hover:bg-white/5 transition-colors">
-                     <td className="px-6 py-4 font-medium">POS-280388</td>
-                     <td className="px-6 py-4 text-gray-400">Walk-in Customer</td>
-                     <td className="px-6 py-4 font-bold text-indigo-400">₹450.00</td>
-                     <td className="px-6 py-4"><span className="bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full text-[10px] font-bold">PAID</span></td>
-                     <td className="px-6 py-4"><button className="text-indigo-400 hover:text-indigo-300 text-sm">Details</button></td>
-                   </tr>
+                   {posOrdersLoading ? (
+                     <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Loading orders...</td></tr>
+                   ) : posOrders.length === 0 ? (
+                     <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No recent POS orders</td></tr>
+                   ) : (
+                     posOrders.map((order: any) => (
+                       <tr key={order.id} className="hover:bg-white/5 transition-colors">
+                         <td className="px-6 py-4 font-medium">{order.receipt_number || `POS-${order.id.slice(0, 5)}`}</td>
+                         <td className="px-6 py-4 text-gray-400">
+                           {order.profiles?.first_name ? `${order.profiles.first_name} ${order.profiles.last_name || ''}` : (order.customer?.name || 'Walk-in Customer')}
+                         </td>
+                         <td className="px-6 py-4 font-bold text-indigo-400">{formatPrice(order.total_amount)}</td>
+                         <td className="px-6 py-4">
+                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${order.payment_status === 'paid' ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                             {order.payment_status?.toUpperCase() || 'UNKNOWN'}
+                           </span>
+                         </td>
+                         <td className="px-6 py-4">
+                           <button 
+                             onClick={() => setPaymentSuccess({ orderId: order.id, receiptNumber: order.receipt_number || `POS-${order.id.slice(0, 5)}`, change: 0 })}
+                             className="text-indigo-400 hover:text-indigo-300 text-sm"
+                           >
+                             Details
+                           </button>
+                         </td>
+                       </tr>
+                     ))
+                   )}
                  </tbody>
                </table>
             </div>
@@ -931,27 +1118,37 @@ export default function CreatePOSOrder() {
                 <h2 className="text-2xl font-bold">Customer Directory</h2>
                 <p className="text-gray-500 text-sm">Manage and add POS customers</p>
               </div>
-              <button className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
+              <button 
+                onClick={() => setAddCustomerModal(true)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"
+              >
                 <UserPlus className="h-4 w-4" /> Add New Customer
               </button>
             </header>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div className="bg-[#1a1d27] border border-white/10 p-4 rounded-2xl hover:border-indigo-500/50 transition-all cursor-pointer">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="bg-indigo-600/20 rounded-full w-10 h-10 flex items-center justify-center">
-                    <User className="h-5 w-5 text-indigo-400" />
+              {(customers as any[]).map((customer: any) => (
+                <div key={customer.id} className="bg-[#1a1d27] border border-white/10 p-4 rounded-2xl hover:border-indigo-500/50 transition-all cursor-pointer">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="bg-indigo-600/20 rounded-full w-10 h-10 flex items-center justify-center">
+                      <User className="h-5 w-5 text-indigo-400" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold">{customer.name}</h3>
+                      <p className="text-xs text-gray-500">{customer.phone || 'No phone'}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-bold">John Doe</h3>
-                    <p className="text-xs text-gray-500">+91 9876543210</p>
+                  <div className="flex justify-between text-xs pt-3 border-t border-white/5">
+                    <span className="text-gray-500">Total Visits: {customer.totalOrders || 0}</span>
+                    <span className="text-indigo-400 font-bold">{formatPrice(customer.totalSpent || 0)} Spent</span>
                   </div>
                 </div>
-                <div className="flex justify-between text-xs pt-3 border-t border-white/5">
-                  <span className="text-gray-500">Total Visits: 12</span>
-                  <span className="text-indigo-400 font-bold">₹12,450.00 Spent</span>
+              ))}
+              {(customers as any[]).length === 0 && (
+                <div className="col-span-full text-center py-10 text-gray-400">
+                  No customers found. Click 'Add New Customer' to create one.
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}
@@ -959,17 +1156,49 @@ export default function CreatePOSOrder() {
         {/* REPORTS VIEW */}
         {activeView === 'reports' && (
           <div className="flex-1 flex flex-col bg-[#0f1117] p-6 overflow-y-auto">
-            <header className="mb-8">
-              <h2 className="text-2xl font-bold">POS Analytics</h2>
-              <p className="text-gray-500 text-sm">Daily sales and performance metrics</p>
+            <header className="mb-8 flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold">POS Analytics</h2>
+                <p className="text-gray-500 text-sm">Session sales and performance metrics</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button 
+                  onClick={() => handleDownloadReport('daily')}
+                  className="bg-white/5 hover:bg-white/10 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
+                >
+                  <Calendar className="h-3.5 w-3.5 text-indigo-400" />
+                  Daily
+                </button>
+                <button 
+                  onClick={() => handleDownloadReport('weekly')}
+                  className="bg-white/5 hover:bg-white/10 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
+                >
+                  <Calendar className="h-3.5 w-3.5 text-indigo-400" />
+                  Weekly
+                </button>
+                <button 
+                  onClick={() => handleDownloadReport('monthly')}
+                  className="bg-white/5 hover:bg-white/10 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
+                >
+                  <Calendar className="h-3.5 w-3.5 text-indigo-400" />
+                  Monthly
+                </button>
+                <button 
+                  onClick={() => handleDownloadReport('session')}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors ml-auto"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Current Session
+                </button>
+              </div>
             </header>
             
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
               {[
-                { label: 'Total Sales', value: '₹45,230', trend: '+12%', color: 'indigo' },
-                { label: 'Orders', value: '42', trend: '+5%', color: 'green' },
-                { label: 'Avg Order', value: '₹1,076', trend: '-2%', color: 'amber' },
-                { label: 'Returns', value: '2', trend: '0%', color: 'red' },
+                { label: 'Total Sales', value: formatPrice(posOrders.reduce((sum: number, o: any) => sum + o.total_amount, 0)), trend: 'Session', color: 'indigo' },
+                { label: 'Orders', value: posOrders.length.toString(), trend: 'Session', color: 'green' },
+                { label: 'Avg Order', value: formatPrice(posOrders.length > 0 ? posOrders.reduce((sum: number, o: any) => sum + o.total_amount, 0) / posOrders.length : 0), trend: 'Session', color: 'amber' },
+                { label: 'Returns', value: '0', trend: 'WIP', color: 'red' }, // POS returns not aggregated locally yet
               ].map((stat, i) => (
                 <div key={i} className="bg-[#1a1d27] border border-white/10 p-5 rounded-3xl">
                   <p className="text-xs text-gray-500 mb-1">{stat.label}</p>
@@ -991,19 +1220,19 @@ export default function CreatePOSOrder() {
               <div className="bg-[#1a1d27] border border-white/10 p-6 rounded-3xl">
                 <h3 className="font-bold mb-4">Top Selling Items</h3>
                 <div className="space-y-4">
-                  {[
-                    { name: 'Fresh Milk 1L', sold: 24, revenue: '₹1,440' },
-                    { name: 'Organic Eggs', sold: 18, revenue: '₹2,160' },
-                    { name: 'Sourdough Bread', sold: 15, revenue: '₹1,200' },
-                  ].map((item, i) => (
-                    <div key={i} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                       <div>
-                         <p className="text-sm font-medium">{item.name}</p>
-                         <p className="text-[10px] text-gray-500">{item.sold} units sold</p>
-                       </div>
-                       <p className="font-bold text-indigo-400">{item.revenue}</p>
-                    </div>
-                  ))}
+                  {topSellingItems.length > 0 ? (
+                    topSellingItems.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                         <div>
+                           <p className="text-sm font-medium">{item.name}</p>
+                           <p className="text-[10px] text-gray-500">{item.sold} units sold</p>
+                         </div>
+                         <p className="font-bold text-indigo-400">{formatPrice(item.revenue)}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-center py-4 text-gray-500 text-sm">No sales data available</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -1024,15 +1253,19 @@ export default function CreatePOSOrder() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm">Dark Mode</span>
-                    <div className="w-10 h-5 bg-indigo-600 rounded-full flex items-center px-1">
-                      <div className="bg-white w-3 h-3 rounded-full ml-auto" />
-                    </div>
+                    <button 
+                      onClick={() => updateSetting('theme', settings.theme === 'dark' ? 'light' : 'dark')}
+                      className={`w-10 h-5 rounded-full flex items-center px-1 transition-colors ${settings.theme === 'dark' ? 'bg-indigo-600' : 'bg-white/10'}`}>
+                      <div className={`bg-white w-3 h-3 rounded-full transition-transform ${settings.theme === 'dark' ? 'translate-x-5' : ''}`} />
+                    </button>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm">Large Item Cards</span>
-                    <div className="w-10 h-5 bg-white/10 rounded-full flex items-center px-1">
-                      <div className="bg-gray-400 w-3 h-3 rounded-full" />
-                    </div>
+                    <button 
+                      onClick={() => updateSetting('largeCards', !settings.largeCards)}
+                      className={`w-10 h-5 rounded-full flex items-center px-1 transition-colors ${settings.largeCards ? 'bg-indigo-600' : 'bg-white/10'}`}>
+                      <div className={`bg-white w-3 h-3 rounded-full transition-transform ${settings.largeCards ? 'translate-x-5' : ''}`} />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1042,13 +1275,44 @@ export default function CreatePOSOrder() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm">Auto-print receipt</span>
-                    <div className="w-10 h-5 bg-indigo-600 rounded-full flex items-center px-1">
-                      <div className="bg-white w-3 h-3 rounded-full ml-auto" />
-                    </div>
+                    <button 
+                      onClick={() => updateSetting('autoPrint', !settings.autoPrint)}
+                      className={`w-10 h-5 rounded-full flex items-center px-1 transition-colors ${settings.autoPrint ? 'bg-indigo-600' : 'bg-white/10'}`}>
+                      <div className={`bg-white w-3 h-3 rounded-full transition-transform ${settings.autoPrint ? 'translate-x-5' : ''}`} />
+                    </button>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm">Thermal Printer IP</span>
                     <input type="text" value="192.168.1.102" readOnly className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-indigo-400 w-24 text-right" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#1a1d27] border border-red-500/10 p-6 rounded-3xl">
+                <h3 className="font-bold mb-4 text-red-500">Danger Zone</h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                       <p className="text-sm font-bold">End POS Session</p>
+                       <p className="text-[10px] text-gray-500">Close the current shift and lock the terminal</p>
+                    </div>
+                    <button 
+                      onClick={async () => {
+                        if (confirm('Are you sure you want to end this POS session?')) {
+                          try {
+                            await apiClient.post(`/pos/sessions/${activeSession?.id}/close`);
+                            toast.success('Session ended');
+                            refetchSession();
+                            window.location.reload();
+                          } catch (err: any) {
+                            toast.error(err.response?.data?.error || 'Failed to close session');
+                          }
+                        }
+                      }}
+                      className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg text-xs font-bold transition-colors"
+                    >
+                      End Terminal Session
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1060,6 +1324,91 @@ export default function CreatePOSOrder() {
       {/* ═══════════════════════════════════════════════════════════
           MODALS
       ══════════════════════════════════════════════════════════════ */}
+
+      {/* ── 0. Session Overlay ────────────────────────────────────── */}
+      {!activeSession && activeView !== 'settings' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0a0c10]/90 backdrop-blur-md">
+           <div className="bg-[#1a1d27] border border-white/10 rounded-3xl p-8 w-[400px] shadow-2xl text-center">
+             <div className="bg-indigo-600/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+               <Store className="h-8 w-8 text-indigo-400" />
+             </div>
+             <h2 className="text-2xl font-bold text-white mb-2">Terminal Locked</h2>
+             <p className="text-gray-400 text-sm mb-8">Start a new POS session to begin ringing up sales.</p>
+             
+             <div className="space-y-4 text-left">
+                <div>
+                   <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 block">Opening Cash</label>
+                   <div className="relative">
+                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">₹</span>
+                     <input 
+                       id="openingCash"
+                       type="number" 
+                       defaultValue={0}
+                       className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-indigo-500 text-lg font-bold transition-colors"
+                     />
+                   </div>
+                </div>
+                <button 
+                  onClick={() => {
+                     const cash = parseFloat((document.getElementById('openingCash') as HTMLInputElement).value) || 0;
+                     startSessionMutation.mutate(cash);
+                  }}
+                  disabled={startSessionMutation.isPending}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-xl shadow-[0_0_20px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-2 mt-4"
+                >
+                  {startSessionMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
+                  START SESSION
+                </button>
+             </div>
+           </div>
+        </div>
+      )}
+
+      {/* ── Add Customer Modal ────────────────────────────────────── */}
+      {addCustomerModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-[#1a1d27] border border-white/10 rounded-2xl p-6 w-[400px] shadow-2xl">
+            <h3 className="font-bold text-lg text-white mb-4">Add New Customer</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1 pointer-events-none">Customer Name <span className="text-red-400">*</span></label>
+                <input 
+                  autoFocus
+                  type="text" 
+                  value={newCustomer.name}
+                  onChange={e => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                  placeholder="E.g. John Doe"
+                  className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white w-full focus:border-indigo-500 outline-none" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1 pointer-events-none">Phone Number</label>
+                <input 
+                  type="tel" 
+                  value={newCustomer.phone}
+                  onChange={e => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                  placeholder="+1..."
+                  className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white w-full focus:border-indigo-500 outline-none" 
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end mt-6">
+              <button onClick={() => setAddCustomerModal(false)} className="px-4 py-2 hover:bg-white/5 rounded-lg text-gray-400 font-medium">Cancel</button>
+              <button 
+                onClick={() => {
+                  if (!newCustomer.name.trim()) return toast.error('Name is required');
+                  createCustomerMutation.mutate(newCustomer);
+                }}
+                disabled={createCustomerMutation.isPending}
+                className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-white font-medium flex items-center gap-2"
+              >
+                {createCustomerMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 1. Custom Price Modal ─────────────────────────────────── */}
       {customPriceModal && (
@@ -1151,6 +1500,24 @@ export default function CreatePOSOrder() {
                   />
                 </div>
               ))}
+
+              <div className="pt-2 border-t border-white/5 mt-4">
+                <label className="text-xs font-bold text-gray-400 mb-3 block uppercase tracking-wider">Order Status</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['pending', 'processing', 'shipped'] as const).map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setOrderStatus(s)}
+                      className={`py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest border transition-all duration-200
+                        ${orderStatus === s 
+                          ? 'bg-indigo-600 border-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.4)]' 
+                          : 'bg-white/5 border-white/10 text-gray-500 hover:border-white/20 hover:bg-white/10'}`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             <div className="flex gap-2 mt-5">
               <button
@@ -1245,9 +1612,18 @@ export default function CreatePOSOrder() {
                 <h3 className="font-semibold text-white">Select Customer</h3>
                 <p className="text-xs text-gray-400 mt-0.5">Walk-in or registered customer</p>
               </div>
-              <button onClick={() => setCustomerModal(false)} className="text-gray-500 hover:text-white">
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setAddCustomerModal(true)}
+                  className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  New
+                </button>
+                <button onClick={() => setCustomerModal(false)} className="text-gray-500 hover:text-white">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
             {/* Walk-in option */}
             <button
@@ -1305,8 +1681,30 @@ export default function CreatePOSOrder() {
                     </div>
                   </button>
                 ))}
-              {(customers as any[]).length === 0 && (
-                <p className="text-center text-xs text-gray-500 py-4">No customers found</p>
+              {(customers as any[]).filter(c => !customerSearch || c.name?.toLowerCase().includes(customerSearch.toLowerCase()) || c.phone?.includes(customerSearch)).length === 0 && (
+                <div className="py-8 text-center bg-white/5 rounded-2xl border border-dashed border-white/10">
+                  <UserPlus className="h-8 w-8 text-gray-600 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-white mb-1">No customers found</p>
+                  <p className="text-xs text-gray-500 mb-4 px-8">Search returned no results. Would you like to create a new customer?</p>
+                  <button 
+                    onClick={() => { setCustomerModal(false); setAddCustomerModal(true); }}
+                    className="mx-auto bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-xl text-xs font-bold transition-all"
+                  >
+                    CREATE NEW ACCOUNT
+                  </button>
+                </div>
+              )}
+              {(customers as any[]).filter(c => !customerSearch || c.name?.toLowerCase().includes(customerSearch.toLowerCase()) || c.phone?.includes(customerSearch)).length > 0 && (
+                <div className="pt-2 text-center">
+                  <p className="text-[10px] text-gray-500 mb-2">Can't find the customer?</p>
+                  <button 
+                    onClick={() => { setCustomerModal(false); setAddCustomerModal(true); }}
+                    className="w-full py-2 rounded-xl border border-dashed border-white/10 text-indigo-400 text-xs font-bold hover:bg-indigo-600/10 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Plus className="h-3 w-3" />
+                    CREATE NEW ACCOUNT
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -1331,18 +1729,26 @@ export default function CreatePOSOrder() {
                     <p className="text-3xl font-bold text-green-400">{formatPrice(paymentSuccess.change)}</p>
                   </div>
                 )}
-                <div className="flex gap-2 w-full mt-6">
-                  <button
-                    onClick={handlePrint}
-                    className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 font-medium transition-colors"
-                  >
-                    <Printer className="h-4 w-4" /> Print
-                  </button>
+                <div className="flex flex-col gap-3 w-full mt-6">
+                  <div className="flex gap-2 w-full">
+                    <button
+                      onClick={handlePrintKitchenKOT}
+                      className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 font-bold transition-colors border border-amber-500/20"
+                    >
+                      <Utensils className="h-4 w-4" /> Kitchen KOT
+                    </button>
+                    <button
+                      onClick={handlePrintCustomerBill}
+                      className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-green-500/10 hover:bg-green-500/20 text-green-500 font-bold transition-colors border border-green-500/20"
+                    >
+                      <Receipt className="h-4 w-4" /> Customer Bill
+                    </button>
+                  </div>
                   <button
                     onClick={handleNewOrder}
-                    className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-colors"
+                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-all shadow-[0_0_15px_rgba(79,70,229,0.3)]"
                   >
-                    <Plus className="h-4 w-4" /> New Order
+                    <Plus className="h-4 w-4" /> Start New Order
                   </button>
                 </div>
               </div>

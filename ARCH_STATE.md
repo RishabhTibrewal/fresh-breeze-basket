@@ -1,6 +1,6 @@
 # Architecture State Document
 
-**Last Updated:** 2026-03-28 (03:40 IST)
+**Last Updated:** 2026-03-29 (01:03 IST)
 **Purpose:** Technical reference for current system architecture, routing patterns, and critical implementation details to prevent architectural mistakes. This document serves as the long-term memory and architectural blueprint for all future AI interactions.
 
 ---
@@ -27,7 +27,9 @@
    - Fulfillment support: Dine-In (Table #), Take Away, Delivery (Address capture)
    - Variant-level product modifiers and add-ons
    - Real-time inventory deduction via OrderService
-   - Thermal-printer ready receipt generation
+   - Secure authenticated reporting and live performance analytics
+   - **Thermal-printer ready receipt generation**: Optimized 80mm 3-column layout (Item | Qty | Amount) with full financial breakdown.
+   - **Smart Cart Merging**: Sequential product clicks increment quantity while respecting modifier selections and price overrides.
 
 3. **Order Management**
    - Sales order creation and tracking
@@ -427,7 +429,11 @@ fresh-breeze-basket/
    - ✅ **Fulfillment Types**: Context-aware UI for Dine-In (Table #), Take-Away, and Delivery (Address).
    - ✅ **Product Modifiers**: Support for variant-level add-ons with automated price adjustments.
    - ✅ **Stock Integration**: Direct linkage to `OrderService` for cross-outlet inventory reservation.
-   - ✅ **Receipt System**: Auto-generated custom receipt numbering (`POS-XXXXXX`) and thermal-ready HTML.
+   - ✅ **Secure Reporting**: Authenticated Excel report exports (Daily, Weekly, Monthly, Session) using `apiClient` blobs.
+   - ✅ **Live Dashboard**: Dynamic "Top Selling Items" analytics driven by live transaction data.
+   - ✅ **Receipt System**: Auto-generated custom receipt numbering (`POS-XXXXXX`) and thermal-ready HTML with **3-column layout** (Item | Qty | Amount) and **Discount % visibility**.
+   - ✅ **Discounted Tax Logic**: Advanced financial engine calculates tax on the net value (after discount) across frontend and backend.
+   - ✅ **Smart Cart Interaction**: Automated quantity incrementing on sequential clicks for identical items.
 
 **Admin Dashboard:**
 - ✅ Multi-module Dashboard with KPIs
@@ -455,6 +461,58 @@ fresh-breeze-basket/
 - ⚠️ Module defined in config
 - ⚠️ Basic structure in place
 - ⚠️ Full implementation pending
+
+### Recent Changes (2026-03-29) — POS Bill Redesign & Discounted Tax Logic
+
+#### POS Thermal Bill & Data Persistence
+- **Objective**: Professionalize the POS customer bill and ensure all financial data is accurately stored for reporting.
+- **Redesigned Thermal Template**:
+  - Implemented a standard **3-column layout** (Item | Qty | Amount) for the 80mm thermal receipt.
+  - Added visibility for **Extra Discount Percentage** (e.g., `Extra Discount (10%)`) in the totals section.
+  - Explicitly displayed **Subtotal**, **Total Tax**, **Discounts**, and **Round-off** for full financial transparency.
+- **OrderService Enhancements**:
+  - Modified `OrderService.ts` to populate previously empty columns in the `orders` table: `subtotal`, `total_tax`, `extra_discount_percentage`, and `extra_discount_amount`.
+  - Enforced strict **2-decimal rounding** across all stored financial values to prevent precision issues.
+
+#### Discounted Tax Calculation Engine
+- **Objective**: Align tax calculations with standard retail practices where tax is calculated on the net price after discounts.
+- **Backend Sync**: Updated `OrderService.ts` to reduce both the total order tax and individual `order_item` tax records by the `extra_discount_percentage`.
+- **Frontend Sync**: Updated `CreatePOSOrder.tsx` to calculate a `rawTax` first, then scale it by the discount factor for real-time display.
+- **Formula**: `FinalTax = GrossTax * (1 - DiscountRatio)`.
+
+#### Smart Cart Merging Logic
+- **Objective**: Improve checkout speed and reduce cart clutter.
+- **Logic**: Sequential clicks on the same product from the items list now automatically increment the quantity in the cart.
+- **Constraint Handling**: Merging only occurs if:
+  1. The item has **no modifiers** selected (ensures "fresh" items are mergeable but customized ones remain distinct).
+  2. The **unit price** matches exactly (handles custom price overrides safely).
+
+### Recent Changes (2026-03-29) — POS Customer Synchronization & Reporting Repairs
+
+#### POS Customer Identification & Data Isolation
+- **Objective**: Standardize POS customer management to support walk-in identification without mandatory ERP user accounts, while maintaining accurate sales statistics.
+- **Database Schema Update**:
+  - Added `source` column (`'erp' | 'pos'`) to `customers` table to isolate POS-originating customers from the main ERP directory.
+  - Relaxed constraints on `customers.user_id` and `customers.sales_executive_id` (made nullable) to allow "quick-add" customers at the terminal.
+- **Frontend / API Sync**:
+  - Updated `Customer` interface across frontend/backend to reflect new schema and isolation logic.
+  - POS terminal now explicitly filters for `source=pos` when fetching the local customer list.
+- **Order Synchronization**:
+  - Fixed `orders.customer_id` mapping in `OrderService.ts` to ensure every POS transaction is linked to a customer record (Retail or Named).
+  - Standardized customer statistics (Visits & Spent) to calculate live from `orders.customer_id` aggregations, ensuring data integrity regardless of the customer's origin.
+
+#### POS Secure Reporting & Analytics
+- **Objective**: Secure the POS reporting module and replace static dummy data with live transaction analytics.
+- **Secure Export Logic**:
+  - Replaced unauthenticated `window.open` report downloads with authenticated `apiClient` blob fetching.
+  - Implementation ensures the JWT `Authorization` header is passed to report endpoints, preventing 404/401 errors on export.
+- **Live Performance Metrics**:
+  - Replaced hardcoded "Top Selling Items" dummy data in the POS Dashboard with real-time aggregations from the `posOrders` dataset.
+  - Updates automatically as new orders are placed via TanStack Query invalidation.
+
+#### UI Logic Fixes
+- **Order History**: Corrected history display to prioritize the `customer.name` from the joined `customers` table over the cashier's `profiles` name, ensuring "Walk-in" or the correct customer name is shown in the terminal.
+- **Real-time Refreshes**: Ensured `pos-customers` and `customers` queries are invalidated immediately upon order charging, providing instant feedback on customer loyalty stats.
 
 ### Recent Changes (2026-03-28) — Quotation Financial Standardization & PDF Generation
 
@@ -546,7 +604,18 @@ Standardize the Quotation module so its financial logic, UI, and document output
 - **Relational Integrity**: 
   - Automatically maps fulfillment types to core system categories (`cash_counter`, `pickup`, `delivery`).
   - Persists item-level modifiers in `order_item_modifiers` for kitchen/production visibility.
-- **Inventory Symmetery**: Leverages `OrderService` for atomic stock reservation across multiple outlets/warehouses.
+- **Inventory Symmetry**: Leverages `OrderService` for atomic stock reservation (Ecommerce) and **Direct Subtraction (POS)**.
+
+#### POS Terminal: Session Management & Inventory Optimization (Update 2)
+- **Database Migration (`20280328_002_pos_sessions_and_extras.sql`)**:
+  - **`pos_sessions` table**: Introduced terminal sessions to track cashier shifts, opening/closing cash, and expected totals.
+  - **Orders Table Extensions**: Added `receipt_number` (string), `pos_session_id` (UUID), and `delivery_address` (JSONB) to `public.orders`.
+  - **Payments Table Extensions**: Added `cash_tendered` and `change_given` (numeric) to track cash drawer activity.
+  - **`order_item_modifiers` table**: Created a dedicated table to persist selected variant-level modifiers per order line item.
+- **Direct Inventory Subtraction Logic (`OrderService.ts`)**:
+  - **The "Skip Reservation" Model**: POS orders now bypass the `reserveStock` phase in `OrderService`.
+  - **Real-time Reduction**: `inventory_updated` is set to `true` instantly, and `SALE` movements are recorded during order creation.
+  - **Negative Stock Allowance**: Specifically for POS transactions, the system permits stock levels to fall below zero to ensure terminal availability during data lags.
 
 ---
 

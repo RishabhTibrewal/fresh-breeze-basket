@@ -2,6 +2,270 @@ import { Request, Response, NextFunction } from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
+/**
+ * Generate 80mm thermal-optimized HTML for KOT/Customer Bills
+ */
+const generateThermalKOTHTML = async (orderId: string, companyId: string, type: 'kitchen' | 'customer') => {
+  // 1. Fetch Data (including modifiers)
+  const [companyRes, orderRes] = await Promise.all([
+    (supabaseAdmin || supabase).from('companies').select('*').eq('id', companyId).single(),
+    (supabaseAdmin || supabase).from('orders').select(`
+      *,
+      order_items (
+        *,
+        product:products(name),
+        variant:product_variants(name, unit_type),
+        order_item_modifiers (
+          *,
+          modifier:modifiers(name)
+        )
+      )
+    `).eq('id', orderId).eq('company_id', companyId).single()
+  ]);
+
+  const company = companyRes.data;
+  const order = orderRes.data;
+
+  if (!order) throw new ApiError(404, 'Order not found');
+
+  const isKitchen = type === 'kitchen';
+  const companyName = company?.name || 'Store';
+  const dateStr = new Date(order.created_at).toLocaleString('en-IN', {
+    dateStyle: 'short',
+    timeStyle: 'short'
+  });
+
+  // Extract Table/Customer info from notes/customer_id
+  let tableNo = '';
+  if (order.notes) {
+    const tableMatch = order.notes.match(/Table:\s*([^\s|]+)/i);
+    if (tableMatch) tableNo = tableMatch[1];
+  }
+
+  let customerName = 'Walk-in';
+  if (order.customer_id) {
+    const { data: cust } = await (supabaseAdmin || supabase)
+      .from('customers')
+      .select('name')
+      .eq('id', order.customer_id)
+      .single();
+    if (cust) customerName = cust.name;
+  }
+
+  // Styles for 80mm printing
+  const styles = `
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Courier New', Courier, monospace; 
+      width: 300px; 
+      padding: 10px; 
+      font-size: 13px; 
+      line-height: 1.2;
+      color: #000;
+    }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .bold { font-weight: bold; }
+    .divider { border-bottom: 1px dashed #000; margin: 8px 0; }
+    .header { margin-bottom: 10px; }
+    .header h2 { font-size: 18px; margin-bottom: 4px; }
+    .fulfillment-badge { 
+      display: block; 
+      border: 2px solid #000; 
+      padding: 5px; 
+      margin: 10px 0; 
+      font-size: 20px; 
+      font-weight: bold; 
+      text-align: center;
+    }
+    .items-table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+    .items-table th { border-bottom: 1px solid #000; padding: 5px 0; font-size: 11px; text-transform: uppercase; }
+    .items-table td { vertical-align: top; padding: 6px 0; font-size: 12px; }
+    .item-name { font-weight: bold; font-size: 13px; display: block; }
+    .item-qty { text-align: center; }
+    .item-amount { text-align: right; font-weight: bold; }
+    .modifier { font-size: 10px; padding-left: 5px; font-style: italic; color: #333; }
+    .totals-section { margin-top: 10px; }
+    .totals-row { display: flex; justify-content: space-between; padding: 2px 0; }
+    .grand-total { border-top: 1px solid #000; margin-top: 5px; padding-top: 5px; font-size: 16px; font-weight: bold; }
+    .footer { margin-top: 20px; font-size: 10px; }
+    @media print {
+      @page { margin: 0; }
+      body { width: 100%; padding: 5mm; }
+    }
+  `;
+
+  // Items List
+  let itemsHTML = '';
+  order.order_items.forEach((item: any) => {
+    const itemName = item.variant?.name || item.product?.name || 'Item';
+    const mods = item.order_item_modifiers || [];
+    const modsHTML = mods.map((m: any) => `<div class="modifier">- ${m.modifier?.name}</div>`).join('');
+    
+    if (isKitchen) {
+      itemsHTML += `
+        <tr>
+          <td width="30" class="bold">${item.quantity}x</td>
+          <td>
+            <span class="item-name">${itemName.toUpperCase()}</span>
+            ${modsHTML}
+          </td>
+        </tr>
+      `;
+    } else {
+      const unitPrice = Number(item.unit_price || 0);
+      const lineTotal = Number(item.line_total || (unitPrice * item.quantity));
+      itemsHTML += `
+        <tr>
+          <td width="160">
+            <span class="item-name">${itemName}</span>
+            ${modsHTML}
+          </td>
+          <td width="40" class="item-qty">${item.quantity}</td>
+          <td width="100" class="item-amount">${lineTotal.toFixed(2)}</td>
+        </tr>
+      `;
+    }
+  });
+
+  // Totals Section (Customer only)
+  let totalsHTML = '';
+  if (!isKitchen) {
+    const subtotal = Number(order.subtotal || 0);
+    const itemDiscount = Number(order.total_discount || 0);
+    const extraDiscount = Number(order.extra_discount_amount || 0);
+    const totalTax = Number(order.total_tax || 0);
+    const roundOff = Number(order.round_off_amount || 0);
+    const grandTotal = Number(order.total_amount || 0);
+
+    totalsHTML = `
+      <div class="totals-section">
+        <div class="totals-row">
+          <span>Subtotal</span>
+          <span>${subtotal.toFixed(2)}</span>
+        </div>
+        ${itemDiscount > 0 ? `
+          <div class="totals-row">
+            <span>Item Discount</span>
+            <span>-${itemDiscount.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        ${extraDiscount > 0 ? `
+          <div class="totals-row">
+            <span>Extra Discount ${order.extra_discount_percentage > 0 ? `(${order.extra_discount_percentage}%)` : ''}</span>
+            <span>-${extraDiscount.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        <div class="totals-row">
+          <span>Tax</span>
+          <span>${totalTax.toFixed(2)}</span>
+        </div>
+        ${roundOff !== 0 ? `
+          <div class="totals-row">
+            <span>Round Off</span>
+            <span>${roundOff > 0 ? '+' : ''}${roundOff.toFixed(2)}</span>
+          </div>
+        ` : ''}
+        <div class="totals-row grand-total">
+          <span>TOTAL</span>
+          <span>${grandTotal.toFixed(2)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const title = isKitchen ? 'KITCHEN ORDER TICKET' : 'CUSTOMER BILL';
+  const fulfillmentLabel = (order.fulfillment_type || 'Take Away').replace('_', ' ').toUpperCase();
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>${title}</title>
+      <style>${styles}</style>
+    </head>
+    <body>
+      <div class="header text-center">
+        ${!isKitchen ? `<h2 class="bold">${companyName}</h2>` : ''}
+        <div class="bold">${title}</div>
+        <div>${order.receipt_number || `ORD-${order.id.substring(0, 8)}`}</div>
+        <div>${dateStr}</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="meta-info">
+        ${tableNo ? `<div><span class="bold">TABLE:</span> ${tableNo}</div>` : ''}
+        <div><span class="bold">CUST:</span> ${customerName}</div>
+      </div>
+
+      <div class="fulfillment-badge">${fulfillmentLabel}</div>
+
+      <div class="divider"></div>
+
+      <table class="items-table">
+        ${isKitchen ? '' : `
+          <thead>
+            <tr>
+              <th style="text-align: left;">Item</th>
+              <th style="text-align: center;">Qty</th>
+              <th style="text-align: right;">Amount</th>
+            </tr>
+          </thead>
+        `}
+        <tbody>
+          ${itemsHTML}
+        </tbody>
+      </table>
+
+      <div class="divider"></div>
+
+      ${totalsHTML}
+
+      ${order.notes ? `<div class="footer"><span class="bold">NOTES:</span> ${order.notes}</div>` : ''}
+      
+      ${!isKitchen ? `
+        <div class="text-center footer" style="margin-top: 20px;">
+          <p>Thank you for visit!</p>
+          <p>Please come again</p>
+        </div>
+      ` : ''}
+    </body>
+    </html>
+  `;
+};
+
+/**
+ * Controller: Get Kitchen KOT (Thermal)
+ */
+export const getKitchenKOT = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { orderId } = req.params;
+    const companyId = req.companyId!;
+    const html = await generateThermalKOTHTML(orderId, companyId, 'kitchen');
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Controller: Get Customer KOT/Bill (Thermal)
+ */
+export const getCustomerKOT = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { orderId } = req.params;
+    const companyId = req.companyId!;
+    const html = await generateThermalKOTHTML(orderId, companyId, 'customer');
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+};
+
 function numberToWords(num: number): string {
     const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
     const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
