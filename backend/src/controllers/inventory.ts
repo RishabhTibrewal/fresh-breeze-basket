@@ -529,7 +529,10 @@ export const getStockMovements = async (req: Request, res: Response) => {
             movement_type, 
             start_date,
             end_date,
-            limit = 100, 
+            reference_type,
+            reference_id,
+            search,
+            limit = 50, 
             offset = 0 
         } = req.query;
 
@@ -540,31 +543,26 @@ export const getStockMovements = async (req: Request, res: Response) => {
             });
         }
 
-        // Use supabaseAdmin to bypass RLS for admin queries
+        // Use the expanded view for simplified and more robust searching
         const client = supabaseAdmin || supabase;
         
+        // We can select directly from the view which already has joined names
         let query = client
-            .from('stock_movements')
+            .from('stock_movements_expanded')
             .select(`
                 *,
-                products (
-                    id,
-                    name
-                ),
-                warehouses (
-                    id,
-                    name,
-                    code
-                ),
-                product_variants (
-                    id,
-                    name,
-                    sku
-                )
-            `)
+                products:product_id (id, name),
+                warehouses:outlet_id (id, name, code),
+                product_variants:variant_id (id, name, sku)
+            `, { count: 'exact' })
             .eq('company_id', req.companyId)
-            .order('created_at', { ascending: false })
-            .range(Number(offset), Number(offset) + Number(limit) - 1);
+            .order('created_at', { ascending: false });
+
+        if (search) {
+            const searchTerm = `%${search}%`;
+            // Simplified search on the view level
+            query = query.or(`product_name.ilike.${searchTerm},variant_name.ilike.${searchTerm},variant_sku.ilike.${searchTerm}`);
+        }
 
         if (product_id) {
             query = query.eq('product_id', product_id as string);
@@ -582,6 +580,14 @@ export const getStockMovements = async (req: Request, res: Response) => {
             query = query.eq('movement_type', movement_type as string);
         }
 
+        if (reference_type) {
+            query = query.eq('reference_type', reference_type as string);
+        }
+
+        if (reference_id) {
+            query = query.eq('reference_id', reference_id as string);
+        }
+
         if (start_date) {
             // Parse as midnight UTC to ensure consistency regardless of server timezone
             const startDate = new Date(start_date as string);
@@ -595,7 +601,10 @@ export const getStockMovements = async (req: Request, res: Response) => {
             query = query.lt('created_at', endDate.toISOString());
         }
 
-        const { data, error } = await query;
+        // Apply pagination
+        query = query.range(Number(offset), Number(offset) + Number(limit) - 1);
+
+        const { data, count, error } = await query;
 
         if (error) {
             console.error('Supabase error fetching stock movements:', error);
@@ -610,13 +619,13 @@ export const getStockMovements = async (req: Request, res: Response) => {
         console.log('Stock movements query result:', {
             companyId: req.companyId,
             filters: { product_id, warehouse_id, variant_id, movement_type, start_date, end_date },
-            count: data?.length || 0,
-            sample: data?.[0] ? {
-                id: data[0].id,
-                hasProducts: !!data[0].products,
-                hasWarehouses: !!data[0].warehouses,
-                hasProductVariants: !!data[0].product_variants,
-                productsType: Array.isArray(data[0].products) ? 'array' : typeof data[0].products,
+            count: (data as any[] || []).length,
+            sample: (data as any[])?.[0] ? {
+                id: (data as any[])[0].id,
+                hasProducts: !!(data as any[])[0].products,
+                hasWarehouses: !!(data as any[])[0].warehouses,
+                hasProductVariants: !!(data as any[])[0].product_variants,
+                productsType: Array.isArray((data as any[])[0].products) ? 'array' : typeof (data as any[])[0].products,
             } : null
         });
 
@@ -644,7 +653,7 @@ export const getStockMovements = async (req: Request, res: Response) => {
         // Map Supabase response to frontend interface
         // Supabase returns: products, warehouses, product_variants (plural)
         // Frontend expects: product, warehouse, variant (singular)
-        const movementsWithUsers = (data || []).map((movement: any) => {
+        const movementsWithUsers = ((data as any[]) || []).map((movement: any) => {
             const mapped: any = {
                 id: movement.id,
                 product_id: movement.product_id,
@@ -714,7 +723,8 @@ export const getStockMovements = async (req: Request, res: Response) => {
 
         return res.json({
             success: true,
-            data: movementsWithUsers || []
+            data: movementsWithUsers || [],
+            count: count ?? 0
         });
     } catch (error: any) {
         console.error('Error fetching stock movements:', error);

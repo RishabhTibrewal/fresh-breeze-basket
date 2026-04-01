@@ -197,11 +197,19 @@ export const inventoryService = {
     movement_type?: string;
     start_date?: string;
     end_date?: string;
-  }): Promise<StockMovement[]> {
+    reference_type?: string;
+    reference_id?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ data: StockMovement[]; count: number }> {
     const { data: response } = await apiClient.get<ApiResponse<StockMovement[]>>('/inventory/movements', {
       params: filters,
     });
-    return response.data;
+    return {
+      data: response.data || [],
+      count: response.count || 0
+    };
   },
 
   /**

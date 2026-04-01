@@ -26,23 +26,34 @@ export interface StockLedgerRow {
 }
 
 export async function getStockLedger(q: ReportQuery, companyId: string) {
-  let query = db()
-    .from('stock_movements')
-    .select(`
-      id, created_at, movement_type, reference_type, quantity, outlet_id, notes, source_type,
+  const s = q.search ? `%${q.search}%` : null;
+  
+  let query: any = db().from('stock_movements_expanded');
+
+  if (s) {
+    query = query.select(`
+      *,
       products:product_id(id, name),
       product_variants:variant_id(id, name, sku),
       warehouses:outlet_id(id, name)
     `, { count: 'exact' })
+    .or(`product_name.ilike.${s},variant_name.ilike.${s},variant_sku.ilike.${s}`);
+  } else {
+    query = query.select(`
+      *,
+      products:product_id(id, name),
+      product_variants:variant_id(id, name, sku),
+      warehouses:outlet_id(id, name)
+    `, { count: 'exact' });
+  }
+
+  query = query
     .eq('company_id', companyId)
     .gte('created_at', q.from_date)
     .lte('created_at', q.to_date + 'T23:59:59Z');
 
   if (q.branch_ids?.length) {
     query = query.in('outlet_id', q.branch_ids as string[]);
-  }
-  if (q.search) {
-    // search not natively supported for joins easily; applied in JS below
   }
 
   query = query.order('created_at', { ascending: q.sort_dir === 'asc' });
@@ -64,13 +75,7 @@ export async function getStockLedger(q: ReportQuery, companyId: string) {
     notes: m.notes ?? '',
   }));
 
-  if (q.search) {
-    const s = q.search.toLowerCase();
-    rows = rows.filter(r =>
-      r.product_name.toLowerCase().includes(s) ||
-      String(r.sku).toLowerCase().includes(s)
-    );
-  }
+  // Search is now handled in DB query
 
   const totalIn  = rows.filter(r => r.quantity > 0).reduce((s, r) => s + r.quantity, 0);
   const totalOut = rows.filter(r => r.quantity < 0).reduce((s, r) => s + Math.abs(r.quantity), 0);
@@ -104,15 +109,28 @@ export interface CurrentStockRow {
 }
 
 export async function getCurrentStock(q: ReportQuery, companyId: string) {
-  let query = db()
-    .from('warehouse_inventory')
-    .select(`
-      id, stock_count, reserved_stock, warehouse_id, product_id, variant_id,
+  const s = q.search ? `%${q.search}%` : null;
+  
+  let query: any = db().from('warehouse_inventory_expanded');
+
+  if (s) {
+    query = query.select(`
+      *,
       warehouses:warehouse_id(id, name),
       products:product_id(id, name),
       product_variants:variant_id(id, name, sku)
     `, { count: 'exact' })
-    .eq('company_id', companyId);
+    .or(`product_name.ilike.${s},variant_name.ilike.${s},variant_sku.ilike.${s}`);
+  } else {
+    query = query.select(`
+      *,
+      warehouses:warehouse_id(id, name),
+      products:product_id(id, name),
+      product_variants:variant_id(id, name, sku)
+    `, { count: 'exact' });
+  }
+
+  query = query.eq('company_id', companyId);
 
   if (q.branch_ids?.length) {
     query = query.in('warehouse_id', q.branch_ids as string[]);
@@ -137,13 +155,7 @@ export async function getCurrentStock(q: ReportQuery, companyId: string) {
     available_stock: Number(wi.stock_count ?? 0) - Number(wi.reserved_stock ?? 0),
   }));
 
-  if (q.search) {
-    const s = q.search.toLowerCase();
-    rows = rows.filter(r =>
-      r.product_name.toLowerCase().includes(s) ||
-      String(r.sku).toLowerCase().includes(s)
-    );
-  }
+  // Search is now handled in DB query
 
   const totalItems = rows.reduce((s, r) => s + r.stock_count, 0);
   const outOfStock = rows.filter(r => r.available_stock <= 0).length;

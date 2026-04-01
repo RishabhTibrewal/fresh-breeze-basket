@@ -121,18 +121,19 @@ export default function OrderDocumentPage() {
   });
 
   const {
-    data: stockMovements,
+    data: stockMovements = [],
   } = useQuery<StockMovement[]>({
     queryKey: ["order-document-stock-movements", id],
     enabled: !!id,
     queryFn: async () => {
       if (!id) return [];
       try {
-        // Backend may or may not support reference filters yet; fallback is safe.
-        const res = await inventoryService.getStockMovements();
-        return res.filter(
-          (m) => m.reference_type === "order" && m.reference_id === id
-        );
+        const res = await inventoryService.getStockMovements({
+          reference_type: "order",
+          reference_id: id,
+          limit: 100,
+        });
+        return res.data;
       } catch {
         return [];
       }

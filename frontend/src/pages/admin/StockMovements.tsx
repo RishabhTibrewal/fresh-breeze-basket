@@ -86,34 +86,24 @@ export default function StockMovements() {
     enabled: !!selectedProductId,
   });
 
-  const { data: movements = [], isLoading } = useQuery<StockMovement[]>({
-    queryKey: ['stock-movements', filters, startDate, endDate],
+  const { data: movementsData, isLoading } = useQuery({
+    queryKey: ['stock-movements', filters, startDate, endDate, searchTerm, currentPage],
     queryFn: () => inventoryService.getStockMovements({
       ...filters,
+      search: searchTerm,
       start_date: startDate ? format(startDate, 'yyyy-MM-dd') : undefined,
       end_date: endDate ? format(endDate, 'yyyy-MM-dd') : undefined,
+      limit: ITEMS_PER_PAGE,
+      offset: (currentPage - 1) * ITEMS_PER_PAGE,
     }),
   });
 
-  const filteredMovements = useMemo(() => {
-    return movements.filter(movement => {
-      const searchLower = searchTerm.toLowerCase();
-      return (
-        movement.product?.name.toLowerCase().includes(searchLower) ||
-        movement.variant?.name.toLowerCase().includes(searchLower) ||
-        movement.warehouse?.name.toLowerCase().includes(searchLower) ||
-        movement.movement_type.toLowerCase().includes(searchLower) ||
-        movement.notes?.toLowerCase().includes(searchLower)
-      );
-    });
-  }, [movements, searchTerm]);
-
-  // Pagination calculations
-  const totalItems = filteredMovements.length;
+  const movements = movementsData?.data || [];
+  const totalItems = movementsData?.count || 0;
   const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+  const paginatedMovements = movements;
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const endIndex = startIndex + ITEMS_PER_PAGE;
-  const paginatedMovements = filteredMovements.slice(startIndex, endIndex);
+  const endIndex = startIndex + movements.length;
 
   // Generate page numbers for pagination
   const getPageNumbers = () => {
@@ -177,7 +167,7 @@ export default function StockMovements() {
 
   const handleExportCSV = () => {
     const headers = ['Date', 'Type', 'Product', 'Variant', 'Warehouse', 'Quantity', 'Reference', 'User', 'Notes'];
-    const rows = filteredMovements.map(m => [
+    const rows = movements.map(m => [
       format(new Date(m.created_at), 'yyyy-MM-dd HH:mm:ss'),
       m.movement_type,
       m.product?.name || 'N/A',
