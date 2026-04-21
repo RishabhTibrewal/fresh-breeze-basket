@@ -8,6 +8,9 @@ import type { ReportQuery } from '../../middleware/reportValidator';
 
 const db = () => supabaseAdmin ?? supabase;
 
+const toServiceError = (scope: string, err: any) =>
+  new Error(`${scope} failed: ${err?.message || 'Unknown error'}${err?.code ? ` (${err.code})` : ''}`);
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -178,20 +181,20 @@ export async function getSalespersonPerformance(q: ReportQuery, companyId: strin
     .gte('created_at', q.from_date)
     .lte('created_at', q.to_date + 'T23:59:59Z');
 
-  if (error) throw error;
+  if (error) throw toServiceError('Salesperson performance query', error);
 
   // Get exec profiles
   const execIds = [...new Set((orders ?? []).map((o: any) => o.sales_executive_id as string))];
 
   const { data: profiles } = execIds.length
     ? await db()
-        .from('customers')
-        .select('user_id, first_name, last_name, email')
-        .in('user_id', execIds)
+        .from('profiles')
+        .select('id, first_name, last_name, email')
+        .in('id', execIds)
     : { data: [] };
 
   const profileMap = new Map(
-    (profiles ?? []).map((p: any) => [p.user_id, p])
+    (profiles ?? []).map((p: any) => [p.id, p])
   );
 
   // Targets in date range
@@ -268,22 +271,22 @@ export interface CustomerWiseSalesRow {
 export async function getCustomerWiseSales(q: ReportQuery, companyId: string) {
   const { data: orders, error } = await db()
     .from('orders')
-    .select('user_id, total_amount, created_at, customers:user_id(id, first_name, last_name, email, phone)')
+    .select('customer_id, total_amount, created_at, customers:customer_id(id, name, email, phone)')
     .eq('company_id', companyId)
     .eq('order_type', 'sales')
     .neq('status', 'cancelled')
     .gte('created_at', q.from_date)
     .lte('created_at', q.to_date + 'T23:59:59Z');
 
-  if (error) throw error;
+  if (error) throw toServiceError('Customer-wise sales query', error);
 
   const buckets = new Map<string, { customer: any; revenue: number; orders: number; lastDate: string }>();
   (orders ?? []).forEach((o: any) => {
-    const uid = o.user_id ?? 'unknown';
-    if (!buckets.has(uid)) {
-      buckets.set(uid, { customer: o.customers, revenue: 0, orders: 0, lastDate: '' });
+    const customerId = o.customer_id ?? 'unknown';
+    if (!buckets.has(customerId)) {
+      buckets.set(customerId, { customer: o.customers, revenue: 0, orders: 0, lastDate: '' });
     }
-    const b = buckets.get(uid)!;
+    const b = buckets.get(customerId)!;
     b.revenue += Number(o.total_amount);
     b.orders += 1;
     const d = o.created_at?.split('T')[0] ?? '';
@@ -291,11 +294,11 @@ export async function getCustomerWiseSales(q: ReportQuery, companyId: string) {
     if (!b.customer && o.customers) b.customer = o.customers;
   });
 
-  let rows: CustomerWiseSalesRow[] = Array.from(buckets.entries()).map(([uid, b]) => ({
-    customer_id: uid,
+  let rows: CustomerWiseSalesRow[] = Array.from(buckets.entries()).map(([customerId, b]) => ({
+    customer_id: customerId,
     customer_name: b.customer
-      ? `${b.customer.first_name ?? ''} ${b.customer.last_name ?? ''}`.trim() || b.customer.email
-      : uid.substring(0, 8),
+      ? b.customer.name || b.customer.email
+      : customerId.substring(0, 8),
     email: b.customer?.email ?? '',
     phone: b.customer?.phone ?? '',
     total_orders: b.orders,
@@ -354,7 +357,7 @@ export async function getProductWiseSales(q: ReportQuery, companyId: string) {
     .gte('order.created_at', q.from_date)
     .lte('order.created_at', q.to_date + 'T23:59:59Z');
 
-  if (error) throw error;
+  if (error) throw toServiceError('Product-wise sales query', error);
 
   const buckets = new Map<string, {
     product: any; variant: any; qty: number; revenue: number; tax: number; orders: Set<string>;
@@ -426,7 +429,7 @@ export async function getTargetVsAchievement(q: ReportQuery, companyId: string) 
     .lte('period_start', q.to_date)
     .gte('period_end', q.from_date);
 
-  if (te) throw te;
+  if (te) throw toServiceError('Target query', te);
 
   const { data: orders, error: oe } = await db()
     .from('orders')
@@ -438,7 +441,7 @@ export async function getTargetVsAchievement(q: ReportQuery, companyId: string) 
     .gte('created_at', q.from_date)
     .lte('created_at', q.to_date + 'T23:59:59Z');
 
-  if (oe) throw oe;
+  if (oe) throw toServiceError('Target achievement order query', oe);
 
   // Revenue map per executive
   const revenueMap = new Map<string, number>();
@@ -450,9 +453,9 @@ export async function getTargetVsAchievement(q: ReportQuery, companyId: string) 
   // Exec profiles
   const execIds = [...new Set((targets ?? []).map((t: any) => t.sales_executive_id as string))];
   const { data: profiles } = execIds.length
-    ? await db().from('customers').select('user_id, first_name, last_name').in('user_id', execIds)
+    ? await db().from('profiles').select('id, first_name, last_name').in('id', execIds)
     : { data: [] };
-  const profileMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p]));
+  const profileMap = new Map((profiles ?? []).map((p: any) => [p.id, p]));
 
   const rows: TargetVsAchievementRow[] = (targets ?? []).map((t: any) => {
     const profile = profileMap.get(t.sales_executive_id) as any;
@@ -518,7 +521,7 @@ export async function getPendingDeliveries(q: ReportQuery, companyId: string) {
     .order('created_at', { ascending: true })
     .range((q.page - 1) * q.page_size, q.page * q.page_size - 1);
 
-  if (error) throw error;
+  if (error) throw toServiceError('Pending deliveries query', error);
 
   const today = new Date();
   const rows: PendingDeliveryRow[] = (data ?? []).map((o: any) => {
@@ -572,7 +575,7 @@ export async function getSalesReturns(q: ReportQuery, companyId: string) {
     .order('created_at', { ascending: false })
     .range((q.page - 1) * q.page_size, q.page * q.page_size - 1);
 
-  if (error) throw error;
+  if (error) throw toServiceError('Sales returns query', error);
 
   const rows: SalesReturnRow[] = (data ?? []).map((o: any) => {
     const c = o.customers;

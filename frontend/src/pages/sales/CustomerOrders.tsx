@@ -395,7 +395,7 @@ export default function CustomerOrders() {
                     <TableRow key={order.id}>
                       <TableCell className="px-2 py-2 font-medium text-sm">{order.order_number}</TableCell>
                       <TableCell className="px-2 py-2 text-sm">{formatDate(order.created_at)}</TableCell>
-                      <TableCell className="px-2 py-2 text-sm font-medium">${parseFloat(order.total_amount.toString()).toFixed(2)}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm font-medium">₹{parseFloat(order.total_amount.toString()).toFixed(2)}</TableCell>
                       <TableCell className="px-2 py-2">{getStatusBadge(order.status)}</TableCell>
                       <TableCell className="px-2 py-2">
                         <div className="space-y-1">
@@ -413,7 +413,7 @@ export default function CustomerOrders() {
                             
                             return (
                               <div className="text-xs sm:text-sm">
-                                <div className="font-medium">${order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount.toString()).toFixed(2)}</div>
+                                <div className="font-medium">₹{order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount.toString()).toFixed(2)}</div>
                                 <div className="text-muted-foreground">
                                   Due: {formatDate(order.credit_details.end_date || (order.credit_details as any).due_date, 'MMM d, yyyy')}
                                 </div>

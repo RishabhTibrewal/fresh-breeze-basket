@@ -328,7 +328,11 @@ export async function getMasterDashboardKpis(companyId: string): Promise<MasterD
     client.from('products').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
     client.from('customers').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
     client.from('suppliers').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
-    client.from('profiles').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
+    client
+      .from('company_memberships')
+      .select('user_id', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .eq('is_active', true),
   ]);
   return {
     total_products:  prodsRes.count ?? 0,

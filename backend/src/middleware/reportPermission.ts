@@ -20,8 +20,14 @@ export const requireReportPermission = (permCode: string) => {
       }
 
       // Admin role bypasses all report permission checks
-      const adminRoles = req.user.roles ?? [];
-      if (adminRoles.includes('admin') || adminRoles.includes('super_admin')) {
+      const userRoles = req.user.roles ?? [];
+      if (userRoles.includes('admin') || userRoles.includes('super_admin')) {
+        return next();
+      }
+
+      // Accounts can view all report types across modules.
+      // Keep export permissions explicit by limiting this bypass to *.view codes.
+      if (userRoles.includes('accounts') && permCode.endsWith('.view')) {
         return next();
       }
 

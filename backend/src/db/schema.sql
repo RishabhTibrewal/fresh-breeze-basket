@@ -173,7 +173,7 @@ DROP POLICY IF EXISTS "Enable read access for users to their own addresses" ON p
 DROP POLICY IF EXISTS "Enable update for users to their own addresses" ON public.addresses;
 DROP POLICY IF EXISTS "Company admins can manage all addresses" ON public.addresses;
 DROP POLICY IF EXISTS "Users can manage their own addresses" ON public.addresses;
-DROP POLICY IF EXISTS "Sales can manage customer addresses" ON public.addresses;
+DROP POLICY IF EXISTS "Staff can manage customer addresses" ON public.addresses;
 
 -- Admins can manage all addresses in their company
 CREATE POLICY "Company admins can manage all addresses"
@@ -187,28 +187,16 @@ CREATE POLICY "Users can manage their own addresses"
   USING (auth.uid() = user_id AND company_id = public.current_company_id())
   WITH CHECK (auth.uid() = user_id AND company_id = public.current_company_id());
 
--- Sales executives can manage addresses for their customers
-CREATE POLICY "Sales can manage customer addresses"
+-- Staff can manage customer addresses
+CREATE POLICY "Staff can manage customer addresses"
   ON public.addresses FOR ALL TO authenticated
   USING (
     company_id = public.current_company_id()
-    AND public.is_admin_or_sales(auth.uid())
-    AND EXISTS (
-      SELECT 1 FROM public.customers
-      WHERE customers.user_id = addresses.user_id
-        AND customers.sales_executive_id = auth.uid()
-        AND customers.company_id = public.current_company_id()
-    )
+    AND public.has_any_role(auth.uid(), ARRAY['sales', 'admin', 'accounts'])
   )
   WITH CHECK (
     company_id = public.current_company_id()
-    AND public.is_admin_or_sales(auth.uid())
-    AND EXISTS (
-      SELECT 1 FROM public.customers
-      WHERE customers.user_id = addresses.user_id
-        AND customers.sales_executive_id = auth.uid()
-        AND customers.company_id = public.current_company_id()
-    )
+    AND public.has_any_role(auth.uid(), ARRAY['sales', 'admin', 'accounts'])
   );
 
 -- Orders Table
@@ -553,7 +541,7 @@ GRANT EXECUTE ON FUNCTION public.create_company_with_admin(
     TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
 ) TO service_role;
 
--- Create a trigger to sync new auth users to profiles with company context
+-- Create a trigger to sync new auth users to global profiles
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -573,7 +561,6 @@ BEGIN
         first_name,
         last_name,
         phone,
-        company_id,
         role
     )
     VALUES (
@@ -582,7 +569,6 @@ BEGIN
         NULLIF(NEW.raw_user_meta_data->>'first_name', ''),
         NULLIF(NEW.raw_user_meta_data->>'last_name', ''),
         NULLIF(NEW.raw_user_meta_data->>'phone', ''),
-        v_company_id,
         v_role
     );
 
@@ -613,7 +599,7 @@ CREATE TRIGGER on_auth_user_created
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_new_user();
 
--- Ensure memberships stay in sync with profiles
+-- Ensure memberships stay in sync with profiles (legacy compatibility)
 CREATE OR REPLACE FUNCTION public.ensure_membership_for_profile()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -621,34 +607,16 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-    IF NEW.company_id IS NULL THEN
-        RETURN NEW;
-    END IF;
-
-    INSERT INTO public.company_memberships (
-        user_id,
-        company_id,
-        role,
-        is_active
-    )
-    VALUES (
-        NEW.id,
-        NEW.company_id,
-        COALESCE(NEW.role, 'user'),
-        true
-    )
-    ON CONFLICT (user_id, company_id) DO UPDATE
-        SET role = EXCLUDED.role,
-            is_active = true,
-            updated_at = CURRENT_TIMESTAMP;
-
+    -- Profiles are global. Memberships should no longer be derived from profile.company_id.
+    -- Keep this trigger as a no-op for backward compatibility.
     RETURN NEW;
+
 END;
 $$;
 
 DROP TRIGGER IF EXISTS ensure_membership_on_profile_upsert ON public.profiles;
 CREATE TRIGGER ensure_membership_on_profile_upsert
-    AFTER INSERT OR UPDATE OF company_id, role ON public.profiles
+    AFTER INSERT OR UPDATE OF role ON public.profiles
     FOR EACH ROW
     EXECUTE FUNCTION public.ensure_membership_for_profile();
 
@@ -666,14 +634,7 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    -- Sync profile company_id if profile exists
-    UPDATE public.profiles
-        SET company_id = NEW.company_id,
-            updated_at = CURRENT_TIMESTAMP
-    WHERE id = NEW.user_id
-        AND (company_id IS NULL OR company_id <> NEW.company_id);
-
-    -- If profile doesn't exist, create it when we have an email
+    -- If profile doesn't exist, create global profile when we have an email
     SELECT role INTO v_role
     FROM public.profiles
     WHERE id = NEW.user_id;
@@ -686,14 +647,12 @@ BEGIN
                     id,
                     email,
                     phone,
-                    company_id,
                     role
                 )
                 VALUES (
                     NEW.user_id,
                     NEW.email,
                     NEW.phone,
-                    NEW.company_id,
                     v_role
                 );
             EXCEPTION WHEN unique_violation THEN

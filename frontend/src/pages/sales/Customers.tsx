@@ -535,7 +535,7 @@ export default function Customers() {
                       </div>
                       <div className="min-w-0">
                         <span className="text-muted-foreground">Spent: </span>
-                        <span className="font-medium">${(customer.totalSpent || 0).toFixed(2)}</span>
+                        <span className="font-medium">₹{(customer.totalSpent || 0).toFixed(2)}</span>
                       </div>
                       <div className="min-w-0 col-span-2">
                         <span className="text-muted-foreground">Last Order: </span>

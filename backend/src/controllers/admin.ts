@@ -50,38 +50,65 @@ export const getAllUsers = async (req: Request, res: Response) => {
     const userIds = memberships.map((m: any) => m.user_id);
     const membershipMap = new Map(memberships.map((m: any) => [m.user_id, m]));
     
-    // Fetch profiles for these users
-    let profilesQuery = db
+    // Fetch global profiles for membership users
+    const { data: profiles, error: profilesError } = await db
       .from('profiles')
       .select('*')
       .in('id', userIds);
     
-    // Add search filter if provided
-    if (search) {
-      const searchTerm = `%${search}%`;
-      profilesQuery = profilesQuery.or(`email.ilike.${searchTerm},first_name.ilike.${searchTerm},last_name.ilike.${searchTerm}`);
-    }
-    
-    const { data: profiles, error: profilesError } = await profilesQuery;
-    
     if (profilesError) {
       throw new ApiError(500, `Error fetching profiles: ${profilesError.message}`);
     }
-    
-    // Combine profiles with membership data
-    let users = (profiles || [])
-      .map((profile: any) => {
-        const membership = membershipMap.get(profile.id);
-        if (!membership) return null;
-        
-        return {
-          ...profile,
-          membership_role: membership.role, // Role from membership (backward compatibility)
-          membership_created_at: membership.created_at,
-          membership_is_active: membership.is_active
-        };
-      })
-      .filter((user: any) => user !== null);
+
+    const profileMap = new Map((profiles || []).map((profile: any) => [profile.id, profile]));
+    const missingProfileUserIds = userIds.filter((id: string) => !profileMap.has(id));
+    const authEmailMap = new Map<string, string>();
+
+    // Fallback for users whose profile row is missing: try auth.users email
+    if (supabaseAdmin && missingProfileUserIds.length > 0) {
+      const adminClient = supabaseAdmin;
+      await Promise.all(
+        missingProfileUserIds.map(async (id: string) => {
+          const { data: authUserData, error: authUserError } = await adminClient.auth.admin.getUserById(id);
+          if (!authUserError && authUserData.user?.email) {
+            authEmailMap.set(id, authUserData.user.email);
+          }
+        })
+      );
+    }
+
+    // Combine memberships with optional profile identity data
+    let users = memberships.map((membership: any) => {
+      const profile = profileMap.get(membership.user_id);
+      const fallbackEmail = authEmailMap.get(membership.user_id) || null;
+      return {
+        id: membership.user_id,
+        email: profile?.email || fallbackEmail || `unknown+${membership.user_id}@no-profile.local`,
+        first_name: profile?.first_name || null,
+        last_name: profile?.last_name || null,
+        phone: profile?.phone || null,
+        avatar_url: profile?.avatar_url || null,
+        created_at: profile?.created_at || membership.created_at,
+        updated_at: profile?.updated_at || membership.created_at,
+        role: profile?.role || membership.role || 'user',
+        membership_role: membership.role, // Role from membership (backward compatibility)
+        membership_created_at: membership.created_at,
+        membership_is_active: membership.is_active,
+        has_profile: Boolean(profile)
+      };
+    });
+
+    // Apply search filter after combining profile + fallback identity values
+    if (search) {
+      const normalizedSearch = String(search).toLowerCase();
+      users = users.filter((user: any) => {
+        const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim().toLowerCase();
+        return (
+          String(user.email || '').toLowerCase().includes(normalizedSearch) ||
+          fullName.includes(normalizedSearch)
+        );
+      });
+    }
     
     // Sort by membership created_at (newest first)
     users.sort((a: any, b: any) => {
@@ -1421,7 +1448,7 @@ export const createLeadAdmin = async (req: Request, res: Response) => {
         description: description || null,
         source: source || 'other',
         estimated_value: estimated_value ? parseFloat(estimated_value) : 0,
-        currency: currency || 'USD',
+        currency: currency || 'INR',
         stage: stage || 'new',
         priority: priority || 'medium',
         address: address || null,

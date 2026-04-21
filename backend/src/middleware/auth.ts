@@ -202,6 +202,13 @@ export const isAuthenticated = async (req: Request, res: Response, next: NextFun
 
     try {
       const payload = await verifySupabaseJwt(token);
+      if (!req.companyId) {
+        return res.status(400).json({ error: 'Company context is required' });
+      }
+      const membership = await getUserMembership(payload.sub, req.companyId);
+      if (!membership) {
+        return res.status(403).json({ error: 'User does not belong to this company' });
+      }
       const userRoles = await getUserRoles(payload.sub, req.companyId);
       req.user = {
         id: payload.sub,

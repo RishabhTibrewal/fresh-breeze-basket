@@ -40,3 +40,21 @@ These rules are aggregated from the `@rules` directory (`.cursor/rules`) to ensu
 - **Optimistic Updates:** Update the UI immediately, then revert gracefully if backend mutations fail.
 - **File Uploads:** Scopes must be company-prefixed (`{companyId}/...`). Used Cloudflare R2 per `ARCH_STATE.md`.
 - **Error Handling:** Unified API Error class mapping Postgres codes (e.g., `23505` to Duplicates, `23503` to Constraints).
+
+---
+
+## 5. Project Skills (Task-Specific Playbooks)
+- Prefer using project skills for procedural, repeatable workflows; keep rules focused on invariant constraints.
+- Available skills:
+  - `.cursor/skills/new-tenant-scoped-endpoint/SKILL.md`
+  - `.cursor/skills/supabase-migration/SKILL.md`
+  - `.cursor/skills/inventory-mutation/SKILL.md`
+  - `.cursor/skills/arch-state-update/SKILL.md`
+  - `.cursor/skills/order-financial-math/SKILL.md`
+- If a task matches one of these workflows, read and follow that skill before implementation.
+
+---
+
+## 6. Code Review Graph Integration
+- Before substantial code changes, refactors, or code-review requests, consult `.code-review-graph/graph.db` for impact/context analysis when available.
+- Keep `.code-review-graph/graph.db` fresh after major edits; project hook automation is configured in `.cursor/hooks.json`.

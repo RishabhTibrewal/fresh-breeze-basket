@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS public.leads (
     description TEXT,
     source VARCHAR(100) NOT NULL DEFAULT 'other', -- website, referral, cold_call, email, social_media, trade_show, other
     estimated_value DECIMAL(12, 2) DEFAULT 0,
-    currency VARCHAR(3) DEFAULT 'USD',
+    currency VARCHAR(3) DEFAULT 'INR',
     
     -- Lead Status
     stage VARCHAR(50) NOT NULL DEFAULT 'new', -- new, contacted, qualified, proposal, negotiation, won, lost

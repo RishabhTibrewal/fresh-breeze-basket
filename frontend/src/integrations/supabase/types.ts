@@ -389,27 +389,57 @@ export type Database = {
       }
       companies: {
         Row: {
+          address: string | null
+          bank_details: Json | null
+          city: string | null
+          country: string | null
           created_at: string | null
+          email: string | null
+          gstin: string | null
           id: string
           is_active: boolean | null
+          logo_url: string | null
           name: string
+          phone: string | null
+          postal_code: string | null
           slug: string
+          state: string | null
           updated_at: string | null
         }
         Insert: {
+          address?: string | null
+          bank_details?: Json | null
+          city?: string | null
+          country?: string | null
           created_at?: string | null
+          email?: string | null
+          gstin?: string | null
           id?: string
           is_active?: boolean | null
+          logo_url?: string | null
           name: string
+          phone?: string | null
+          postal_code?: string | null
           slug: string
+          state?: string | null
           updated_at?: string | null
         }
         Update: {
+          address?: string | null
+          bank_details?: Json | null
+          city?: string | null
+          country?: string | null
           created_at?: string | null
+          email?: string | null
+          gstin?: string | null
           id?: string
           is_active?: boolean | null
+          logo_url?: string | null
           name?: string
+          phone?: string | null
+          postal_code?: string | null
           slug?: string
+          state?: string | null
           updated_at?: string | null
         }
         Relationships: []
@@ -537,6 +567,85 @@ export type Database = {
           },
         ]
       }
+      credit_notes: {
+        Row: {
+          amount: number
+          cd_percentage: number
+          cn_date: string
+          cn_number: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          customer_id: string | null
+          id: string
+          notes: string | null
+          order_id: string | null
+          reason: string
+          status: string
+          tax_amount: number
+          total_amount: number
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          cd_percentage?: number
+          cn_date?: string
+          cn_number?: string | null
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          customer_id?: string | null
+          id?: string
+          notes?: string | null
+          order_id?: string | null
+          reason?: string
+          status?: string
+          tax_amount?: number
+          total_amount: number
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          cd_percentage?: number
+          cn_date?: string
+          cn_number?: string | null
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          customer_id?: string | null
+          id?: string
+          notes?: string | null
+          order_id?: string | null
+          reason?: string
+          status?: string
+          tax_amount?: number
+          total_amount?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_notes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_notes_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_notes_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       credit_periods: {
         Row: {
           amount: number
@@ -603,6 +712,10 @@ export type Database = {
       }
       customers: {
         Row: {
+          cd_days: number
+          cd_enabled: boolean
+          cd_percentage: number
+          cd_settlement_mode: string
           company_id: string
           created_at: string | null
           credit_limit: number | null
@@ -614,11 +727,16 @@ export type Database = {
           party_id: string | null
           phone: string | null
           sales_executive_id: string | null
+          source: string | null
           trn_number: string | null
           updated_at: string | null
           user_id: string | null
         }
         Insert: {
+          cd_days?: number
+          cd_enabled?: boolean
+          cd_percentage?: number
+          cd_settlement_mode?: string
           company_id?: string
           created_at?: string | null
           credit_limit?: number | null
@@ -630,11 +748,16 @@ export type Database = {
           party_id?: string | null
           phone?: string | null
           sales_executive_id?: string | null
+          source?: string | null
           trn_number?: string | null
           updated_at?: string | null
           user_id?: string | null
         }
         Update: {
+          cd_days?: number
+          cd_enabled?: boolean
+          cd_percentage?: number
+          cd_settlement_mode?: string
           company_id?: string
           created_at?: string | null
           credit_limit?: number | null
@@ -646,6 +769,7 @@ export type Database = {
           party_id?: string | null
           phone?: string | null
           sales_executive_id?: string | null
+          source?: string | null
           trn_number?: string | null
           updated_at?: string | null
           user_id?: string | null
@@ -961,6 +1085,52 @@ export type Database = {
           },
         ]
       }
+      order_item_modifiers: {
+        Row: {
+          company_id: string
+          id: string
+          modifier_id: string
+          order_item_id: string
+          price_adjust: number | null
+        }
+        Insert: {
+          company_id?: string
+          id?: string
+          modifier_id: string
+          order_item_id: string
+          price_adjust?: number | null
+        }
+        Update: {
+          company_id?: string
+          id?: string
+          modifier_id?: string
+          order_item_id?: string
+          price_adjust?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_item_modifiers_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_item_modifiers_modifier_id_fkey"
+            columns: ["modifier_id"]
+            isOneToOne: false
+            referencedRelation: "modifiers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_item_modifiers_order_item_id_fkey"
+            columns: ["order_item_id"]
+            isOneToOne: false
+            referencedRelation: "order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       order_items: {
         Row: {
           company_id: string
@@ -1100,9 +1270,18 @@ export type Database = {
       orders: {
         Row: {
           billing_address_id: string | null
+          cd_amount: number
+          cd_days: number
+          cd_enabled: boolean
+          cd_percentage: number
+          cd_settlement_mode: string
+          cd_valid_until: string | null
           company_id: string
           created_at: string | null
+          customer_id: string | null
+          delivery_address: Json | null
           estimated_delivery: string | null
+          extra_charges: Json
           extra_discount_amount: number
           extra_discount_percentage: number
           fulfillment_type: string | null
@@ -1118,13 +1297,18 @@ export type Database = {
           payment_intent_id: string | null
           payment_method: string | null
           payment_status: string | null
+          pos_session_id: string | null
           quotation_id: string | null
+          receipt_number: string | null
+          round_off_amount: number
           sales_executive_id: string | null
           shipping_address_id: string | null
           status: string
           subtotal: number
+          taxable_value: number
           total_amount: number
           total_discount: number
+          total_extra_charges: number
           total_tax: number
           tracking_number: string | null
           updated_at: string | null
@@ -1132,9 +1316,18 @@ export type Database = {
         }
         Insert: {
           billing_address_id?: string | null
+          cd_amount?: number
+          cd_days?: number
+          cd_enabled?: boolean
+          cd_percentage?: number
+          cd_settlement_mode?: string
+          cd_valid_until?: string | null
           company_id?: string
           created_at?: string | null
+          customer_id?: string | null
+          delivery_address?: Json | null
           estimated_delivery?: string | null
+          extra_charges?: Json
           extra_discount_amount?: number
           extra_discount_percentage?: number
           fulfillment_type?: string | null
@@ -1150,13 +1343,18 @@ export type Database = {
           payment_intent_id?: string | null
           payment_method?: string | null
           payment_status?: string | null
+          pos_session_id?: string | null
           quotation_id?: string | null
+          receipt_number?: string | null
+          round_off_amount?: number
           sales_executive_id?: string | null
           shipping_address_id?: string | null
           status?: string
           subtotal?: number
+          taxable_value?: number
           total_amount: number
           total_discount?: number
+          total_extra_charges?: number
           total_tax?: number
           tracking_number?: string | null
           updated_at?: string | null
@@ -1164,9 +1362,18 @@ export type Database = {
         }
         Update: {
           billing_address_id?: string | null
+          cd_amount?: number
+          cd_days?: number
+          cd_enabled?: boolean
+          cd_percentage?: number
+          cd_settlement_mode?: string
+          cd_valid_until?: string | null
           company_id?: string
           created_at?: string | null
+          customer_id?: string | null
+          delivery_address?: Json | null
           estimated_delivery?: string | null
+          extra_charges?: Json
           extra_discount_amount?: number
           extra_discount_percentage?: number
           fulfillment_type?: string | null
@@ -1182,13 +1389,18 @@ export type Database = {
           payment_intent_id?: string | null
           payment_method?: string | null
           payment_status?: string | null
+          pos_session_id?: string | null
           quotation_id?: string | null
+          receipt_number?: string | null
+          round_off_amount?: number
           sales_executive_id?: string | null
           shipping_address_id?: string | null
           status?: string
           subtotal?: number
+          taxable_value?: number
           total_amount?: number
           total_discount?: number
+          total_extra_charges?: number
           total_tax?: number
           tracking_number?: string | null
           updated_at?: string | null
@@ -1210,6 +1422,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "orders_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "orders_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
@@ -1228,6 +1447,13 @@ export type Database = {
             columns: ["outlet_id"]
             isOneToOne: false
             referencedRelation: "warehouses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_pos_session_id_fkey"
+            columns: ["pos_session_id"]
+            isOneToOne: false
+            referencedRelation: "pos_sessions"
             referencedColumns: ["id"]
           },
           {
@@ -1420,6 +1646,8 @@ export type Database = {
       payments: {
         Row: {
           amount: number
+          cash_tendered: number | null
+          change_given: number | null
           cheque_no: string | null
           company_id: string
           created_at: string | null
@@ -1436,6 +1664,8 @@ export type Database = {
         }
         Insert: {
           amount: number
+          cash_tendered?: number | null
+          change_given?: number | null
           cheque_no?: string | null
           company_id?: string
           created_at?: string | null
@@ -1452,6 +1682,8 @@ export type Database = {
         }
         Update: {
           amount?: number
+          cash_tendered?: number | null
+          change_given?: number | null
           cheque_no?: string | null
           company_id?: string
           created_at?: string | null
@@ -1509,6 +1741,60 @@ export type Database = {
           module?: string
         }
         Relationships: []
+      }
+      pos_sessions: {
+        Row: {
+          cashier_id: string
+          closed_at: string | null
+          closing_cash: number | null
+          company_id: string
+          expected_cash: number | null
+          id: string
+          opened_at: string | null
+          opening_cash: number | null
+          outlet_id: string
+          status: string | null
+        }
+        Insert: {
+          cashier_id: string
+          closed_at?: string | null
+          closing_cash?: number | null
+          company_id: string
+          expected_cash?: number | null
+          id?: string
+          opened_at?: string | null
+          opening_cash?: number | null
+          outlet_id: string
+          status?: string | null
+        }
+        Update: {
+          cashier_id?: string
+          closed_at?: string | null
+          closing_cash?: number | null
+          company_id?: string
+          expected_cash?: number | null
+          id?: string
+          opened_at?: string | null
+          opening_cash?: number | null
+          outlet_id?: string
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_sessions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_sessions_outlet_id_fkey"
+            columns: ["outlet_id"]
+            isOneToOne: false
+            referencedRelation: "warehouses"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       product_images: {
         Row: {
@@ -2038,6 +2324,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           customer_id: string | null
+          extra_charges: Json
           extra_discount_amount: number | null
           extra_discount_percentage: number
           id: string
@@ -2045,12 +2332,15 @@ export type Database = {
           notes: string | null
           parent_quotation_id: string | null
           quotation_number: string | null
+          round_off_amount: number
           sales_executive_id: string | null
           status: string
           subtotal: number
+          taxable_value: number
           terms_and_conditions: string | null
           total_amount: number | null
           total_discount: number | null
+          total_extra_charges: number
           total_tax: number | null
           updated_at: string
           valid_until: string | null
@@ -2062,6 +2352,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           customer_id?: string | null
+          extra_charges?: Json
           extra_discount_amount?: number | null
           extra_discount_percentage?: number
           id?: string
@@ -2069,12 +2360,15 @@ export type Database = {
           notes?: string | null
           parent_quotation_id?: string | null
           quotation_number?: string | null
+          round_off_amount?: number
           sales_executive_id?: string | null
           status?: string
           subtotal?: number
+          taxable_value?: number
           terms_and_conditions?: string | null
           total_amount?: number | null
           total_discount?: number | null
+          total_extra_charges?: number
           total_tax?: number | null
           updated_at?: string
           valid_until?: string | null
@@ -2086,6 +2380,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           customer_id?: string | null
+          extra_charges?: Json
           extra_discount_amount?: number | null
           extra_discount_percentage?: number
           id?: string
@@ -2093,12 +2388,15 @@ export type Database = {
           notes?: string | null
           parent_quotation_id?: string | null
           quotation_number?: string | null
+          round_off_amount?: number
           sales_executive_id?: string | null
           status?: string
           subtotal?: number
+          taxable_value?: number
           terms_and_conditions?: string | null
           total_amount?: number | null
           total_discount?: number | null
+          total_extra_charges?: number
           total_tax?: number | null
           updated_at?: string
           valid_until?: string | null
@@ -3130,6 +3428,120 @@ export type Database = {
         }
         Relationships: []
       }
+      stock_movements_expanded: {
+        Row: {
+          company_id: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string | null
+          movement_type: string | null
+          notes: string | null
+          outlet_id: string | null
+          product_id: string | null
+          product_name: string | null
+          quantity: number | null
+          reference_id: string | null
+          reference_type: string | null
+          source_type: string | null
+          variant_id: string | null
+          variant_name: string | null
+          variant_sku: string | null
+          warehouse_code: string | null
+          warehouse_name: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_movements_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_outlet_id_fkey"
+            columns: ["outlet_id"]
+            isOneToOne: false
+            referencedRelation: "warehouses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product_stock_view"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "stock_movements_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "product_variants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      warehouse_inventory_expanded: {
+        Row: {
+          company_id: string | null
+          created_at: string | null
+          id: string | null
+          location: string | null
+          product_id: string | null
+          product_name: string | null
+          reserved_stock: number | null
+          stock_count: number | null
+          updated_at: string | null
+          variant_id: string | null
+          variant_name: string | null
+          variant_sku: string | null
+          warehouse_id: string | null
+          warehouse_name: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "warehouse_inventory_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "warehouse_inventory_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "product_stock_view"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "warehouse_inventory_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "warehouse_inventory_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "product_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "warehouse_inventory_warehouse_id_fkey"
+            columns: ["warehouse_id"]
+            isOneToOne: false
+            referencedRelation: "warehouses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       accept_quotation: { Args: { p_quotation_id: string }; Returns: string }
@@ -3297,116 +3709,116 @@ type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
 
 export type Tables<
   DefaultSchemaTableNameOrOptions extends
-    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
-    | { schema: keyof DatabaseWithoutInternals },
+  | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+  | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+  ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+    DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+  : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
   ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+    DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
       Row: infer R
     }
-    ? R
-    : never
+  ? R
+  : never
   : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])
-    ? (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
-        Row: infer R
-      }
-      ? R
-      : never
-    : never
+    DefaultSchema["Views"])
+  ? (DefaultSchema["Tables"] &
+    DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+      Row: infer R
+    }
+  ? R
+  : never
+  : never
 
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+  | keyof DefaultSchema["Tables"]
+  | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+  ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+  : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
   ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Insert: infer I
-    }
-    ? I
-    : never
+    Insert: infer I
+  }
+  ? I
+  : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Insert: infer I
-      }
-      ? I
-      : never
-    : never
+  ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+    Insert: infer I
+  }
+  ? I
+  : never
+  : never
 
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+  | keyof DefaultSchema["Tables"]
+  | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+  ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+  : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
   ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Update: infer U
-    }
-    ? U
-    : never
+    Update: infer U
+  }
+  ? U
+  : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Update: infer U
-      }
-      ? U
-      : never
-    : never
+  ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+    Update: infer U
+  }
+  ? U
+  : never
+  : never
 
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
+  | keyof DefaultSchema["Enums"]
+  | { schema: keyof DatabaseWithoutInternals },
   EnumName extends DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+  ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+  : never = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
   ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
-    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
-    : never
+  ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+  : never
 
 export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
-    | keyof DefaultSchema["CompositeTypes"]
-    | { schema: keyof DatabaseWithoutInternals },
+  | keyof DefaultSchema["CompositeTypes"]
+  | { schema: keyof DatabaseWithoutInternals },
   CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+  ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+  : never = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
   ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
-    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
-    : never
+  ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+  : never
 
 export const Constants = {
   public: {

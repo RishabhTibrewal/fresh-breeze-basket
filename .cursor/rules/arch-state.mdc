@@ -13,6 +13,12 @@ Your primary directive is to maintain architectural consistency and strictly adh
 # Anti-Hallucination & Error Prevention
 1. Before writing code, consult the "Anti-Hallucination Ledger" in `ARCH_STATE.md`. Do not repeat past mistakes logged there.
 2. Do not invent libraries, assume database schemas, or hallucinate API routes. If the required information is not in the codebase or `ARCH_STATE.md`, ask for clarification.
+3. For procedural implementation workflows, prefer project skills under `.cursor/skills/`:
+   - `new-tenant-scoped-endpoint`
+   - `supabase-migration`
+   - `inventory-mutation`
+   - `arch-state-update`
+   - `order-financial-math`
 
 # Mandatory State Updates
 If a coding session results in any of the following:

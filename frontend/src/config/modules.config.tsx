@@ -126,7 +126,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     kpis: [
       { label: 'Today\'s Orders', key: 'orders_today' },
       { label: 'Outstanding Invoices', key: 'outstanding_invoices' },
-      { label: 'Monthly Revenue', key: 'monthly_revenue', formatter: (v) => `$${v?.toLocaleString()}` }
+      { label: 'Monthly Revenue', key: 'monthly_revenue', formatter: (v) => `₹${v?.toLocaleString()}` }
     ],
     ctas: [
       { label: 'Go to Sales', route: '/sales', variant: 'primary' },
@@ -175,7 +175,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     kpis: [
       { label: 'Total Products', key: 'total_products' },
       { label: 'Low Stock Items', key: 'low_stock' },
-      { label: 'Total Stock Value', key: 'stock_value', formatter: (v) => `$${v?.toLocaleString()}` }
+      { label: 'Total Stock Value', key: 'stock_value', formatter: (v) => `₹${v?.toLocaleString()}` }
     ],
     ctas: [
       { label: 'Go to Inventory', route: '/inventory', variant: 'primary' }
@@ -222,7 +222,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     kpis: [
       { label: 'Open Purchase Orders', key: 'open_pos' },
       { label: 'Pending GRNs', key: 'pending_grns' },
-      { label: 'Supplier Outstanding', key: 'supplier_outstanding', formatter: (v) => `$${v?.toLocaleString()}` }
+      { label: 'Supplier Outstanding', key: 'supplier_outstanding', formatter: (v) => `₹${v?.toLocaleString()}` }
     ],
     ctas: [
       { label: 'Go to Procurement', route: '/procurement', variant: 'primary' }
@@ -261,9 +261,9 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     permissions: ['accounting.read'],
     showOnDashboard: true,
     kpis: [
-      { label: 'Receivables', key: 'receivables', formatter: (v) => `$${v?.toLocaleString()}` },
-      { label: 'Payables', key: 'payables', formatter: (v) => `$${v?.toLocaleString()}` },
-      { label: 'Cash Balance', key: 'cash_balance', formatter: (v) => `$${v?.toLocaleString()}` }
+      { label: 'Receivables', key: 'receivables', formatter: (v) => `₹${v?.toLocaleString()}` },
+      { label: 'Payables', key: 'payables', formatter: (v) => `₹${v?.toLocaleString()}` },
+      { label: 'Cash Balance', key: 'cash_balance', formatter: (v) => `₹${v?.toLocaleString()}` }
     ],
     ctas: [
       { label: 'Go to Accounting', route: '/accounting', variant: 'primary' }
@@ -302,7 +302,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     showOnDashboard: true,
     kpis: [
       { label: 'Sales Report', key: 'sales_report' },
-      { label: 'Inventory Valuation', key: 'inventory_valuation', formatter: (v) => `$${v?.toLocaleString()}` }
+      { label: 'Inventory Valuation', key: 'inventory_valuation', formatter: (v) => `₹${v?.toLocaleString()}` }
     ],
     ctas: [
       { label: 'View Reports', route: '/reports', variant: 'primary' }
@@ -395,9 +395,9 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     showOnDashboard: true,
     highlighted: true,
     kpis: [
-      { label: 'Today\'s Sales', key: 'pos_sales_today', formatter: (v) => `$${v?.toLocaleString()}` },
-      { label: 'Transactions', key: 'pos_transactions' },
-      { label: 'Avg Ticket', key: 'pos_avg_ticket', formatter: (v) => `$${v?.toFixed(2)}` }
+      { label: 'Today\'s Sales', key: 'pos_sales_today', formatter: (v) => `₹${v?.toLocaleString()}` },
+      { label: 'Total Transactions', key: 'pos_transactions_today' },
+      { label: 'Avg Ticket', key: 'pos_avg_ticket', formatter: (v) => `₹${v?.toFixed(2)}` }
     ],
     ctas: [
       { label: 'Open POS', route: '/pos', variant: 'primary' }

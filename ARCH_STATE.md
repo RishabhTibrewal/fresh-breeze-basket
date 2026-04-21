@@ -1,6 +1,6 @@
 # Architecture State Document
 
-**Last Updated:** 2026-03-29 (01:03 IST)
+**Last Updated:** 2026-04-01 (13:10 IST)
 **Purpose:** Technical reference for current system architecture, routing patterns, and critical implementation details to prevent architectural mistakes. This document serves as the long-term memory and architectural blueprint for all future AI interactions.
 
 ---
@@ -63,10 +63,12 @@
 
 7. **Reports & Analytics**
    - 5 major groups: Sales, Inventory, Procurement, Accounting, Master
-   - Dedicated materialized views for fast aggregated lookups
-   - Export logic (CSV streaming, Excel)
-   - Multi-currency support and real-time exchange rates
-   - IP-based rate limiting on report generation
+   - **Server-Side Pagination**: Robust pagination for datasets exceeding thousands of records (e.g., Stock Movements).
+   - **Unified Search Views**: Flattened database views (`stock_movements_expanded`, `warehouse_inventory_expanded`) for accurate cross-table searching (Product Name OR SKU OR Variant Name).
+   - Dedicated materialized views for fast aggregated lookups.
+   - Export logic (CSV streaming, Excel).
+   - Multi-currency support and real-time exchange rates.
+   - IP-based rate limiting on report generation.
 
 8. **E-commerce** (Module defined, implementation status varies)
    - Online store product catalog
@@ -461,6 +463,60 @@ fresh-breeze-basket/
 - ⚠️ Module defined in config
 - ⚠️ Basic structure in place
 - ⚠️ Full implementation pending
+
+### Recent Changes (2026-04-22) — Global Profiles + Membership Tenant Source
+
+#### Identity / Tenant Resolution Alignment
+- **Problem addressed**: Users can belong to multiple companies, but several auth/admin flows implicitly treated `profiles.company_id` as tenant ownership, which caused "profile not found" or role-visibility mismatches.
+- **New model enforced**:
+  - `profiles` is treated as a **global identity** record (one row per auth user id).
+  - `company_memberships` is the **tenant access source of truth**.
+  - Tenant-scoped role checks continue via `user_roles` + `company_id`.
+
+#### Backend Auth Changes
+- **`backend/src/controllers/auth.ts`**:
+  - Removed profile auto-creation from login/session paths (`/api/auth/me`, login token flow, password flow).
+  - Removed profile `company_id` rewrites during tenant switches.
+  - Profile lookups are now global by user id; missing profile returns controlled `PROFILE_MISSING` response.
+- **`backend/src/middleware/auth.ts`**:
+  - `isAuthenticated` now also validates active membership for `req.companyId` to match `protect()` behavior.
+
+#### Admin User Roles Page Data Source
+- **`backend/src/controllers/admin.ts` `getAllUsers`**:
+  - Base dataset remains `company_memberships` (active users in tenant).
+  - Profile join is now optional; users are no longer dropped when profile row is missing.
+  - Added fallback email hydration via `auth.admin.getUserById()` for missing profiles.
+
+#### Database / Migration
+- Added migration: **`backend/src/db/migrations/20260422_globalize_profiles_memberships.sql`**
+  - Backfills missing `profiles` rows from `auth.users`.
+  - Reinforces membership uniqueness/indexing.
+  - Converts profile->membership sync trigger to no-op (profiles no longer drive memberships).
+  - Replaces `profile_company_id/current_company_id` resolution to use memberships only.
+  - Updates `handle_new_user` trigger to create global profiles and optional membership from metadata.
+
+### Recent Changes (2026-04-01) — Unified Inventory Search & Pagination
+
+#### Server-Side Pagination for Inventory
+- **Objective**: Prevent data truncation and UI slow-downs for large inventory datasets.
+- **Implementation**:
+  - Refactored `getStockMovements` (backend) to support `limit`, `offset`, and total `count`.
+  - Updated frontend `StockMovements.tsx` to handle the `{ data, count }` response format and manage pagination state via URL/query params.
+  - Eliminated legacy 100-record hard limit, enabling infinite traversal of historical stock movements.
+
+#### Unified Cross-Table Search
+- **Objective**: Resolve search inaccuracies where product-level names were missing from variant-only searches.
+- **Database Views**:
+  - Introduced **`stock_movements_expanded`**: Joins `stock_movements`, `products`, and `product_variants` into a flat searchable view.
+  - Introduced **`warehouse_inventory_expanded`**: Provides a unified view of current stock with pre-joined product/variant metadata.
+- **Logic**:
+  - Search bar now performs a single `.or()` query across `product_name`, `variant_name`, and `variant_sku` on the view level.
+  - This ensures that searching for "Sumola" (product name) finds all variants even if the variant name is just "30 Kg".
+
+#### Report Optimization
+- **Backend Refactor**:
+  - `getStockLedger` and `getCurrentStock` now perform filtering at the database level using the new expanded views.
+  - Removed in-memory JavaScript filtering that caused inconsistent results when searching across multiple pages of data.
 
 ### Recent Changes (2026-03-29) — POS Bill Redesign & Discounted Tax Logic
 

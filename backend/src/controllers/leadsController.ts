@@ -211,7 +211,7 @@ export const createLead = async (req: Request, res: Response) => {
         description: description || null,
         source: source || 'other',
         estimated_value: estimated_value ? parseFloat(estimated_value) : 0,
-        currency: currency || 'USD',
+        currency: currency || 'INR',
         stage: stage || 'new',
         priority: priority || 'medium',
         address: address || null,

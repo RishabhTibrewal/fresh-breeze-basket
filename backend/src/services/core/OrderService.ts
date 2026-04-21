@@ -256,6 +256,8 @@ export class OrderService {
         variant_id: item.variantId, // Now required (DEFAULT variant if not provided)
         quantity: item.quantity,
         unit_price: item.unitPrice,
+        // Persist line_total so POS/history UIs can render reliable subtotals.
+        line_total: Math.round((item.quantity * item.unitPrice) * 100) / 100,
         tax_amount: Math.round((item.taxAmount * (1 - extraDiscountPct / 100)) * 100) / 100,
         warehouse_id: item.outletId || finalOutletId,
       }));

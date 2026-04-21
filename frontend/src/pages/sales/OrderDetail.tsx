@@ -468,8 +468,8 @@ export default function OrderDetail() {
                                 <span className="text-muted-foreground">-</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm">${parseFloat(item.unit_price || 0).toFixed(2)}</TableCell>
-                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm font-medium">${(item.quantity * parseFloat(item.unit_price || 0)).toFixed(2)}</TableCell>
+                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm">₹{parseFloat(item.unit_price || 0).toFixed(2)}</TableCell>
+                            <TableCell className="text-right px-2 py-2 text-xs sm:text-sm font-medium">₹{(item.quantity * parseFloat(item.unit_price || 0)).toFixed(2)}</TableCell>
                           </TableRow>
                         );
                       })}
@@ -725,7 +725,7 @@ export default function OrderDetail() {
                               <div className="grid grid-cols-2 gap-4">
                                 <div>
                                   <p className="text-sm text-muted-foreground">Credit Amount</p>
-                                  <p className="font-medium">${parseFloat(creditDetails.amount.toString()).toFixed(2)}</p>
+                                  <p className="font-medium">₹{parseFloat(creditDetails.amount.toString()).toFixed(2)}</p>
                                 </div>
                                 <div>
                                   <p className="text-sm text-muted-foreground">Credit Period</p>
@@ -871,18 +871,18 @@ export default function OrderDetail() {
                     <div className="space-y-1.5">
                       <div className="flex justify-between text-xs sm:text-sm">
                         <p className="text-muted-foreground">Credit Limit:</p>
-                        <p className="font-medium">${(customer.credit_limit || 0).toFixed(2)}</p>
+                        <p className="font-medium">₹{(customer.credit_limit || 0).toFixed(2)}</p>
                       </div>
                       <div className="flex justify-between text-xs sm:text-sm">
                         <p className="text-muted-foreground">Current Credit:</p>
-                        <p className="font-medium">${(customer.current_credit || 0).toFixed(2)}</p>
+                        <p className="font-medium">₹{(customer.current_credit || 0).toFixed(2)}</p>
                       </div>
                       {customer.active_credit && (
                         <>
                           <Separator className="my-2" />
                           <div className="flex justify-between text-xs sm:text-sm">
                             <p className="text-muted-foreground">Active Credit:</p>
-                            <p className="font-medium">${customer.active_credit.amount.toFixed(2)}</p>
+                            <p className="font-medium">₹{customer.active_credit.amount.toFixed(2)}</p>
                           </div>
                           <div className="flex justify-between text-xs sm:text-sm">
                             <p className="text-muted-foreground">Due Date:</p>
@@ -925,7 +925,7 @@ export default function OrderDetail() {
                 
                 <div className="min-w-0">
                   <p className="text-xs sm:text-sm text-muted-foreground">Total Amount</p>
-                  <p className="font-medium text-base sm:text-lg">${parseFloat(order.total_amount).toFixed(2)}</p>
+                  <p className="font-medium text-base sm:text-lg">₹{parseFloat(order.total_amount).toFixed(2)}</p>
                 </div>
 
                 {/* CD Financial Breakdown */}
@@ -935,7 +935,7 @@ export default function OrderDetail() {
                     {order.taxable_value != null && (
                       <div className="flex justify-between text-xs sm:text-sm">
                         <span className="text-muted-foreground">Taxable Value:</span>
-                        <span>${parseFloat(order.taxable_value).toFixed(2)}</span>
+                        <span>₹{parseFloat(order.taxable_value).toFixed(2)}</span>
                       </div>
                     )}
                     {order.cd_enabled && order.cd_amount != null && (
@@ -974,7 +974,7 @@ export default function OrderDetail() {
                           </TableRow>
                           <TableRow>
                             <TableCell className="font-medium text-xs sm:text-sm">Amount</TableCell>
-                            <TableCell className="text-xs sm:text-sm">${parseFloat(creditPeriodData.amount?.toString() || '0').toFixed(2)}</TableCell>
+                            <TableCell className="text-xs sm:text-sm">₹{parseFloat(creditPeriodData.amount?.toString() || '0').toFixed(2)}</TableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell className="font-medium text-xs sm:text-sm">Period</TableCell>
@@ -1049,7 +1049,7 @@ export default function OrderDetail() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <div className="min-w-0">
                       <p className="text-xs sm:text-sm text-muted-foreground">Credit Amount</p>
-                      <p className="font-medium text-sm sm:text-base">${parseFloat(creditDetails.amount.toString()).toFixed(2)}</p>
+                      <p className="font-medium text-sm sm:text-base">₹{parseFloat(creditDetails.amount.toString()).toFixed(2)}</p>
                     </div>
                     <div className="min-w-0">
                       <p className="text-xs sm:text-sm text-muted-foreground">Credit Status</p>

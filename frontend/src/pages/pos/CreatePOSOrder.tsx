@@ -1,6 +1,15 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Bar } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Tooltip,
+  Legend,
+} from 'chart.js';
 import { Badge } from "@/components/ui/badge";
 import {
   Plus, Minus, Trash2, ShoppingCart, Printer,
@@ -17,6 +26,8 @@ import apiClient from '@/lib/apiClient';
 import { useAuth } from '@/contexts/AuthContext';
 import { warehousesService } from '@/api/warehouses';
 import { invoicesService } from '@/api/invoices';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -80,6 +91,7 @@ export default function CreatePOSOrder() {
   const queryClient = useQueryClient();
   const { profile } = useAuth();
   const searchRef = useRef<HTMLInputElement>(null);
+  const canViewAllPosSessions = (profile?.roles || []).includes('admin') || profile?.role === 'admin';
 
   // ── sidebar ──
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -111,6 +123,7 @@ export default function CreatePOSOrder() {
   const [modifierModal, setModifierModal] = useState<{ item: CartItem } | null>(null);
   const [paymentModal, setPaymentModal] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState<{ orderId: string; receiptNumber: string; change: number } | null>(null);
+  const [historyDetailsOrderId, setHistoryDetailsOrderId] = useState<string | null>(null);
 
   // ── outlet ──
   const [selectedOutletId, setSelectedOutletId] = useState<string>('');
@@ -154,6 +167,13 @@ export default function CreatePOSOrder() {
     { method: 'cash', amount: '' },
     { method: 'card', amount: '' },
   ]);
+  const [sellingView, setSellingView] = useState<'top' | 'low'>('top');
+  const [chartView, setChartView] = useState<'hourly' | 'daily' | 'weekly'>('hourly');
+  const [reportDateFrom, setReportDateFrom] = useState('');
+  const [reportDateTo, setReportDateTo] = useState('');
+  const [historyDateFrom, setHistoryDateFrom] = useState('');
+  const [historyDateTo, setHistoryDateTo] = useState('');
+  const [historyOutletId, setHistoryOutletId] = useState('');
 
   // ─── Data Fetching ──────────────────────────────────────────────────────────
 
@@ -166,18 +186,31 @@ export default function CreatePOSOrder() {
   });
 
   const { data: posOrders = [], isLoading: posOrdersLoading } = useQuery({
-    queryKey: ['pos-history', activeSession?.id],
+    queryKey: ['pos-history', canViewAllPosSessions ? 'all-sessions' : activeSession?.id],
     queryFn: async () => {
+      const params: Record<string, any> = {
+        order_source: 'pos',
+        limit: 100
+      };
+      if (!canViewAllPosSessions && activeSession?.id) {
+        params.pos_session_id = activeSession.id;
+      }
       const res = await apiClient.get('/orders', {
-        params: {
-          order_source: 'pos',
-          pos_session_id: activeSession?.id,
-          limit: 100
-        }
+        params
       });
       return res.data?.data || [];
     },
-    enabled: !!activeSession?.id
+    enabled: canViewAllPosSessions || !!activeSession?.id
+  });
+
+  const { data: historyOrderDetails, isLoading: historyOrderDetailsLoading } = useQuery({
+    queryKey: ['pos-order-details', historyDetailsOrderId],
+    queryFn: async () => {
+      if (!historyDetailsOrderId) return null;
+      const res = await apiClient.get(`/orders/${historyDetailsOrderId}`);
+      return res.data?.data || res.data || null;
+    },
+    enabled: !!historyDetailsOrderId,
   });
 
   const { data: variants = [], isLoading: productsLoading } = useQuery({
@@ -246,27 +279,328 @@ export default function CreatePOSOrder() {
     staleTime: 30000,
   });
 
-  const topSellingItems = useMemo(() => {
-    const stats: Record<string, { name: string, sold: number, revenue: number }> = {};
+  const filteredPosOrders = useMemo(() => {
     const orders = Array.isArray(posOrders) ? posOrders : [];
+    if (!reportDateFrom && !reportDateTo) return orders;
+
+    const fromDate = reportDateFrom ? new Date(`${reportDateFrom}T00:00:00`) : null;
+    const toDate = reportDateTo ? new Date(`${reportDateTo}T23:59:59.999`) : null;
+
+    return orders.filter((order: any) => {
+      if (!order?.created_at) return false;
+      const orderDate = new Date(order.created_at);
+      if (Number.isNaN(orderDate.getTime())) return false;
+      if (fromDate && orderDate < fromDate) return false;
+      if (toDate && orderDate > toDate) return false;
+      return true;
+    });
+  }, [posOrders, reportDateFrom, reportDateTo]);
+
+  const outletFilteredOrders = useMemo(() => {
+    const baseOrders = Array.isArray(posOrders) ? posOrders : [];
+    if (!selectedOutletId) return baseOrders;
+    return baseOrders.filter((order: any) => order.outlet_id === selectedOutletId);
+  }, [posOrders, selectedOutletId]);
+
+  const historyFilteredOrders = useMemo(() => {
+    const baseOrders = Array.isArray(posOrders) ? posOrders : [];
+    const fromDate = historyDateFrom ? new Date(`${historyDateFrom}T00:00:00`) : null;
+    const toDate = historyDateTo ? new Date(`${historyDateTo}T23:59:59.999`) : null;
+
+    return baseOrders.filter((order: any) => {
+      if (historyOutletId && order.outlet_id !== historyOutletId) return false;
+      if (!fromDate && !toDate) return true;
+      const dtRaw = order?.created_at || order?.createdAt || order?.order_date;
+      if (!dtRaw) return false;
+      const dt = new Date(dtRaw);
+      if (Number.isNaN(dt.getTime())) return false;
+      if (fromDate && dt < fromDate) return false;
+      if (toDate && dt > toDate) return false;
+      return true;
+    });
+  }, [posOrders, historyDateFrom, historyDateTo, historyOutletId]);
+
+  const reportOrders = useMemo(() => {
+    if (!selectedOutletId) return filteredPosOrders;
+    return filteredPosOrders.filter((order: any) => order.outlet_id === selectedOutletId);
+  }, [filteredPosOrders, selectedOutletId]);
+
+  const isDateRangeSelected = useMemo(() => {
+    return Boolean(reportDateFrom && reportDateTo && reportDateFrom !== reportDateTo);
+  }, [reportDateFrom, reportDateTo]);
+
+  const chartBaseDate = useMemo(() => {
+    return reportDateFrom || reportDateTo || new Date().toISOString().split('T')[0];
+  }, [reportDateFrom, reportDateTo]);
+
+  useEffect(() => {
+    if (isDateRangeSelected && chartView === 'hourly') {
+      setChartView('daily');
+    }
+  }, [isDateRangeSelected, chartView]);
+
+  const sellingItems = useMemo(() => {
+    const stats: Record<string, { name: string, sold: number, revenue: number }> = {};
+    const orders = chartView === 'hourly'
+      ? reportOrders.filter((order: any) => {
+          const createdAtRaw = order?.created_at || order?.createdAt || order?.order_date;
+          if (!createdAtRaw) return false;
+          const dt = new Date(createdAtRaw);
+          if (Number.isNaN(dt.getTime())) return false;
+          const localDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+          return localDate === chartBaseDate;
+        })
+      : reportOrders;
     
     orders.forEach((order: any) => {
       const items = order.order_items || [];
+      const orderExtraDiscount = Number(order.extra_discount_amount || 0);
+      const resolveItemGross = (item: any) => {
+        const qty = Number(item.quantity || 0);
+        const unitPrice = Number(item.unit_price ?? item.price ?? 0);
+        const computedLine = qty * unitPrice;
+        const candidates = [
+          Number(item.line_total),
+          Number(item.subtotal),
+          Number(item.total),
+          computedLine,
+        ].filter((v) => Number.isFinite(v) && v > 0);
+        return candidates[0] ?? 0;
+      };
+      const orderItemsGrossTotal = items.reduce((sum: number, item: any) => {
+        return sum + resolveItemGross(item);
+      }, 0);
+
       items.forEach((item: any) => {
-        // Use variant name or product name
-        const name = item.variant?.name || item.product?.name || item.products?.name || 'Unknown Item';
+        const productName = item.product?.name || item.products?.name || 'Unknown Item';
+        const variantName = item.variant?.name || item.variant_name || '';
+        const name = variantName && variantName !== productName
+          ? `${productName} (${variantName})`
+          : productName;
         if (!stats[name]) {
           stats[name] = { name, sold: 0, revenue: 0 };
         }
-        stats[name].sold += Number(item.quantity || 0);
-        stats[name].revenue += Number(item.subtotal || 0);
+        const qty = Number(item.quantity || 0);
+        const safeLineGross = resolveItemGross(item);
+        const discountShare =
+          orderExtraDiscount > 0 && orderItemsGrossTotal > 0
+            ? (safeLineGross / orderItemsGrossTotal) * orderExtraDiscount
+            : 0;
+        const lineRevenue = safeLineGross - discountShare;
+
+        stats[name].sold += qty;
+        stats[name].revenue += Number.isFinite(lineRevenue) ? lineRevenue : safeLineGross;
       });
     });
 
-    return Object.values(stats)
-      .sort((a, b) => b.sold - a.sold)
+    const sorted = Object.values(stats)
+      .sort((a, b) => sellingView === 'top' ? (b.sold - a.sold) : (a.sold - b.sold));
+
+    return sorted
       .slice(0, 5);
-  }, [posOrders]);
+  }, [reportOrders, sellingView]);
+
+  const salesTrend = useMemo(() => {
+    const toSafeNumber = (value: unknown) => {
+      if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : 0;
+      }
+      if (typeof value === 'string') {
+        // Handle formatted values like "₹1,234.50" or "1,234.50"
+        const cleaned = value.replace(/[^0-9.-]/g, '');
+        const n = Number(cleaned);
+        return Number.isFinite(n) ? n : 0;
+      }
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const bucketMap = new Map<string, { label: string; total: number; order: number }>();
+    const orders = reportOrders;
+    orders.forEach((order: any) => {
+      const createdAtRaw = order?.created_at || order?.createdAt || order?.order_date;
+      if (!createdAtRaw) return;
+
+      const dt = new Date(createdAtRaw);
+      if (Number.isNaN(dt.getTime())) return;
+
+      const hour = dt.getHours();
+      const orderLevelTotal = toSafeNumber(
+        order.total_amount ??
+        order.grand_total ??
+        order.final_total ??
+        order.total ??
+        order.subtotal
+      );
+      const itemsLevelTotal = Array.isArray(order.order_items)
+        ? order.order_items.reduce((sum: number, item: any) => {
+            const qty = toSafeNumber(item.quantity);
+            const unitPrice = toSafeNumber(item.unit_price ?? item.price);
+            const lineTotal = toSafeNumber(item.line_total ?? item.subtotal ?? item.total);
+            return sum + (lineTotal > 0 ? lineTotal : qty * unitPrice);
+          }, 0)
+        : 0;
+
+      const safeOrderTotal = orderLevelTotal > 0 ? orderLevelTotal : itemsLevelTotal;
+      let key = '';
+      let label = '';
+      let orderKey = 0;
+
+      if (chartView === 'hourly') {
+        key = `h-${hour}`;
+        label = `${String(hour).padStart(2, '0')}:00`;
+        orderKey = hour;
+      } else if (chartView === 'daily') {
+        const y = dt.getFullYear();
+        const m = String(dt.getMonth() + 1).padStart(2, '0');
+        const d = String(dt.getDate()).padStart(2, '0');
+        key = `${y}-${m}-${d}`;
+        label = dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        orderKey = new Date(key).getTime();
+      } else {
+        const day = dt.getDay();
+        const diffToMonday = day === 0 ? 6 : day - 1;
+        const monday = new Date(dt);
+        monday.setDate(dt.getDate() - diffToMonday);
+        monday.setHours(0, 0, 0, 0);
+        const y = monday.getFullYear();
+        const m = String(monday.getMonth() + 1).padStart(2, '0');
+        const d = String(monday.getDate()).padStart(2, '0');
+        key = `w-${y}-${m}-${d}`;
+        label = `Wk ${monday.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}`;
+        orderKey = monday.getTime();
+      }
+
+      const existing = bucketMap.get(key);
+      if (existing) {
+        existing.total += safeOrderTotal;
+      } else {
+        bucketMap.set(key, { label, total: safeOrderTotal, order: orderKey });
+      }
+    });
+
+    const points = (chartView === 'hourly'
+      ? Array.from({ length: 24 }, (_, hour) => {
+          const key = `h-${hour}`;
+          const fromMap = bucketMap.get(key);
+          return {
+            key,
+            label: `${String(hour).padStart(2, '0')}:00`,
+            total: fromMap?.total || 0,
+            order: hour,
+          };
+        })
+      : Array.from(bucketMap.entries()).map(([key, value]) => ({
+          key,
+          label: value.label,
+          total: value.total,
+          order: value.order,
+        })).sort((a, b) => a.order - b.order)
+    );
+
+    const maxTotal = Math.max(...points.map(b => b.total), 0);
+    return {
+      points: points.map(b => ({
+        ...b,
+        heightPct: maxTotal > 0 ? Math.max((b.total / maxTotal) * 100, b.total > 0 ? 6 : 0) : 0,
+      })),
+      maxTotal,
+    };
+  }, [reportOrders, chartView, chartBaseDate]);
+
+  const outletWiseStats = useMemo(() => {
+    const map = new Map<string, { outletId: string; outletName: string; orders: number; sales: number }>();
+    const warehouseMap = new Map((warehouses as any[]).map((w: any) => [w.id, w]));
+
+    filteredPosOrders.forEach((order: any) => {
+      const outletId = order.outlet_id || 'unknown';
+      const outletMeta = warehouseMap.get(outletId);
+      const outletName = outletMeta?.name || (outletId === 'unknown' ? 'Unknown Outlet' : `Outlet ${outletId.slice(0, 6)}`);
+      const amount = Number(order.total_amount || 0);
+      const existing = map.get(outletId);
+      if (existing) {
+        existing.orders += 1;
+        existing.sales += Number.isFinite(amount) ? amount : 0;
+      } else {
+        map.set(outletId, {
+          outletId,
+          outletName,
+          orders: 1,
+          sales: Number.isFinite(amount) ? amount : 0,
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.sales - a.sales);
+  }, [filteredPosOrders, warehouses]);
+
+  const salesTrendChartData = useMemo(() => ({
+    labels: salesTrend.points.map((point: any) => point.label),
+    datasets: [
+      {
+        label: 'Sales',
+        data: salesTrend.points.map((point: any) => Number(point.total || 0)),
+        backgroundColor: 'rgba(99, 102, 241, 0.75)',
+        borderColor: 'rgba(129, 140, 248, 1)',
+        borderWidth: 1,
+        borderRadius: 6,
+        borderSkipped: false as const,
+        maxBarThickness: 24,
+      },
+    ],
+  }), [salesTrend.points]);
+
+  const salesTrendChartOptions = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx: any) => ` ${formatPrice(Number(ctx.parsed?.y || 0))}`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        ticks: {
+          color: '#9ca3af',
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: chartView === 'hourly' ? 8 : 6,
+        },
+        grid: {
+          display: false,
+          drawBorder: false,
+        },
+      },
+      y: {
+        beginAtZero: true,
+        ticks: {
+          color: '#9ca3af',
+          callback: (value: any) => formatPrice(Number(value || 0)),
+        },
+        grid: {
+          color: 'rgba(255,255,255,0.08)',
+          drawBorder: false,
+        },
+      },
+    },
+  }), [chartView]);
+
+  const formatOrderDateTime = (value?: string) => {
+    if (!value) return 'N/A';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return value;
+    return dt.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
 
   const { data: modifierGroups = [] } = useQuery<ModifierGroup[]>({
     queryKey: ['modifier-groups-with-modifiers'],
@@ -282,18 +616,26 @@ export default function CreatePOSOrder() {
       let fromDate = today;
       let toDate = today;
       let params: any = { export: 'excel', order_source: 'pos' };
+      const hasCustomDateRange = Boolean(reportDateFrom || reportDateTo);
 
-      if (period === 'weekly') {
+      if (!hasCustomDateRange && period === 'weekly') {
         fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      } else if (period === 'monthly') {
+      } else if (!hasCustomDateRange && period === 'monthly') {
         fromDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      } else if (period === 'session' && activeSession) {
+      }
+
+      if (period === 'session' && activeSession) {
+        params.pos_session_id = activeSession.id;
+      }
+      // POS billers (sales role) should remain scoped to their current session.
+      if (!canViewAllPosSessions && activeSession?.id) {
         params.pos_session_id = activeSession.id;
       }
 
-      if (period !== 'session') {
-        params.from_date = fromDate;
-        params.to_date = toDate;
+      params.from_date = reportDateFrom || fromDate;
+      params.to_date = reportDateTo || toDate;
+      if (selectedOutletId) {
+        params.outlet_id = selectedOutletId;
       }
 
       toast.loading(`Preparing ${period} report...`, { id: 'report-download' });
@@ -456,8 +798,12 @@ export default function CreatePOSOrder() {
 
   const startSessionMutation = useMutation({
     mutationFn: async (openingCash: number) => {
+      const outletId = selectedOutletId || (warehouses[0] as any)?.id;
+      if (!outletId) {
+        throw new Error('Please select an outlet before starting session');
+      }
       const res = await apiClient.post('/pos/sessions', {
-        outlet_id: warehouses[0]?.id || selectedOutletId,
+        outlet_id: outletId,
         opening_cash: openingCash
       });
       return res.data.data;
@@ -574,6 +920,16 @@ export default function CreatePOSOrder() {
     }
   };
 
+  const handlePrintHistoryBill = async () => {
+    if (!historyDetailsOrderId) return;
+    try {
+      const html = await invoicesService.getCustomerKOTHTML(historyDetailsOrderId);
+      await invoicesService.printHTML(html);
+    } catch {
+      toast.error('Could not open Customer Bill');
+    }
+  };
+
   const handleNewOrder = () => {
     setPaymentModal(false);
     setPaymentSuccess(null);
@@ -684,7 +1040,7 @@ export default function CreatePOSOrder() {
       </aside>
 
       {/* ── Main Content Area ────────────────────────────────────── */}
-      <div className="flex-1 flex min-w-0 overflow-hidden relative">
+      <div className="flex-1 flex min-w-0 min-h-0 overflow-hidden relative">
         
         {/* SALE VIEW */}
         {activeView === 'sale' && (
@@ -1056,15 +1412,62 @@ export default function CreatePOSOrder() {
 
     {/* ORDER HISTORY VIEW */}
     {activeView === 'history' && (
-          <div className="flex-1 flex flex-col bg-[#0f1117] p-6 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col bg-[#0f1117] p-6 overflow-hidden">
             <header className="mb-6 flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-bold">Order History</h2>
                 <p className="text-gray-500 text-sm">Review recent POS transactions</p>
               </div>
             </header>
+
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 py-1">
+                <label className="text-[11px] text-gray-400 whitespace-nowrap">Outlet</label>
+                <select
+                  value={historyOutletId}
+                  onChange={(e) => setHistoryOutletId(e.target.value)}
+                  className="bg-transparent text-xs text-white border border-white/10 rounded-md px-2 py-1 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">All Outlets</option>
+                  {(warehouses as any[]).map((w: any) => (
+                    <option key={w.id} value={w.id} className="bg-[#1a1d27] text-white">
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 py-1">
+                <input
+                  type="date"
+                  value={historyDateFrom}
+                  onChange={(e) => setHistoryDateFrom(e.target.value)}
+                  className="bg-transparent text-xs text-white border border-white/10 rounded-md px-2 py-1 focus:outline-none focus:border-indigo-500 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert"
+                  aria-label="History from date"
+                />
+                <span className="text-gray-500 text-xs">to</span>
+                <input
+                  type="date"
+                  value={historyDateTo}
+                  onChange={(e) => setHistoryDateTo(e.target.value)}
+                  className="bg-transparent text-xs text-white border border-white/10 rounded-md px-2 py-1 focus:outline-none focus:border-indigo-500 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert"
+                  aria-label="History to date"
+                />
+                {(historyDateFrom || historyDateTo || historyOutletId) && (
+                  <button
+                    onClick={() => {
+                      setHistoryDateFrom('');
+                      setHistoryDateTo('');
+                      setHistoryOutletId('');
+                    }}
+                    className="text-[10px] text-indigo-300 hover:text-indigo-200"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
             
-            <div className="bg-[#1a1d27] border border-white/10 rounded-2xl overflow-hidden">
+            <div className="flex-1 min-h-0 bg-[#1a1d27] border border-white/10 rounded-2xl overflow-auto">
                <table className="w-full text-left">
                  <thead className="bg-white/5 border-b border-white/10">
                    <tr>
@@ -1078,10 +1481,10 @@ export default function CreatePOSOrder() {
                  <tbody className="divide-y divide-white/5">
                    {posOrdersLoading ? (
                      <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Loading orders...</td></tr>
-                   ) : posOrders.length === 0 ? (
+                   ) : historyFilteredOrders.length === 0 ? (
                      <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No recent POS orders</td></tr>
                    ) : (
-                     posOrders.map((order: any) => (
+                     historyFilteredOrders.map((order: any) => (
                        <tr key={order.id} className="hover:bg-white/5 transition-colors">
                          <td className="px-6 py-4 font-medium">{order.receipt_number || `POS-${order.id.slice(0, 5)}`}</td>
                          <td className="px-6 py-4 text-gray-400">
@@ -1094,8 +1497,8 @@ export default function CreatePOSOrder() {
                            </span>
                          </td>
                          <td className="px-6 py-4">
-                           <button 
-                             onClick={() => setPaymentSuccess({ orderId: order.id, receiptNumber: order.receipt_number || `POS-${order.id.slice(0, 5)}`, change: 0 })}
+                          <button 
+                            onClick={() => setHistoryDetailsOrderId(order.id)}
                              className="text-indigo-400 hover:text-indigo-300 text-sm"
                            >
                              Details
@@ -1161,31 +1564,71 @@ export default function CreatePOSOrder() {
                 <h2 className="text-2xl font-bold">POS Analytics</h2>
                 <p className="text-gray-500 text-sm">Session sales and performance metrics</p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 py-1">
+                  <label className="text-[11px] text-gray-400 whitespace-nowrap">Outlet</label>
+                  <select
+                    value={selectedOutletId}
+                    onChange={(e) => setSelectedOutletId(e.target.value)}
+                    className="bg-transparent text-xs text-white border border-white/10 rounded-md px-2 py-1 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">All Outlets</option>
+                    {(warehouses as any[]).map((w: any) => (
+                      <option key={w.id} value={w.id} className="bg-[#1a1d27] text-white">
+                        {w.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 py-1">
+                  <input
+                    type="date"
+                    value={reportDateFrom}
+                    onChange={(e) => setReportDateFrom(e.target.value)}
+                    className="bg-transparent text-xs text-white border border-white/10 rounded-md px-2 py-1 focus:outline-none focus:border-indigo-500 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert"
+                    aria-label="From date"
+                  />
+                  <span className="text-gray-500 text-xs">to</span>
+                  <input
+                    type="date"
+                    value={reportDateTo}
+                    onChange={(e) => setReportDateTo(e.target.value)}
+                    className="bg-transparent text-xs text-white border border-white/10 rounded-md px-2 py-1 focus:outline-none focus:border-indigo-500 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert"
+                    aria-label="To date"
+                  />
+                  {(reportDateFrom || reportDateTo) && (
+                    <button
+                      onClick={() => { setReportDateFrom(''); setReportDateTo(''); }}
+                      className="text-[10px] text-indigo-300 hover:text-indigo-200"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
                 <button 
                   onClick={() => handleDownloadReport('daily')}
-                  className="bg-white/5 hover:bg-white/10 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
+                  className="h-8 bg-white/5 hover:bg-white/10 text-white px-3 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
                 >
                   <Calendar className="h-3.5 w-3.5 text-indigo-400" />
                   Daily
                 </button>
                 <button 
                   onClick={() => handleDownloadReport('weekly')}
-                  className="bg-white/5 hover:bg-white/10 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
+                  className="h-8 bg-white/5 hover:bg-white/10 text-white px-3 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
                 >
                   <Calendar className="h-3.5 w-3.5 text-indigo-400" />
                   Weekly
                 </button>
                 <button 
                   onClick={() => handleDownloadReport('monthly')}
-                  className="bg-white/5 hover:bg-white/10 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
+                  className="h-8 bg-white/5 hover:bg-white/10 text-white px-3 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
                 >
                   <Calendar className="h-3.5 w-3.5 text-indigo-400" />
                   Monthly
                 </button>
                 <button 
                   onClick={() => handleDownloadReport('session')}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors ml-auto"
+                  className="h-8 bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors"
                 >
                   <Download className="h-3.5 w-3.5" />
                   Current Session
@@ -1195,9 +1638,9 @@ export default function CreatePOSOrder() {
             
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
               {[
-                { label: 'Total Sales', value: formatPrice(posOrders.reduce((sum: number, o: any) => sum + o.total_amount, 0)), trend: 'Session', color: 'indigo' },
-                { label: 'Orders', value: posOrders.length.toString(), trend: 'Session', color: 'green' },
-                { label: 'Avg Order', value: formatPrice(posOrders.length > 0 ? posOrders.reduce((sum: number, o: any) => sum + o.total_amount, 0) / posOrders.length : 0), trend: 'Session', color: 'amber' },
+                { label: 'Total Sales', value: formatPrice(reportOrders.reduce((sum: number, o: any) => sum + o.total_amount, 0)), trend: selectedOutletId ? 'Outlet' : (reportDateFrom || reportDateTo ? 'Filtered' : 'Session'), color: 'indigo' },
+                { label: 'Orders', value: reportOrders.length.toString(), trend: selectedOutletId ? 'Outlet' : (reportDateFrom || reportDateTo ? 'Filtered' : 'Session'), color: 'green' },
+                { label: 'Avg Order', value: formatPrice(reportOrders.length > 0 ? reportOrders.reduce((sum: number, o: any) => sum + o.total_amount, 0) / reportOrders.length : 0), trend: selectedOutletId ? 'Outlet' : (reportDateFrom || reportDateTo ? 'Filtered' : 'Session'), color: 'amber' },
                 { label: 'Returns', value: '0', trend: 'WIP', color: 'red' }, // POS returns not aggregated locally yet
               ].map((stat, i) => (
                 <div key={i} className="bg-[#1a1d27] border border-white/10 p-5 rounded-3xl">
@@ -1211,17 +1654,64 @@ export default function CreatePOSOrder() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-[#1a1d27] border border-white/10 p-6 rounded-3xl min-h-[300px] flex items-center justify-center">
-                <div className="text-center">
-                  <BarChart3 className="h-12 w-12 text-gray-700 mx-auto mb-3" />
-                  <p className="text-gray-500 text-sm font-medium italic">Sales Chart Visualization Loading...</p>
+              <div className="bg-[#1a1d27] border border-white/10 p-6 rounded-3xl min-h-[300px]">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="font-bold">Sales Trend</h3>
+                  <span className="text-[10px] text-gray-500">Today Session</span>
                 </div>
+                <div className="mb-4 inline-flex rounded-lg border border-white/10 bg-white/5 p-1">
+                  {(['hourly', 'daily', 'weekly'] as const)
+                    .filter((view) => !(isDateRangeSelected && view === 'hourly'))
+                    .map((view) => (
+                    <button
+                      key={view}
+                      onClick={() => setChartView(view)}
+                      className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                        chartView === view ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:text-white'
+                      }`}
+                    >
+                      {view.charAt(0).toUpperCase() + view.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                {reportOrders.length === 0 ? (
+                  <div className="h-[220px] flex items-center justify-center text-center">
+                    <div>
+                      <BarChart3 className="h-12 w-12 text-gray-700 mx-auto mb-3" />
+                      <p className="text-gray-500 text-sm font-medium">No sales data to visualize yet</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-[220px]">
+                    <Bar data={salesTrendChartData} options={salesTrendChartOptions} />
+                  </div>
+                )}
               </div>
               <div className="bg-[#1a1d27] border border-white/10 p-6 rounded-3xl">
-                <h3 className="font-bold mb-4">Top Selling Items</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold">{sellingView === 'top' ? 'Top Selling Items' : 'Low Selling Items'}</h3>
+                  <div className="inline-flex rounded-lg border border-white/10 bg-white/5 p-1">
+                    <button
+                      onClick={() => setSellingView('top')}
+                      className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                        sellingView === 'top' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:text-white'
+                      }`}
+                    >
+                      Top
+                    </button>
+                    <button
+                      onClick={() => setSellingView('low')}
+                      className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                        sellingView === 'low' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:text-white'
+                      }`}
+                    >
+                      Low
+                    </button>
+                  </div>
+                </div>
                 <div className="space-y-4">
-                  {topSellingItems.length > 0 ? (
-                    topSellingItems.map((item, i) => (
+                  {sellingItems.length > 0 ? (
+                    sellingItems.map((item, i) => (
                       <div key={i} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
                          <div>
                            <p className="text-sm font-medium">{item.name}</p>
@@ -1235,6 +1725,35 @@ export default function CreatePOSOrder() {
                   )}
                 </div>
               </div>
+            </div>
+
+            <div className="mt-6 bg-[#1a1d27] border border-white/10 p-6 rounded-3xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold">Outlet-wise POS Performance</h3>
+                <span className="text-[10px] text-gray-500">Date-filtered view</span>
+              </div>
+              {outletWiseStats.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-4">No outlet data available for selected range</p>
+              ) : (
+                <div className="space-y-2">
+                  {outletWiseStats.map((outlet) => (
+                    <div
+                      key={outlet.outletId}
+                      className={`flex items-center justify-between rounded-xl px-4 py-3 border ${
+                        selectedOutletId && selectedOutletId === outlet.outletId
+                          ? 'border-indigo-500/40 bg-indigo-500/10'
+                          : 'border-white/10 bg-white/5'
+                      }`}
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-white">{outlet.outletName}</p>
+                        <p className="text-[11px] text-gray-500">{outlet.orders} orders</p>
+                      </div>
+                      <p className="text-sm font-bold text-indigo-300">{formatPrice(outlet.sales)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1912,6 +2431,142 @@ export default function CreatePOSOrder() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 5. Order Details Modal (History) ─────────────────────── */}
+      {historyDetailsOrderId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-[#1a1d27] border border-white/10 rounded-2xl w-full max-w-5xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+              <div>
+                <h3 className="font-semibold text-white text-lg">Order Details</h3>
+                <p className="text-xs text-gray-400">
+                  Order Id: {historyOrderDetails?.id || historyDetailsOrderId}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePrintHistoryBill}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/30 transition-colors text-xs font-semibold"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Print Bill
+                </button>
+                <button onClick={() => setHistoryDetailsOrderId(null)} className="text-gray-500 hover:text-white">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 text-sm">
+              {historyOrderDetailsLoading ? (
+                <div className="py-12 text-center text-gray-400">Loading order details...</div>
+              ) : !historyOrderDetails ? (
+                <div className="py-12 text-center text-gray-400">Could not load order details.</div>
+              ) : (
+                <div className="space-y-5">
+                  <div className="text-gray-400">{formatOrderDateTime(historyOrderDetails.created_at)}</div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">From</p>
+                      <p className="font-semibold text-white">{profile?.company_name || 'Fresh Breeze Basket'}</p>
+                      <p className="text-gray-400 text-xs mt-1">{profile?.company_address || 'Address not available'}</p>
+                    </div>
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">To</p>
+                      <p className="font-semibold text-white">{historyOrderDetails.customer?.name || 'Walk-in Customer'}</p>
+                      <p className="text-gray-400 text-xs mt-1">
+                        Phone: {historyOrderDetails.customer?.phone || 'N/A'}
+                      </p>
+                      <p className="text-gray-400 text-xs">
+                        Order Type: {historyOrderDetails.order_type_label || historyOrderDetails.fulfillment_type || 'Quick Bill'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 mb-3">Details</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                      <p className="text-gray-300">Bill No: <span className="text-white font-medium">{historyOrderDetails.receipt_number || '-'}</span></p>
+                      <p className="text-gray-300">Order Status: <span className="text-white font-medium">{historyOrderDetails.status || '-'}</span></p>
+                      <p className="text-gray-300">Payment Status: <span className="text-white font-medium">{historyOrderDetails.payment_status || '-'}</span></p>
+                      <p className="text-gray-300">Order Source: <span className="text-white font-medium">{historyOrderDetails.order_source || 'pos'}</span></p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-white/5 border-b border-white/10">
+                        <tr>
+                          <th className="px-3 py-2">#</th>
+                          <th className="px-3 py-2">Item</th>
+                          <th className="px-3 py-2">Quantity</th>
+                          <th className="px-3 py-2">Price</th>
+                          <th className="px-3 py-2">Tax</th>
+                          <th className="px-3 py-2">Sub Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {(historyOrderDetails.order_items || []).map((item: any, idx: number) => (
+                          <tr key={item.id || idx}>
+                            {(() => {
+                              const qty = Number(item.quantity ?? 0);
+                              const unitPrice = Number(item.unit_price ?? item.price ?? 0);
+                              const amountCandidates = [
+                                item.line_total,
+                                item.lineTotal,
+                                item.taxable_value,
+                                item.net_amount,
+                                item.total,
+                                item.subtotal,
+                              ]
+                                .map((val) => Number(val))
+                                .filter((val) => Number.isFinite(val) && val > 0);
+                              const lineSubtotal = amountCandidates[0] ?? (qty * unitPrice);
+                              const lineTax = Number(item.tax_amount ?? item.tax ?? 0);
+                              return (
+                                <>
+                            <td className="px-3 py-2 text-gray-400">{idx + 1}</td>
+                            <td className="px-3 py-2 text-white">{item.product?.name || item.products?.name || item.variant?.name || 'Item'}</td>
+                            <td className="px-3 py-2 text-gray-300">{qty}</td>
+                            <td className="px-3 py-2 text-gray-300">{formatPrice(unitPrice)}</td>
+                            <td className="px-3 py-2 text-gray-300">{lineTax.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-indigo-300">{formatPrice(lineSubtotal)}</td>
+                                </>
+                              );
+                            })()}
+                          </tr>
+                        ))}
+                        {(historyOrderDetails.order_items || []).length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="px-3 py-4 text-center text-gray-500">No line items found</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 mb-3">Payment Details</p>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex justify-between"><span className="text-gray-400">Payment Method</span><span className="text-white">{historyOrderDetails.payment_method || 'N/A'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Total Amount</span><span className="text-white">{formatPrice(Number(historyOrderDetails.total_amount || 0))}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Discount</span><span className="text-white">{formatPrice(Number(historyOrderDetails.total_discount || 0))}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">External Discount</span><span className="text-white">{formatPrice(Number(historyOrderDetails.extra_discount_amount || 0))}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Tax</span><span className="text-white">{formatPrice(Number(historyOrderDetails.total_tax || 0))}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Charges</span><span className="text-white">{formatPrice(Number(historyOrderDetails.total_extra_charges || 0))}</span></div>
+                      <div className="flex justify-between font-semibold border-t border-white/10 pt-2 mt-2">
+                        <span className="text-white">Grand Total</span>
+                        <span className="text-indigo-300">{formatPrice(Number(historyOrderDetails.total_amount || 0))}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

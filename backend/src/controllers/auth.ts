@@ -51,6 +51,22 @@ const getMembership = async (userId: string, companyId?: string) => {
   return data || null;
 };
 
+const getGlobalProfile = async (userId: string, token?: string) => {
+  const client = supabaseAdmin || (token ? createAuthClient(token) : supabase);
+  const { data, error } = await client
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching profile:', error);
+    return { profile: null, error };
+  }
+
+  return { profile: data || null, error: null };
+};
+
 // Register new user
 export const register = async (req: Request, res: Response) => {
   try {
@@ -220,7 +236,7 @@ export const register = async (req: Request, res: Response) => {
           // Update or create profile if needed
           const { data: currentProfile } = await supabaseAdmin
             .from('profiles')
-            .select('id, company_id, first_name, last_name, phone')
+            .select('id, first_name, last_name, phone')
             .eq('id', existingUserId)
             .maybeSingle();
 
@@ -234,7 +250,6 @@ export const register = async (req: Request, res: Response) => {
                 first_name: first_name || null,
                 last_name: last_name || null,
                 phone: phone || null,
-                company_id: req.companyId, // Set to new company
                 role: userRoles[0] || 'user'
               });
 
@@ -299,7 +314,6 @@ export const register = async (req: Request, res: Response) => {
       first_name: first_name || null,
       last_name: last_name || null,
       phone: phone || null,
-      company_id: req.companyId,
       role: userRoles[0] || 'user' // Primary role for backward compatibility
     };
 
@@ -372,17 +386,14 @@ export const login = async (req: Request, res: Response) => {
         
         // Token is valid, get or create profile
         let profile;
-        const { data: existingProfile, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', payload.sub)
-          .single();
+        const { profile: existingProfile, error: profileError } = await getGlobalProfile(payload.sub, supabase_token);
         
-        if (profileError) {
+        if (profileError || !existingProfile) {
           console.error('Profile not found for valid token user:', payload.sub);
-          return res.status(500).json({
+          return res.status(404).json({
             success: false,
-            message: 'User profile is missing. Please contact support.'
+            message: 'User profile is missing. Please contact support.',
+            code: 'PROFILE_MISSING'
           });
         } else {
           profile = existingProfile;
@@ -405,13 +416,6 @@ export const login = async (req: Request, res: Response) => {
           });
         }
 
-        if (profile.company_id !== activeCompanyId) {
-          await supabase
-            .from('profiles')
-            .update({ company_id: activeCompanyId })
-            .eq('id', profile.id);
-        }
-        
         // Get user roles using new role system
         const userRoles = await getUserRoles(payload.sub, activeCompanyId);
         const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
@@ -474,17 +478,17 @@ export const login = async (req: Request, res: Response) => {
     
     // Get or create profile using admin client (bypasses RLS)
     let profile;
-    const { data: existingProfile, error: profileError } = await client
-      .from('profiles')
-      .select('*')
-      .eq('id', authData.user.id)
-      .single();
+    const { profile: existingProfile, error: profileError } = await getGlobalProfile(
+      authData.user.id,
+      authData.session.access_token
+    );
     
-    if (profileError) {
+    if (profileError || !existingProfile) {
       console.error('Login successful but profile not found for user ID:', authData.user.id, 'Error:', profileError);
-      return res.status(500).json({
+      return res.status(404).json({
         success: false,
-        message: 'Login successful, but user profile is missing. Please contact support.'
+        message: 'Login successful, but user profile is missing. Please contact support.',
+        code: 'PROFILE_MISSING'
       });
     } else {
       profile = existingProfile;
@@ -507,13 +511,6 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    if (profile.company_id !== activeCompanyId) {
-      await client
-        .from('profiles')
-        .update({ company_id: activeCompanyId })
-        .eq('id', profile.id);
-    }
-    
     // Get user roles using new role system
     const userRoles = await getUserRoles(authData.user.id, activeCompanyId);
     const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
@@ -600,67 +597,6 @@ export const getCurrentUser = async (req: Request, res: Response) => {
     }
     const activeCompanyId = req.companyId;
 
-    // First, verify profile exists and belongs to the company
-    // Use admin client to bypass RLS when checking/creating profiles
-    const adminClient = supabaseAdmin || supabase;
-    const { data: profileCheck, error: profileCheckError } = await adminClient
-      .from('profiles')
-      .select('company_id')
-      .eq('id', userId)
-      .single();
-    
-    // If profile doesn't exist, create it
-    if (profileCheckError && profileCheckError.code === 'PGRST116') { // PGRST116 is "not found" error
-      console.log('Profile not found for user ID:', userId, 'Creating new profile...');
-      
-      try {
-        // Create new profile using admin client to bypass RLS
-        const { data: newProfile, error: createError } = await adminClient
-          .from('profiles')
-          .insert({
-            id: userId,
-            email: req.user.email,
-            role: 'user',
-            company_id: activeCompanyId,
-            updated_at: new Date()
-          })
-          .select()
-          .single();
-        
-        if (createError) {
-          console.error('Error creating profile:', createError);
-          // Instead of throwing an error that crashes the server, return a response
-          return res.status(500).json({
-            success: false,
-            error: {
-              message: 'Error creating user profile. This may be due to permissions issues.',
-              details: createError.message
-            }
-          });
-        }
-        
-        console.log('New profile created successfully:', newProfile);
-      } catch (profileCreateError) {
-        console.error('Caught exception while creating profile:', profileCreateError);
-        return res.status(500).json({
-          success: false,
-          error: {
-            message: 'Failed to create user profile. Please try again later.',
-            details: profileCreateError instanceof Error ? profileCreateError.message : 'Unknown error'
-          }
-        });
-      }
-    } else if (profileCheckError) {
-      console.error('Error fetching profile:', profileCheckError);
-      return res.status(500).json({
-        success: false,
-        error: {
-          message: 'Error fetching user profile',
-          details: profileCheckError.message
-        }
-      });
-    }
-
     const membership = await getMembership(userId, activeCompanyId);
 
     if (!membership) {
@@ -681,20 +617,24 @@ export const getCurrentUser = async (req: Request, res: Response) => {
       });
     }
 
-    // Fetch full profile once company is verified (use admin client to bypass RLS)
-    const { data: profile, error } = await adminClient
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
+    // Fetch global profile once membership is verified
+    const token = req.headers.authorization?.split(' ')[1];
+    const { profile, error } = await getGlobalProfile(userId, token);
 
-    if (error) {
-      console.error('Error fetching profile:', error);
-      return res.status(500).json({
+    if (error || !profile) {
+      console.error('Error fetching profile:', {
+        userId,
+        hasToken: Boolean(token),
+        usingAdminClient: Boolean(supabaseAdmin),
+        error: error?.message || null,
+        profileFound: Boolean(profile)
+      });
+      return res.status(404).json({
         success: false,
         error: {
-          message: 'Error fetching user profile',
-          details: error.message
+          message: 'User profile is missing. Please contact support.',
+          details: error?.message,
+          code: 'PROFILE_MISSING'
         }
       });
     }
@@ -706,13 +646,6 @@ export const getCurrentUser = async (req: Request, res: Response) => {
     const userRoles = await getUserRoles(userId, activeCompanyId);
     const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
     
-    if (profile?.company_id !== activeCompanyId) {
-      await adminClient
-        .from('profiles')
-        .update({ company_id: activeCompanyId })
-        .eq('id', userId);
-    }
-
     return res.status(200).json({
       success: true,
       data: {

@@ -139,11 +139,11 @@ export default function CreditManagement() {
                   <div className="grid grid-cols-2 gap-2 pt-2 border-t">
                     <div>
                       <p className="text-xs text-muted-foreground">Credit Amount</p>
-                      <p className="font-medium text-sm">${customer.current_credit?.toFixed(2) || '0.00'}</p>
+                      <p className="font-medium text-sm">₹{customer.current_credit?.toFixed(2) || '0.00'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Credit Limit</p>
-                      <p className="font-medium text-sm">${customer.credit_limit?.toFixed(2) || '0.00'}</p>
+                      <p className="font-medium text-sm">₹{customer.credit_limit?.toFixed(2) || '0.00'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Credit Period</p>
@@ -152,7 +152,7 @@ export default function CreditManagement() {
                     {customer.overdue_credit ? (
                       <div>
                         <p className="text-xs text-muted-foreground">Overdue</p>
-                        <p className="font-medium text-sm text-red-600">${customer.overdue_credit.amount.toFixed(2)}</p>
+                        <p className="font-medium text-sm text-red-600">₹{customer.overdue_credit.amount.toFixed(2)}</p>
                       </div>
                     ) : (
                       <div>

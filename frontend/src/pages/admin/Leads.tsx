@@ -88,7 +88,7 @@ const leadFormSchema = z.object({
   description: z.string().optional(),
   source: z.enum(['website', 'referral', 'cold_call', 'email', 'social_media', 'trade_show', 'other']).default('other'),
   estimated_value: z.number().min(0).optional(),
-  currency: z.string().default('USD'),
+  currency: z.string().default('INR'),
   stage: z.enum(['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'won', 'lost']).default('new'),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).default('medium'),
   address: z.string().optional(),
@@ -169,7 +169,7 @@ export default function AdminLeads() {
       stage: 'new',
       priority: 'medium',
       source: 'other',
-      currency: 'USD',
+      currency: 'INR',
     },
   });
 
@@ -227,7 +227,7 @@ export default function AdminLeads() {
       stage: 'new',
       priority: 'medium',
       source: 'other',
-      currency: 'USD',
+      currency: 'INR',
     });
   };
 

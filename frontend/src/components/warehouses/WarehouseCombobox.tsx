@@ -78,7 +78,7 @@ export const WarehouseCombobox: React.FC<WarehouseComboboxProps> = ({
             value={searchQuery}
             onValueChange={setSearchQuery}
           />
-          <CommandList>
+          <CommandList className="max-h-[300px] overflow-y-auto">
             <CommandEmpty>No warehouse found.</CommandEmpty>
             <CommandGroup>
               {filteredWarehouses.map((w) => (

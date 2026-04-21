@@ -136,7 +136,7 @@ const SalesDashboard = () => {
                   <div className="text-sm text-gray-500">Order #{order.id}</div>
                 </div>
                 <div className="text-right">
-                  <div className="font-medium">${order.amount}</div>
+                  <div className="font-medium">₹{order.amount}</div>
                   <div className={`text-sm ${
                     order.status === 'completed' ? 'text-green-600' :
                     order.status === 'processing' ? 'text-blue-600' :

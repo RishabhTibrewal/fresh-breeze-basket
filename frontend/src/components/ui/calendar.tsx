@@ -16,29 +16,45 @@ function Calendar({
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
-      className={cn("p-3 h-[280px] flex flex-col", className)}
+      className={cn("p-3", className)}
       classNames={{
-        months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
+        months: "relative",
         month: "space-y-4",
-        caption: "flex justify-center pt-1 relative items-center",
-        caption_label: "text-sm font-medium",
-        nav: "space-x-1 flex items-center",
+        caption: "grid grid-cols-[2rem_1fr_2rem] items-center pt-1",
+        caption_label: "text-sm font-medium text-center",
+        nav: "absolute top-1 left-1 right-1 flex items-center justify-between z-10 pointer-events-none",
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
-          "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100"
+          "h-8 w-8 p-0 bg-background border-border text-foreground opacity-100 shadow-sm pointer-events-auto"
         ),
-        nav_button_previous: "absolute left-1",
-        nav_button_next: "absolute right-1",
-        table: "w-full border-collapse space-y-1",
-        head_row: "flex w-full",
-        head_cell:
-          "text-muted-foreground rounded-md w-9 h-9 flex items-center justify-center font-normal text-[0.8rem]",
-        row: "flex w-full mt-2",
-        cell: "h-9 w-9 text-center text-sm p-0 relative flex items-center justify-center [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
-        day: cn(
+        button_previous: cn(
+          buttonVariants({ variant: "outline" }),
+          "h-8 w-8 p-0 bg-background border-border text-foreground opacity-100 shadow-sm pointer-events-auto"
+        ),
+        button_next: cn(
+          buttonVariants({ variant: "outline" }),
+          "h-8 w-8 p-0 bg-background border-border text-foreground opacity-100 shadow-sm pointer-events-auto"
+        ),
+        nav_button_previous: cn(
+          buttonVariants({ variant: "outline" }),
+          "h-8 w-8 p-0 bg-background border-border text-foreground opacity-100 shadow-sm pointer-events-auto"
+        ),
+        nav_button_next: cn(
+          buttonVariants({ variant: "outline" }),
+          "h-8 w-8 p-0 bg-background border-border text-foreground opacity-100 shadow-sm pointer-events-auto"
+        ),
+        month_grid: "w-full border-collapse",
+        weekdays: "grid grid-cols-7 gap-1",
+        weekday:
+          "text-muted-foreground rounded-md h-9 flex items-center justify-center font-normal text-[0.8rem]",
+        weeks: "mt-2 space-y-1",
+        week: "grid grid-cols-7 gap-1",
+        day: "h-9 w-9 p-0 text-center text-sm relative",
+        day_button: cn(
           buttonVariants({ variant: "ghost" }),
           "h-9 w-9 p-0 font-normal aria-selected:opacity-100"
         ),
+        cell: "h-9 w-9 p-0 text-center text-sm relative",
         day_range_end: "day-range-end",
         day_selected:
           "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
@@ -52,8 +68,12 @@ function Calendar({
         ...classNames,
       }}
       components={{
-        IconLeft: ({ ..._props }) => <ChevronLeft className="h-4 w-4" />,
-        IconRight: ({ ..._props }) => <ChevronRight className="h-4 w-4" />,
+        Chevron: ({ orientation }) =>
+          orientation === "left" ? (
+            <ChevronLeft className="h-4 w-4" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          ),
       }}
       {...props}
     />

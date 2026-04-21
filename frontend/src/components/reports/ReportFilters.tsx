@@ -11,7 +11,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { CalendarIcon, X, Search } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, parse, isValid } from 'date-fns';
 import type { ReportFilter } from '@/api/reports';
 
 // ---------------------------------------------------------------------------
@@ -46,7 +46,11 @@ function DateButton({
   onChange: (val: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const date = value ? new Date(value) : undefined;
+  const date = React.useMemo(() => {
+    if (!value) return undefined;
+    const parsed = parse(value, 'yyyy-MM-dd', new Date());
+    return isValid(parsed) ? parsed : undefined;
+  }, [value]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -62,6 +66,7 @@ function DateButton({
           selected={date}
           onSelect={(d) => {
             if (d) {
+              // Use date-fns formatting from the selected local Date object to avoid UTC day-shift.
               onChange(format(d, 'yyyy-MM-dd'));
               setOpen(false);
             }
