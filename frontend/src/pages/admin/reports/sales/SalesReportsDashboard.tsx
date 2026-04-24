@@ -4,7 +4,10 @@ import { Link } from 'react-router-dom';
 import {
   DollarSign, ShoppingCart, TrendingUp, TrendingDown, RotateCcw,
   BarChart3, Users, Package, Target, Clock, ChevronRight,
+  CreditCard, Truck, Tag, UserCheck,
+  Layers, Boxes, PlusSquare, CalendarClock, Trophy,
 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { KpiCard } from '@/components/reports/KpiCard';
 import { ReportFilters } from '@/components/reports/ReportFilters';
@@ -29,16 +32,36 @@ interface SalesDashboardKpis {
 }
 
 const REPORT_LINKS = [
-  { label: 'Sales Order Summary',       path: '/admin/reports/sales/order-summary',          icon: ShoppingCart, color: 'text-blue-600 bg-blue-50' },
-  { label: 'Salesperson Performance',   path: '/admin/reports/sales/salesperson-performance', icon: Users,        color: 'text-violet-600 bg-violet-50' },
-  { label: 'Customer-wise Sales',       path: '/admin/reports/sales/customer-wise',           icon: BarChart3,    color: 'text-emerald-600 bg-emerald-50' },
-  { label: 'Product-wise Sales',        path: '/admin/reports/sales/product-wise',            icon: Package,      color: 'text-amber-600 bg-amber-50' },
-  { label: 'Target vs Achievement',     path: '/admin/reports/sales/target-vs-achievement',  icon: Target,       color: 'text-rose-600 bg-rose-50' },
-  { label: 'Pending Deliveries',        path: '/admin/reports/sales/pending-deliveries',     icon: Clock,        color: 'text-orange-600 bg-orange-50' },
-  { label: 'Sales Returns',             path: '/admin/reports/sales/returns',                icon: RotateCcw,    color: 'text-red-600 bg-red-50' },
+  { label: 'Sales Order Summary',       path: '/reports/sales/order-summary',          icon: ShoppingCart, color: 'text-blue-600 bg-blue-50' },
+  { label: 'Salesperson Performance',   path: '/reports/sales/salesperson-performance', icon: Users,        color: 'text-violet-600 bg-violet-50' },
+  { label: 'Customer-wise Sales',       path: '/reports/sales/customer-wise',           icon: BarChart3,    color: 'text-emerald-600 bg-emerald-50' },
+  { label: 'Product-wise Sales',        path: '/reports/sales/product-wise',            icon: Package,      color: 'text-amber-600 bg-amber-50' },
+  { label: 'Target vs Achievement',     path: '/reports/sales/target-vs-achievement',  icon: Target,       color: 'text-rose-600 bg-rose-50' },
+  { label: 'Pending Deliveries',        path: '/reports/sales/pending-deliveries',     icon: Clock,        color: 'text-orange-600 bg-orange-50' },
+  { label: 'Sales Returns',             path: '/reports/sales/returns',                icon: RotateCcw,    color: 'text-red-600 bg-red-50' },
+  { label: 'Hourly Sales Heatmap',      path: '/reports/sales/hourly-heatmap',         icon: Clock,        color: 'text-indigo-600 bg-indigo-50' },
+  { label: 'Payment Method Mix',        path: '/reports/sales/payment-mix',            icon: CreditCard,   color: 'text-sky-600 bg-sky-50' },
+  { label: 'Fulfillment Breakdown',     path: '/reports/sales/fulfillment-mix',        icon: Truck,        color: 'text-teal-600 bg-teal-50' },
+  { label: 'Discount Impact',           path: '/reports/sales/discount-impact',        icon: Tag,          color: 'text-pink-600 bg-pink-50' },
+  { label: 'Cashier Performance',       path: '/reports/sales/cashier-performance',    icon: UserCheck,    color: 'text-fuchsia-600 bg-fuchsia-50' },
+  { label: 'Category & Brand Sales',    path: '/reports/sales/category-brand',         icon: Layers,       color: 'text-cyan-600 bg-cyan-50' },
+  { label: 'Average Basket Metrics',    path: '/reports/sales/basket-metrics',         icon: Boxes,        color: 'text-lime-600 bg-lime-50' },
+  { label: 'Modifier / Add-on Revenue', path: '/reports/sales/modifier-revenue',       icon: PlusSquare,   color: 'text-purple-600 bg-purple-50' },
+  { label: 'Hourly & Weekday Trend',    path: '/reports/sales/trend-comparison',       icon: CalendarClock,color: 'text-blue-600 bg-blue-50' },
+  { label: 'Top / Bottom Movers',       path: '/reports/sales/movers',                 icon: TrendingUp,   color: 'text-emerald-600 bg-emerald-50' },
+];
+
+const ADMIN_ONLY_REPORTS = [
+  { label: 'Outlet Leaderboard',        path: '/reports/sales/outlet-leaderboard',     icon: Trophy,       color: 'text-amber-600 bg-amber-50' },
 ];
 
 export default function SalesReportsDashboard() {
+  const { profile } = useAuth();
+  const isAdmin = (profile?.roles || []).includes('admin')
+    || (profile?.roles || []).includes('super_admin')
+    || profile?.role === 'admin'
+    || profile?.role === 'super_admin';
+  const reportLinks = isAdmin ? [...REPORT_LINKS, ...ADMIN_ONLY_REPORTS] : REPORT_LINKS;
   const [filters, setFilters] = useState<ReportFilter>({
     from_date: thirtyDaysAgo.toISOString().split('T')[0],
     to_date: today.toISOString().split('T')[0],
@@ -111,7 +134,7 @@ export default function SalesReportsDashboard() {
       <div>
         <h2 className="text-base font-semibold mb-3">Available Reports</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {REPORT_LINKS.map((r) => {
+          {reportLinks.map((r) => {
             const Icon = r.icon;
             return (
               <Link key={r.path} to={r.path}>

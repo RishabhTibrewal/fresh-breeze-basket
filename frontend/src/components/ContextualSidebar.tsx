@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { PanelLeft, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { getModuleByRoute } from '@/config/modules.config';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useAuth } from '@/contexts/AuthContext';
 import type { SidebarItem } from '@/config/modules.config';
 
 interface ContextualSidebarProps {
@@ -112,6 +113,7 @@ const ContextualSidebar: React.FC<ContextualSidebarProps> = ({ onToggle }) => {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(true);
   const { permissions } = usePermissions();
+  const { roles, profile } = useAuth();
 
   const handleToggle = () => {
     const newState = !isOpen;
@@ -134,18 +136,29 @@ const ContextualSidebar: React.FC<ContextualSidebarProps> = ({ onToggle }) => {
     () => new Set(permissions.map((p) => p.permission_code)),
     [permissions]
   );
+  const roleCodes = useMemo(() => {
+    const profileRoles = Array.isArray(profile?.roles) ? profile.roles : [];
+    return new Set<string>(
+      [...roles, ...profileRoles, profile?.role].filter((role): role is string => typeof role === 'string')
+    );
+  }, [roles, profile?.role, profile?.roles]);
 
   // Filter top-level items (and recursively children) by permissions
   const filteredItems = useMemo(() => {
+    const hasItemAccess = (item: SidebarItem) => {
+      const hasPermission = !item.permission || permissionCodes.has(item.permission);
+      const isAdmin = roleCodes.has('admin') || roleCodes.has('super_admin');
+      const hasRole = !item.roles || isAdmin || item.roles.some((role) => roleCodes.has(role));
+      return hasPermission && hasRole;
+    };
+
     return sidebarItems
-      .filter((item) => !item.permission || permissionCodes.has(item.permission))
+      .filter(hasItemAccess)
       .map((item) => ({
         ...item,
-        children: item.children?.filter(
-          (c) => !c.permission || permissionCodes.has(c.permission)
-        ),
+        children: item.children?.filter(hasItemAccess),
       }));
-  }, [sidebarItems, permissionCodes]);
+  }, [sidebarItems, permissionCodes, roleCodes]);
 
   // Shared nav renderer
   const renderDesktopNav = () =>

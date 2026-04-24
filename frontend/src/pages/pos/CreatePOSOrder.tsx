@@ -1,12 +1,13 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Bar } from 'react-chartjs-2';
+import { Bar, Doughnut } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
   BarElement,
+  ArcElement,
   Tooltip,
   Legend,
 } from 'chart.js';
@@ -19,15 +20,23 @@ import {
   Banknote, Layers, CheckCircle2, Tag,
   MapPin, Package, Pencil, ChevronDown,
   SlidersHorizontal, Receipt, BarChart3, User,
-  Loader2, Play, Calendar, Download, Utensils
+  Loader2, Play, Calendar, Download, Utensils, Filter, FileDown
 } from "lucide-react";
 import { toast } from "sonner";
 import apiClient from '@/lib/apiClient';
 import { useAuth } from '@/contexts/AuthContext';
 import { warehousesService } from '@/api/warehouses';
 import { invoicesService } from '@/api/invoices';
+import {
+  downloadReport,
+  reportsApi,
+  type ReportFilter,
+  type SalesProductWiseRow,
+} from '@/api/reports';
+import PosAnalyticsBatchAWidgets from './PosAnalyticsBatchAWidgets';
+import PosAnalyticsBatchBWidgets from './PosAnalyticsBatchBWidgets';
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -83,6 +92,41 @@ interface SplitPayment {
 const genId = () => Math.random().toString(36).substring(2, 10);
 
 const formatPrice = (p: number) => `₹${p.toFixed(2)}`;
+const toLocalDate = (value: Date = new Date()) => {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+function Sparkline({
+  values,
+  className = "h-6 w-20",
+}: {
+  values: number[];
+  className?: string;
+}) {
+  const safe = values.length ? values : [0];
+  const max = Math.max(...safe, 1);
+  const points = safe.map((v, i) => {
+    const x = safe.length === 1 ? 0 : (i / (safe.length - 1)) * 100;
+    const y = 100 - (v / max) * 100;
+    return `${x},${y}`;
+  }).join(' ');
+
+  return (
+    <svg viewBox="0 0 100 100" className={className} preserveAspectRatio="none" aria-hidden="true">
+      <polyline
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={points}
+      />
+    </svg>
+  );
+}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -169,11 +213,19 @@ export default function CreatePOSOrder() {
   ]);
   const [sellingView, setSellingView] = useState<'top' | 'low'>('top');
   const [chartView, setChartView] = useState<'hourly' | 'daily' | 'weekly'>('hourly');
+  const [reportPeriod, setReportPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'session'>('daily');
+  const [comparisonMode, setComparisonMode] = useState(true);
+  const [segmentation, setSegmentation] = useState<'none' | 'cashier' | 'outlet' | 'fulfillment'>('none');
+  const [segmentValue, setSegmentValue] = useState<string>('all');
+  const [selectedTrendBucket, setSelectedTrendBucket] = useState<string | null>(null);
+  const [selectedItemDrilldown, setSelectedItemDrilldown] = useState<{ productId: string; variantId?: string; name: string } | null>(null);
+  const todayDate = toLocalDate();
   const [reportDateFrom, setReportDateFrom] = useState('');
   const [reportDateTo, setReportDateTo] = useState('');
   const [historyDateFrom, setHistoryDateFrom] = useState('');
   const [historyDateTo, setHistoryDateTo] = useState('');
   const [historyOutletId, setHistoryOutletId] = useState('');
+  const reportSnapshotRef = useRef<HTMLDivElement>(null);
 
   // ─── Data Fetching ──────────────────────────────────────────────────────────
 
@@ -190,11 +242,13 @@ export default function CreatePOSOrder() {
     queryFn: async () => {
       const params: Record<string, any> = {
         order_source: 'pos',
-        limit: 100
+        limit: 1000,
       };
+
       if (!canViewAllPosSessions && activeSession?.id) {
         params.pos_session_id = activeSession.id;
       }
+
       const res = await apiClient.get('/orders', {
         params
       });
@@ -279,14 +333,37 @@ export default function CreatePOSOrder() {
     staleTime: 30000,
   });
 
+  const reportDisplayFilters = useMemo(() => {
+    let fromDate = todayDate;
+    let toDate = todayDate;
+    const hasCustomDateRange = Boolean(reportDateFrom || reportDateTo);
+
+    if (!hasCustomDateRange && reportPeriod === 'session' && activeSession?.opened_at) {
+      fromDate = toLocalDate(new Date(activeSession.opened_at));
+    } else if (!hasCustomDateRange && reportPeriod === 'weekly') {
+      fromDate = toLocalDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+    } else if (!hasCustomDateRange && reportPeriod === 'monthly') {
+      fromDate = toLocalDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+    }
+
+    return {
+      from_date: reportDateFrom || fromDate,
+      to_date: reportDateTo || toDate,
+      pos_session_id: (reportPeriod === 'session' || !canViewAllPosSessions) && activeSession?.id
+        ? activeSession.id
+        : null,
+    };
+  }, [todayDate, reportDateFrom, reportDateTo, reportPeriod, canViewAllPosSessions, activeSession?.id, activeSession?.opened_at]);
+
   const filteredPosOrders = useMemo(() => {
     const orders = Array.isArray(posOrders) ? posOrders : [];
-    if (!reportDateFrom && !reportDateTo) return orders;
-
-    const fromDate = reportDateFrom ? new Date(`${reportDateFrom}T00:00:00`) : null;
-    const toDate = reportDateTo ? new Date(`${reportDateTo}T23:59:59.999`) : null;
+    const fromDate = reportDisplayFilters.from_date ? new Date(`${reportDisplayFilters.from_date}T00:00:00`) : null;
+    const toDate = reportDisplayFilters.to_date ? new Date(`${reportDisplayFilters.to_date}T23:59:59.999`) : null;
 
     return orders.filter((order: any) => {
+      if (reportDisplayFilters.pos_session_id && order?.pos_session_id !== reportDisplayFilters.pos_session_id) {
+        return false;
+      }
       if (!order?.created_at) return false;
       const orderDate = new Date(order.created_at);
       if (Number.isNaN(orderDate.getTime())) return false;
@@ -294,7 +371,7 @@ export default function CreatePOSOrder() {
       if (toDate && orderDate > toDate) return false;
       return true;
     });
-  }, [posOrders, reportDateFrom, reportDateTo]);
+  }, [posOrders, reportDisplayFilters]);
 
   const outletFilteredOrders = useMemo(() => {
     const baseOrders = Array.isArray(posOrders) ? posOrders : [];
@@ -325,13 +402,72 @@ export default function CreatePOSOrder() {
     return filteredPosOrders.filter((order: any) => order.outlet_id === selectedOutletId);
   }, [filteredPosOrders, selectedOutletId]);
 
+  const segmentOptions = useMemo(() => {
+    if (segmentation === 'none') return [];
+    const map = new Map<string, string>();
+    reportOrders.forEach((order: any) => {
+      if (segmentation === 'cashier') {
+        const id = String(order.created_by || order.user_id || order.cashier_id || 'unknown');
+        const name = order?.profiles?.first_name
+          ? `${order.profiles.first_name} ${order.profiles.last_name || ''}`.trim()
+          : (order.cashier_name || 'Unknown Cashier');
+        map.set(id, name);
+      } else if (segmentation === 'outlet') {
+        const id = String(order.outlet_id || 'unknown');
+        const name = order.outlet_name || (warehouses as any[]).find((w: any) => w.id === id)?.name || 'Unknown Outlet';
+        map.set(id, name);
+      } else if (segmentation === 'fulfillment') {
+        const key = String(order.fulfillment_type || order.order_type_label || 'unknown');
+        map.set(key, key.replace(/_/g, ' '));
+      }
+    });
+    return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
+  }, [segmentation, reportOrders, warehouses]);
+
+  useEffect(() => {
+    setSegmentValue('all');
+  }, [segmentation]);
+
+  const segmentedReportOrders = useMemo(() => {
+    if (segmentation === 'none' || segmentValue === 'all') return reportOrders;
+    return reportOrders.filter((order: any) => {
+      if (segmentation === 'cashier') {
+        const id = String(order.created_by || order.user_id || order.cashier_id || 'unknown');
+        return id === segmentValue;
+      }
+      if (segmentation === 'outlet') {
+        return String(order.outlet_id || 'unknown') === segmentValue;
+      }
+      const key = String(order.fulfillment_type || order.order_type_label || 'unknown');
+      return key === segmentValue;
+    });
+  }, [reportOrders, segmentation, segmentValue]);
+
+  const trendFilteredOrders = useMemo(() => {
+    if (!selectedTrendBucket) return segmentedReportOrders;
+    return segmentedReportOrders.filter((order: any) => {
+      const createdAtRaw = order?.created_at || order?.createdAt || order?.order_date;
+      if (!createdAtRaw) return false;
+      const dt = new Date(createdAtRaw);
+      if (Number.isNaN(dt.getTime())) return false;
+      if (chartView === 'hourly') return `h-${dt.getHours()}` === selectedTrendBucket;
+      if (chartView === 'daily') return toLocalDate(dt) === selectedTrendBucket;
+      const day = dt.getDay();
+      const diffToMonday = day === 0 ? 6 : day - 1;
+      const monday = new Date(dt);
+      monday.setDate(dt.getDate() - diffToMonday);
+      monday.setHours(0, 0, 0, 0);
+      return `w-${toLocalDate(monday)}` === selectedTrendBucket;
+    });
+  }, [segmentedReportOrders, selectedTrendBucket, chartView]);
+
   const isDateRangeSelected = useMemo(() => {
     return Boolean(reportDateFrom && reportDateTo && reportDateFrom !== reportDateTo);
   }, [reportDateFrom, reportDateTo]);
 
   const chartBaseDate = useMemo(() => {
-    return reportDateFrom || reportDateTo || new Date().toISOString().split('T')[0];
-  }, [reportDateFrom, reportDateTo]);
+    return reportDisplayFilters.from_date || reportDisplayFilters.to_date || todayDate;
+  }, [reportDisplayFilters, todayDate]);
 
   useEffect(() => {
     if (isDateRangeSelected && chartView === 'hourly') {
@@ -339,66 +475,38 @@ export default function CreatePOSOrder() {
     }
   }, [isDateRangeSelected, chartView]);
 
+  useEffect(() => {
+    setSelectedTrendBucket(null);
+  }, [chartView, reportPeriod, reportDateFrom, reportDateTo, selectedOutletId, segmentation, segmentValue]);
+
   const sellingItems = useMemo(() => {
-    const stats: Record<string, { name: string, sold: number, revenue: number }> = {};
-    const orders = chartView === 'hourly'
-      ? reportOrders.filter((order: any) => {
-          const createdAtRaw = order?.created_at || order?.createdAt || order?.order_date;
-          if (!createdAtRaw) return false;
-          const dt = new Date(createdAtRaw);
-          if (Number.isNaN(dt.getTime())) return false;
-          const localDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-          return localDate === chartBaseDate;
-        })
-      : reportOrders;
-    
-    orders.forEach((order: any) => {
-      const items = order.order_items || [];
-      const orderExtraDiscount = Number(order.extra_discount_amount || 0);
-      const resolveItemGross = (item: any) => {
-        const qty = Number(item.quantity || 0);
-        const unitPrice = Number(item.unit_price ?? item.price ?? 0);
-        const computedLine = qty * unitPrice;
-        const candidates = [
-          Number(item.line_total),
-          Number(item.subtotal),
-          Number(item.total),
-          computedLine,
-        ].filter((v) => Number.isFinite(v) && v > 0);
-        return candidates[0] ?? 0;
-      };
-      const orderItemsGrossTotal = items.reduce((sum: number, item: any) => {
-        return sum + resolveItemGross(item);
-      }, 0);
-
+    const map = new Map<string, { product_id: string; variant_id?: string; name: string; sold: number; revenue: number }>();
+    trendFilteredOrders.forEach((order: any) => {
+      const items = Array.isArray(order.order_items) ? order.order_items : [];
       items.forEach((item: any) => {
-        const productName = item.product?.name || item.products?.name || 'Unknown Item';
-        const variantName = item.variant?.name || item.variant_name || '';
-        const name = variantName && variantName !== productName
-          ? `${productName} (${variantName})`
-          : productName;
-        if (!stats[name]) {
-          stats[name] = { name, sold: 0, revenue: 0 };
+        const key = `${item.product_id}::${item.variant_id || ''}`;
+        const variantName = item.variant_name && item.variant_name !== '—' ? ` (${item.variant_name})` : '';
+        const name = item.product_name ? `${item.product_name}${variantName}` : (item.name || 'Unknown item');
+        if (!map.has(key)) {
+          map.set(key, {
+            product_id: item.product_id,
+            variant_id: item.variant_id || undefined,
+            name,
+            sold: 0,
+            revenue: 0,
+          });
         }
-        const qty = Number(item.quantity || 0);
-        const safeLineGross = resolveItemGross(item);
-        const discountShare =
-          orderExtraDiscount > 0 && orderItemsGrossTotal > 0
-            ? (safeLineGross / orderItemsGrossTotal) * orderExtraDiscount
-            : 0;
-        const lineRevenue = safeLineGross - discountShare;
-
-        stats[name].sold += qty;
-        stats[name].revenue += Number.isFinite(lineRevenue) ? lineRevenue : safeLineGross;
+        const row = map.get(key)!;
+        row.sold += Number(item.quantity || 0);
+        row.revenue += Number(item.line_total || item.total || Number(item.quantity || 0) * Number(item.unit_price || item.price || 0));
       });
     });
-
-    const sorted = Object.values(stats)
-      .sort((a, b) => sellingView === 'top' ? (b.sold - a.sold) : (a.sold - b.sold));
-
-    return sorted
-      .slice(0, 5);
-  }, [reportOrders, sellingView]);
+    const normalized = Array.from(map.values());
+    const sorted = normalized.sort((a, b) => (
+      sellingView === 'top' ? (b.sold - a.sold) : (a.sold - b.sold)
+    ));
+    return sorted.slice(0, 5);
+  }, [trendFilteredOrders, sellingView]);
 
   const salesTrend = useMemo(() => {
     const toSafeNumber = (value: unknown) => {
@@ -416,7 +524,7 @@ export default function CreatePOSOrder() {
     };
 
     const bucketMap = new Map<string, { label: string; total: number; order: number }>();
-    const orders = reportOrders;
+    const orders = segmentedReportOrders;
     orders.forEach((order: any) => {
       const createdAtRaw = order?.created_at || order?.createdAt || order?.order_date;
       if (!createdAtRaw) return;
@@ -506,13 +614,13 @@ export default function CreatePOSOrder() {
       })),
       maxTotal,
     };
-  }, [reportOrders, chartView, chartBaseDate]);
+  }, [segmentedReportOrders, chartView, chartBaseDate]);
 
   const outletWiseStats = useMemo(() => {
     const map = new Map<string, { outletId: string; outletName: string; orders: number; sales: number }>();
     const warehouseMap = new Map((warehouses as any[]).map((w: any) => [w.id, w]));
 
-    filteredPosOrders.forEach((order: any) => {
+    trendFilteredOrders.forEach((order: any) => {
       const outletId = order.outlet_id || 'unknown';
       const outletMeta = warehouseMap.get(outletId);
       const outletName = outletMeta?.name || (outletId === 'unknown' ? 'Unknown Outlet' : `Outlet ${outletId.slice(0, 6)}`);
@@ -532,7 +640,7 @@ export default function CreatePOSOrder() {
     });
 
     return Array.from(map.values()).sort((a, b) => b.sales - a.sales);
-  }, [filteredPosOrders, warehouses]);
+  }, [trendFilteredOrders, warehouses]);
 
   const salesTrendChartData = useMemo(() => ({
     labels: salesTrend.points.map((point: any) => point.label),
@@ -561,6 +669,13 @@ export default function CreatePOSOrder() {
         },
       },
     },
+    onClick: (_event: unknown, elements: Array<{ index: number }>) => {
+      if (!elements?.length) return;
+      const idx = elements[0].index;
+      const key = salesTrend.points[idx]?.key;
+      if (!key) return;
+      setSelectedTrendBucket((prev) => (prev === key ? null : key));
+    },
     scales: {
       x: {
         ticks: {
@@ -586,7 +701,76 @@ export default function CreatePOSOrder() {
         },
       },
     },
-  }), [chartView]);
+  }), [chartView, salesTrend.points]);
+
+  const previousRange = useMemo(() => {
+    if (reportPeriod === 'session') return null;
+    const from = new Date(`${reportDisplayFilters.from_date}T00:00:00`);
+    const to = new Date(`${reportDisplayFilters.to_date}T23:59:59.999`);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
+    const ms = to.getTime() - from.getTime();
+    const prevTo = new Date(from.getTime() - 1);
+    const prevFrom = new Date(prevTo.getTime() - ms);
+    return { from: toLocalDate(prevFrom), to: toLocalDate(prevTo) };
+  }, [reportDisplayFilters.from_date, reportDisplayFilters.to_date, reportPeriod]);
+
+  const previousOrders = useMemo(() => {
+    if (!comparisonMode || !previousRange) return [] as any[];
+    const baseOrders = Array.isArray(posOrders) ? posOrders : [];
+    const from = new Date(`${previousRange.from}T00:00:00`);
+    const to = new Date(`${previousRange.to}T23:59:59.999`);
+    return baseOrders.filter((order: any) => {
+      if (selectedOutletId && order.outlet_id !== selectedOutletId) return false;
+      const createdAtRaw = order?.created_at || order?.createdAt || order?.order_date;
+      if (!createdAtRaw) return false;
+      const dt = new Date(createdAtRaw);
+      if (Number.isNaN(dt.getTime())) return false;
+      if (dt < from || dt > to) return false;
+      return true;
+    });
+  }, [comparisonMode, previousRange, posOrders, selectedOutletId]);
+
+  const currentRevenue = useMemo(() => trendFilteredOrders.reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0), [trendFilteredOrders]);
+  const previousRevenue = useMemo(() => previousOrders.reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0), [previousOrders]);
+  const currentOrdersCount = trendFilteredOrders.length;
+  const previousOrdersCount = previousOrders.length;
+  const currentAvgOrder = currentOrdersCount > 0 ? currentRevenue / currentOrdersCount : 0;
+  const previousAvgOrder = previousOrdersCount > 0 ? previousRevenue / previousOrdersCount : 0;
+
+  const safePctDelta = (current: number, previous: number) => {
+    if (previous === 0) return current > 0 ? 100 : 0;
+    return ((current - previous) / previous) * 100;
+  };
+
+  const handleSnapshotPdf = () => {
+    const root = reportSnapshotRef.current;
+    if (!root) return;
+    const snapshotWindow = window.open('', '_blank', 'width=1200,height=900');
+    if (!snapshotWindow) {
+      toast.error('Popup blocked. Please allow popups to export snapshot.');
+      return;
+    }
+    snapshotWindow.document.write(`
+      <html>
+        <head>
+          <title>POS Analytics Snapshot</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; color: #0f172a; }
+            .meta { margin-bottom: 12px; font-size: 12px; color: #475569; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <h2>POS Analytics Snapshot</h2>
+          <div class="meta">Generated at ${new Date().toLocaleString()} | Period: ${reportPeriod}</div>
+          ${root.innerHTML}
+          <script>window.onload = () => window.print();</script>
+        </body>
+      </html>
+    `);
+    snapshotWindow.document.close();
+  };
 
   const formatOrderDateTime = (value?: string) => {
     if (!value) return 'N/A';
@@ -610,45 +794,234 @@ export default function CreatePOSOrder() {
     },
   });
 
+  const buildPosReportFilters = (period: 'daily' | 'weekly' | 'monthly' | 'session'): ReportFilter => {
+    let fromDate = todayDate;
+    let toDate = todayDate;
+    const hasCustomDateRange = Boolean(reportDateFrom || reportDateTo);
+
+    if (!hasCustomDateRange && period === 'session' && activeSession?.opened_at) {
+      fromDate = toLocalDate(new Date(activeSession.opened_at));
+    } else if (!hasCustomDateRange && period === 'weekly') {
+      fromDate = toLocalDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+    } else if (!hasCustomDateRange && period === 'monthly') {
+      fromDate = toLocalDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+    }
+
+    const filters: ReportFilter = {
+      order_source: 'pos',
+      from_date: reportDateFrom || fromDate,
+      to_date: reportDateTo || toDate,
+    };
+
+    if (selectedOutletId) {
+      filters.branch_ids = [selectedOutletId];
+    }
+
+    if ((period === 'session' || !canViewAllPosSessions) && activeSession?.id) {
+      filters.pos_session_id = activeSession.id;
+    }
+
+    return filters;
+  };
+
+  const itemWiseFilters = useMemo<ReportFilter>(() => {
+    const filters = buildPosReportFilters(reportPeriod);
+    return filters;
+  }, [reportPeriod, reportDateFrom, reportDateTo, selectedOutletId, canViewAllPosSessions, activeSession?.id]);
+
+  const {
+    data: itemWiseReport,
+    isLoading: itemWiseLoading,
+    isFetching: itemWiseFetching,
+    error: itemWiseError,
+  } = useQuery({
+    queryKey: ['pos-item-wise-report', itemWiseFilters],
+    queryFn: () => reportsApi.salesProductWise(itemWiseFilters),
+    enabled: activeView === 'reports',
+  });
+
+  // ─── Batch A: High-impact POS analytics widgets ─────────────────────────────
+  const posWidgetFilters = useMemo<ReportFilter>(() => buildPosReportFilters(reportPeriod), [
+    reportPeriod, reportDateFrom, reportDateTo, selectedOutletId, canViewAllPosSessions, activeSession?.id,
+  ]);
+
+  const hourlyHeatmapQuery = useQuery({
+    queryKey: ['pos-hourly-heatmap', posWidgetFilters],
+    queryFn: () => reportsApi.salesHourlyHeatmap(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const paymentMixQuery = useQuery({
+    queryKey: ['pos-payment-mix', posWidgetFilters],
+    queryFn: () => reportsApi.salesPaymentMix(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const fulfillmentMixQuery = useQuery({
+    queryKey: ['pos-fulfillment-mix', posWidgetFilters],
+    queryFn: () => reportsApi.salesFulfillmentMix(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const discountImpactQuery = useQuery({
+    queryKey: ['pos-discount-impact', posWidgetFilters],
+    queryFn: () => reportsApi.salesDiscountImpact(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const cashierPerfQuery = useQuery({
+    queryKey: ['pos-cashier-performance', posWidgetFilters],
+    queryFn: () => reportsApi.posCashierPerformance(posWidgetFilters),
+    enabled: activeView === 'reports' && canViewAllPosSessions,
+  });
+
+  const returnsQuery = useQuery({
+    queryKey: ['pos-returns', posWidgetFilters],
+    queryFn: () => reportsApi.salesReturns(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+  const returnsValue = Number(returnsQuery.data?.summary?.total_return_value ?? 0);
+
+  const categoryBrandQuery = useQuery({
+    queryKey: ['pos-category-brand', posWidgetFilters],
+    queryFn: () => reportsApi.salesCategoryBrand(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const basketQuery = useQuery({
+    queryKey: ['pos-basket-metrics', posWidgetFilters],
+    queryFn: () => reportsApi.salesBasketMetrics(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const modifierQuery = useQuery({
+    queryKey: ['pos-modifier-revenue', posWidgetFilters],
+    queryFn: () => reportsApi.salesModifierRevenue(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const trendComparisonQuery = useQuery({
+    queryKey: ['pos-trend-comparison', posWidgetFilters],
+    queryFn: () => reportsApi.salesTrendComparison(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const moversQuery = useQuery({
+    queryKey: ['pos-movers', posWidgetFilters],
+    queryFn: () => reportsApi.salesMovers(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const outletLeaderboardQuery = useQuery({
+    queryKey: ['pos-outlet-leaderboard', posWidgetFilters],
+    queryFn: () => reportsApi.salesOutletLeaderboard(posWidgetFilters),
+    enabled: activeView === 'reports' && canViewAllPosSessions,
+  });
+
+  // ─── Derived memos that depend on itemWiseReport (must come after its useQuery) ─
+  const itemWiseRows = useMemo(() => {
+    const rows = (itemWiseReport?.data || []) as SalesProductWiseRow[];
+    const bucketItemKeys = new Set<string>();
+    trendFilteredOrders.forEach((order: any) => {
+      const items = Array.isArray(order.order_items) ? order.order_items : [];
+      items.forEach((item: any) => {
+        bucketItemKeys.add(`${item.product_id}::${item.variant_id || ''}`);
+      });
+    });
+
+    let filtered = rows;
+    if (selectedTrendBucket) {
+      filtered = filtered.filter((row) => bucketItemKeys.has(`${row.product_id}::${row.variant_id || ''}`));
+    }
+    if (selectedItemDrilldown) {
+      filtered = filtered.filter((row) => row.product_id === selectedItemDrilldown.productId
+        && String(row.variant_id || '') === String(selectedItemDrilldown.variantId || ''));
+    }
+    return filtered;
+  }, [itemWiseReport?.data, selectedItemDrilldown, trendFilteredOrders, selectedTrendBucket]);
+
+  const buildItemSparkline = (row: SalesProductWiseRow) => {
+    const dayMap = new Map<string, number>();
+    trendFilteredOrders.forEach((order: any) => {
+      const day = toLocalDate(new Date(order.created_at || order.order_date || new Date()));
+      const items = Array.isArray(order.order_items) ? order.order_items : [];
+      let revenue = 0;
+      items.forEach((item: any) => {
+        if (item.product_id !== row.product_id) return;
+        if (row.variant_id && String(item.variant_id || '') !== String(row.variant_id || '')) return;
+        revenue += Number(item.line_total || item.total || Number(item.quantity || 0) * Number(item.unit_price || item.price || 0));
+      });
+      if (revenue > 0) dayMap.set(day, (dayMap.get(day) || 0) + revenue);
+    });
+    const days = Array.from(dayMap.keys()).sort();
+    return days.slice(-7).map((d) => dayMap.get(d) || 0);
+  };
+
+  const drilldownDetails = useMemo(() => {
+    if (!selectedItemDrilldown) return null;
+    const dayRevenue = new Map<string, number>();
+    const outletRevenue = new Map<string, number>();
+    let qty = 0;
+    let revenue = 0;
+    let orderCount = 0;
+    trendFilteredOrders.forEach((order: any) => {
+      const items = Array.isArray(order.order_items) ? order.order_items : [];
+      let matchedRevenue = 0;
+      let matchedQty = 0;
+      items.forEach((item: any) => {
+        if (item.product_id !== selectedItemDrilldown.productId) return;
+        if (selectedItemDrilldown.variantId && String(item.variant_id || '') !== String(selectedItemDrilldown.variantId || '')) return;
+        const lineRevenue = Number(item.line_total || item.total || Number(item.quantity || 0) * Number(item.unit_price || item.price || 0));
+        const lineQty = Number(item.quantity || 0);
+        matchedRevenue += lineRevenue;
+        matchedQty += lineQty;
+      });
+      if (matchedRevenue > 0) {
+        orderCount += 1;
+        revenue += matchedRevenue;
+        qty += matchedQty;
+        const day = toLocalDate(new Date(order.created_at || order.order_date || new Date()));
+        dayRevenue.set(day, (dayRevenue.get(day) || 0) + matchedRevenue);
+        const outlet = order.outlet_name || (warehouses as any[]).find((w: any) => w.id === order.outlet_id)?.name || 'Unknown Outlet';
+        outletRevenue.set(outlet, (outletRevenue.get(outlet) || 0) + matchedRevenue);
+      }
+    });
+    return {
+      qty,
+      revenue,
+      orderCount,
+      trend: Array.from(dayRevenue.entries()).sort((a, b) => a[0].localeCompare(b[0])).slice(-7),
+      outlets: Array.from(outletRevenue.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5),
+    };
+  }, [selectedItemDrilldown, trendFilteredOrders, warehouses]);
+
+  const handleDownloadPosWidget = async (endpoint: string, label: string) => {
+    const toastId = `pos-widget-${endpoint}`;
+    try {
+      toast.loading(`Preparing ${label}…`, { id: toastId });
+      await downloadReport(endpoint, 'excel', posWidgetFilters);
+      toast.success(`${label} downloaded`, { id: toastId });
+    } catch (err) {
+      console.error('Widget download error:', err);
+      toast.error(`Failed to download ${label}`, { id: toastId });
+    }
+  };
+
   const handleDownloadReport = async (period: 'daily' | 'weekly' | 'monthly' | 'session') => {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      let fromDate = today;
-      let toDate = today;
-      let params: any = { export: 'excel', order_source: 'pos' };
-      const hasCustomDateRange = Boolean(reportDateFrom || reportDateTo);
-
-      if (!hasCustomDateRange && period === 'weekly') {
-        fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      } else if (!hasCustomDateRange && period === 'monthly') {
-        fromDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      }
-
-      if (period === 'session' && activeSession) {
-        params.pos_session_id = activeSession.id;
-      }
-      // POS billers (sales role) should remain scoped to their current session.
-      if (!canViewAllPosSessions && activeSession?.id) {
-        params.pos_session_id = activeSession.id;
-      }
-
-      params.from_date = reportDateFrom || fromDate;
-      params.to_date = reportDateTo || toDate;
-      if (selectedOutletId) {
-        params.outlet_id = selectedOutletId;
-      }
+      const params = buildPosReportFilters(period);
 
       toast.loading(`Preparing ${period} report...`, { id: 'report-download' });
 
       const response = await apiClient.get('/reports/sales/order-summary', {
-        params,
+        params: { ...params, export: 'excel' },
         responseType: 'blob'
       });
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      const filename = `pos_report_${period}_${today}.xlsx`;
+      const filename = `pos_report_${period}_${todayDate}.xlsx`;
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
@@ -659,6 +1032,17 @@ export default function CreatePOSOrder() {
     } catch (error) {
       console.error('Download error:', error);
       toast.error('Failed to download report', { id: 'report-download' });
+    }
+  };
+
+  const handleDownloadItemWiseReport = async () => {
+    try {
+      toast.loading('Preparing item-wise report...', { id: 'item-wise-report-download' });
+      await downloadReport('/reports/sales/product-wise', 'excel', itemWiseFilters);
+      toast.success('Item-wise report downloaded', { id: 'item-wise-report-download' });
+    } catch (error) {
+      console.error('Item-wise download error:', error);
+      toast.error('Failed to download item-wise report', { id: 'item-wise-report-download' });
     }
   };
 
@@ -1558,13 +1942,64 @@ export default function CreatePOSOrder() {
 
         {/* REPORTS VIEW */}
         {activeView === 'reports' && (
-          <div className="flex-1 flex flex-col bg-[#0f1117] p-6 overflow-y-auto">
+          <div ref={reportSnapshotRef} className="flex-1 flex flex-col bg-[#0f1117] p-6 overflow-y-auto">
             <header className="mb-8 flex justify-between items-center">
               <div>
                 <h2 className="text-2xl font-bold">POS Analytics</h2>
                 <p className="text-gray-500 text-sm">Session sales and performance metrics</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded-lg border border-white/10 bg-white/5 p-1">
+                  {[
+                    { key: 'today', label: 'Today' },
+                    { key: 'yesterday', label: 'Yesterday' },
+                    { key: 'this_week', label: 'This Week' },
+                    { key: 'last_week', label: 'Last Week' },
+                    { key: 'this_month', label: 'This Month' },
+                    { key: 'mtd', label: 'MTD' },
+                  ].map((preset) => (
+                    <button
+                      key={preset.key}
+                      onClick={() => {
+                        const now = new Date();
+                        const today = toLocalDate(now);
+                        if (preset.key === 'today') {
+                          setReportDateFrom(today); setReportDateTo(today); setReportPeriod('daily');
+                        } else if (preset.key === 'yesterday') {
+                          const d = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                          const y = toLocalDate(d);
+                          setReportDateFrom(y); setReportDateTo(y); setReportPeriod('daily');
+                        } else if (preset.key === 'this_week') {
+                          const day = now.getDay();
+                          const diff = day === 0 ? 6 : day - 1;
+                          const monday = new Date(now);
+                          monday.setDate(now.getDate() - diff);
+                          setReportDateFrom(toLocalDate(monday)); setReportDateTo(today); setReportPeriod('weekly');
+                        } else if (preset.key === 'last_week') {
+                          const day = now.getDay();
+                          const diff = day === 0 ? 6 : day - 1;
+                          const thisMonday = new Date(now);
+                          thisMonday.setDate(now.getDate() - diff);
+                          const lastMonday = new Date(thisMonday);
+                          lastMonday.setDate(thisMonday.getDate() - 7);
+                          const lastSunday = new Date(thisMonday);
+                          lastSunday.setDate(thisMonday.getDate() - 1);
+                          setReportDateFrom(toLocalDate(lastMonday)); setReportDateTo(toLocalDate(lastSunday)); setReportPeriod('weekly');
+                        } else if (preset.key === 'this_month') {
+                          const start = new Date(now.getFullYear(), now.getMonth(), 1);
+                          const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                          setReportDateFrom(toLocalDate(start)); setReportDateTo(toLocalDate(end)); setReportPeriod('monthly');
+                        } else if (preset.key === 'mtd') {
+                          const start = new Date(now.getFullYear(), now.getMonth(), 1);
+                          setReportDateFrom(toLocalDate(start)); setReportDateTo(today); setReportPeriod('monthly');
+                        }
+                      }}
+                      className="px-2 py-1 text-[11px] rounded-md transition-colors text-gray-300 hover:text-white"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
                 <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 py-1">
                   <label className="text-[11px] text-gray-400 whitespace-nowrap">Outlet</label>
                   <select
@@ -1605,49 +2040,103 @@ export default function CreatePOSOrder() {
                     </button>
                   )}
                 </div>
-                <button 
-                  onClick={() => handleDownloadReport('daily')}
-                  className="h-8 bg-white/5 hover:bg-white/10 text-white px-3 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
+                <div className="inline-flex rounded-lg border border-white/10 bg-white/5 p-1">
+                  {(['daily', 'weekly', 'monthly', 'session'] as const).map((period) => (
+                    <button
+                      key={period}
+                      onClick={() => setReportPeriod(period)}
+                      className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                        reportPeriod === period ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:text-white'
+                      }`}
+                    >
+                      {period.charAt(0).toUpperCase() + period.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                <div className="inline-flex rounded-lg border border-white/10 bg-white/5 p-1 items-center gap-1 px-2">
+                  <Filter className="h-3.5 w-3.5 text-gray-400" />
+                  <select
+                    value={segmentation}
+                    onChange={(e) => setSegmentation(e.target.value as 'none' | 'cashier' | 'outlet' | 'fulfillment')}
+                    className="bg-transparent text-xs text-white border border-white/10 rounded px-2 py-1"
+                  >
+                    <option value="none" className="bg-[#1a1d27]">No Segment</option>
+                    <option value="cashier" className="bg-[#1a1d27]">By Cashier</option>
+                    <option value="outlet" className="bg-[#1a1d27]">By Outlet</option>
+                    <option value="fulfillment" className="bg-[#1a1d27]">By Fulfillment</option>
+                  </select>
+                  {segmentation !== 'none' && (
+                    <select
+                      value={segmentValue}
+                      onChange={(e) => setSegmentValue(e.target.value)}
+                      className="bg-transparent text-xs text-white border border-white/10 rounded px-2 py-1"
+                    >
+                      <option value="all" className="bg-[#1a1d27]">All</option>
+                      {segmentOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value} className="bg-[#1a1d27]">{opt.label}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <button
+                  onClick={() => setComparisonMode((v) => !v)}
+                  className={`h-8 px-3 rounded-lg text-xs font-semibold border transition-colors ${
+                    comparisonMode
+                      ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-200'
+                      : 'bg-white/5 border-white/10 text-gray-300'
+                  }`}
                 >
-                  <Calendar className="h-3.5 w-3.5 text-indigo-400" />
-                  Daily
+                  {comparisonMode ? 'This vs Previous' : 'Current only'}
                 </button>
-                <button 
-                  onClick={() => handleDownloadReport('weekly')}
-                  className="h-8 bg-white/5 hover:bg-white/10 text-white px-3 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
-                >
-                  <Calendar className="h-3.5 w-3.5 text-indigo-400" />
-                  Weekly
-                </button>
-                <button 
-                  onClick={() => handleDownloadReport('monthly')}
-                  className="h-8 bg-white/5 hover:bg-white/10 text-white px-3 rounded-lg text-xs font-medium flex items-center gap-2 border border-white/10 transition-colors"
-                >
-                  <Calendar className="h-3.5 w-3.5 text-indigo-400" />
-                  Monthly
-                </button>
-                <button 
-                  onClick={() => handleDownloadReport('session')}
-                  className="h-8 bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors"
+                <button
+                  onClick={() => handleDownloadReport(reportPeriod)}
+                  className="h-8 bg-indigo-600 hover:bg-indigo-500 text-white px-3 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors"
                 >
                   <Download className="h-3.5 w-3.5" />
-                  Current Session
+                  Download Report
+                </button>
+                <button
+                  onClick={handleSnapshotPdf}
+                  className="h-8 bg-violet-600 hover:bg-violet-500 text-white px-3 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors"
+                >
+                  <FileDown className="h-3.5 w-3.5" />
+                  Snapshot PDF
                 </button>
               </div>
             </header>
             
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
               {[
-                { label: 'Total Sales', value: formatPrice(reportOrders.reduce((sum: number, o: any) => sum + o.total_amount, 0)), trend: selectedOutletId ? 'Outlet' : (reportDateFrom || reportDateTo ? 'Filtered' : 'Session'), color: 'indigo' },
-                { label: 'Orders', value: reportOrders.length.toString(), trend: selectedOutletId ? 'Outlet' : (reportDateFrom || reportDateTo ? 'Filtered' : 'Session'), color: 'green' },
-                { label: 'Avg Order', value: formatPrice(reportOrders.length > 0 ? reportOrders.reduce((sum: number, o: any) => sum + o.total_amount, 0) / reportOrders.length : 0), trend: selectedOutletId ? 'Outlet' : (reportDateFrom || reportDateTo ? 'Filtered' : 'Session'), color: 'amber' },
-                { label: 'Returns', value: '0', trend: 'WIP', color: 'red' }, // POS returns not aggregated locally yet
+                {
+                  label: 'Total Sales',
+                  value: formatPrice(currentRevenue),
+                  trend: comparisonMode ? `${safePctDelta(currentRevenue, previousRevenue) >= 0 ? '↑' : '↓'} ${Math.abs(safePctDelta(currentRevenue, previousRevenue)).toFixed(1)}%` : 'Current',
+                  color: safePctDelta(currentRevenue, previousRevenue) >= 0 ? 'emerald' : 'red',
+                },
+                {
+                  label: 'Orders',
+                  value: currentOrdersCount.toString(),
+                  trend: comparisonMode ? `${safePctDelta(currentOrdersCount, previousOrdersCount) >= 0 ? '↑' : '↓'} ${Math.abs(safePctDelta(currentOrdersCount, previousOrdersCount)).toFixed(1)}%` : 'Current',
+                  color: safePctDelta(currentOrdersCount, previousOrdersCount) >= 0 ? 'emerald' : 'red',
+                },
+                {
+                  label: 'Avg Order',
+                  value: formatPrice(currentAvgOrder),
+                  trend: comparisonMode ? `${safePctDelta(currentAvgOrder, previousAvgOrder) >= 0 ? '↑' : '↓'} ${Math.abs(safePctDelta(currentAvgOrder, previousAvgOrder)).toFixed(1)}%` : 'Target',
+                  color: currentAvgOrder < 250 ? 'red' : 'amber',
+                },
+                {
+                  label: 'Returns',
+                  value: formatPrice(returnsValue),
+                  trend: returnsValue > currentRevenue * 0.08 ? 'High' : 'Healthy',
+                  color: returnsValue > currentRevenue * 0.08 ? 'red' : 'emerald',
+                },
               ].map((stat, i) => (
                 <div key={i} className="bg-[#1a1d27] border border-white/10 p-5 rounded-3xl">
                   <p className="text-xs text-gray-500 mb-1">{stat.label}</p>
                   <div className="flex items-end justify-between">
                     <h3 className="text-2xl font-black">{stat.value}</h3>
-                    <span className={`text-[10px] font-bold text-${stat.color}-400`}>{stat.trend}</span>
+                    <span className={`text-[10px] font-bold ${stat.color === 'emerald' ? 'text-emerald-400' : stat.color === 'red' ? 'text-red-400' : 'text-amber-400'}`}>{stat.trend}</span>
                   </div>
                 </div>
               ))}
@@ -1657,7 +2146,7 @@ export default function CreatePOSOrder() {
               <div className="bg-[#1a1d27] border border-white/10 p-6 rounded-3xl min-h-[300px]">
                 <div className="flex items-center justify-between mb-5">
                   <h3 className="font-bold">Sales Trend</h3>
-                  <span className="text-[10px] text-gray-500">Today Session</span>
+                  <span className="text-[10px] text-gray-500">{selectedTrendBucket ? `Filtered: ${selectedTrendBucket}` : 'Click bar to filter'}</span>
                 </div>
                 <div className="mb-4 inline-flex rounded-lg border border-white/10 bg-white/5 p-1">
                   {(['hourly', 'daily', 'weekly'] as const)
@@ -1712,13 +2201,17 @@ export default function CreatePOSOrder() {
                 <div className="space-y-4">
                   {sellingItems.length > 0 ? (
                     sellingItems.map((item, i) => (
-                      <div key={i} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                      <button
+                        key={i}
+                        onClick={() => setSelectedItemDrilldown({ productId: item.product_id, variantId: item.variant_id, name: item.name })}
+                        className="w-full text-left flex items-center justify-between py-2 border-b border-white/5 last:border-0 hover:bg-white/5 rounded-lg px-2"
+                      >
                          <div>
                            <p className="text-sm font-medium">{item.name}</p>
                            <p className="text-[10px] text-gray-500">{item.sold} units sold</p>
                          </div>
                          <p className="font-bold text-indigo-400">{formatPrice(item.revenue)}</p>
-                      </div>
+                      </button>
                     ))
                   ) : (
                     <p className="text-center py-4 text-gray-500 text-sm">No sales data available</p>
@@ -1726,6 +2219,64 @@ export default function CreatePOSOrder() {
                 </div>
               </div>
             </div>
+
+            {selectedItemDrilldown && drilldownDetails && (
+              <div className="mt-6 bg-[#1a1d27] border border-indigo-500/20 p-6 rounded-3xl">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold">Item Drilldown</h3>
+                    <p className="text-[11px] text-gray-500 mt-1">{selectedItemDrilldown.name} · trend + outlet contribution</p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedItemDrilldown(null)}
+                    className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white text-xs font-semibold"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                  <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-400">Revenue</p>
+                    <p className="text-lg font-bold text-indigo-300">{formatPrice(drilldownDetails.revenue)}</p>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-400">Qty Sold</p>
+                    <p className="text-lg font-bold text-white">{drilldownDetails.qty}</p>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-400">Orders</p>
+                    <p className="text-lg font-bold text-white">{drilldownDetails.orderCount}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                    <p className="text-xs font-semibold text-gray-300 mb-2">Last 7 days trend</p>
+                    <div className="h-20 text-indigo-300">
+                      <Sparkline values={drilldownDetails.trend.map((x) => x[1])} className="h-20 w-full" />
+                    </div>
+                    <div className="mt-2 text-[10px] text-gray-500 flex flex-wrap gap-2">
+                      {drilldownDetails.trend.map(([day, value]) => (
+                        <span key={day}>{day}: {formatPrice(value)}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                    <p className="text-xs font-semibold text-gray-300 mb-2">Contributing outlets</p>
+                    <div className="space-y-2">
+                      {drilldownDetails.outlets.map(([outlet, value]) => (
+                        <div key={outlet} className="flex items-center justify-between text-sm border-b border-white/5 pb-1">
+                          <span className="text-gray-200">{outlet}</span>
+                          <span className="font-semibold text-indigo-300">{formatPrice(value)}</span>
+                        </div>
+                      ))}
+                      {drilldownDetails.outlets.length === 0 && (
+                        <p className="text-xs text-gray-500">No outlet split available for this item.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="mt-6 bg-[#1a1d27] border border-white/10 p-6 rounded-3xl">
               <div className="flex items-center justify-between mb-4">
@@ -1755,6 +2306,109 @@ export default function CreatePOSOrder() {
                 </div>
               )}
             </div>
+
+            <div className="mt-6 bg-[#1a1d27] border border-white/10 p-6 rounded-3xl">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-bold">Item-wise Report</h3>
+                  <p className="text-[11px] text-gray-500 mt-1">POS item performance for selected date/outlet filters</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {selectedItemDrilldown && (
+                    <button
+                      onClick={() => setSelectedItemDrilldown(null)}
+                      className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white text-xs font-semibold"
+                    >
+                      Clear Drilldown
+                    </button>
+                  )}
+                  <button
+                    onClick={handleDownloadItemWiseReport}
+                    className="h-8 bg-indigo-600 hover:bg-indigo-500 text-white px-3 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Export Item-wise
+                  </button>
+                </div>
+              </div>
+
+              {itemWiseLoading || itemWiseFetching ? (
+                <div className="py-8 flex items-center justify-center text-sm text-gray-400 gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading item-wise report...
+                </div>
+              ) : itemWiseError ? (
+                <div className="py-8 text-center text-sm text-red-300">
+                  Could not load item-wise report data.
+                </div>
+              ) : itemWiseRows.length === 0 ? (
+                <div className="py-8 text-center text-sm text-gray-500">
+                  No item-wise sales data found for selected filters.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] text-sm">
+                    <thead>
+                      <tr className="text-left text-[11px] uppercase tracking-wide text-gray-400 border-b border-white/10">
+                        <th className="py-2 pr-3">Item</th>
+                        <th className="py-2 pr-3">SKU</th>
+                        <th className="py-2 pr-3 text-right">Qty Sold</th>
+                        <th className="py-2 pr-3 text-right">Avg Price</th>
+                        <th className="py-2 pr-3 text-right">Revenue</th>
+                        <th className="py-2 text-right">Orders</th>
+                        <th className="py-2 text-right">7-Day Trend</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {itemWiseRows.map((row: SalesProductWiseRow) => {
+                        const itemName = row.variant_name && row.variant_name !== '—'
+                          ? `${row.product_name} (${row.variant_name})`
+                          : row.product_name;
+
+                        return (
+                          <tr key={`${row.product_id}-${row.variant_id || row.sku}`} className="border-b border-white/5 last:border-b-0">
+                            <td className="py-3 pr-3">
+                              <p className="text-white font-medium">{itemName}</p>
+                            </td>
+                            <td className="py-3 pr-3 text-gray-300">{row.sku || '—'}</td>
+                            <td className="py-3 pr-3 text-right text-gray-200">{row.total_qty}</td>
+                            <td className="py-3 pr-3 text-right text-gray-200">{formatPrice(Number(row.avg_unit_price || 0))}</td>
+                            <td className="py-3 pr-3 text-right font-semibold text-indigo-300">{formatPrice(Number(row.total_revenue || 0))}</td>
+                            <td className="py-3 text-right text-gray-200">{row.order_count}</td>
+                            <td className="py-3 text-right text-indigo-300">
+                              <Sparkline values={buildItemSparkline(row)} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <PosAnalyticsBatchAWidgets
+              hourlyHeatmapQuery={hourlyHeatmapQuery}
+              paymentMixQuery={paymentMixQuery}
+              fulfillmentMixQuery={fulfillmentMixQuery}
+              discountImpactQuery={discountImpactQuery}
+              cashierPerfQuery={cashierPerfQuery}
+              returnsQuery={returnsQuery}
+              canViewAllPosSessions={canViewAllPosSessions}
+              handleDownloadPosWidget={handleDownloadPosWidget}
+              navigate={navigate}
+            />
+
+            <PosAnalyticsBatchBWidgets
+              categoryBrandQuery={categoryBrandQuery}
+              basketQuery={basketQuery}
+              modifierQuery={modifierQuery}
+              trendQuery={trendComparisonQuery}
+              moversQuery={moversQuery}
+              leaderboardQuery={outletLeaderboardQuery}
+              isAdmin={canViewAllPosSessions}
+              handleDownloadPosWidget={handleDownloadPosWidget}
+            />
           </div>
         )}
 

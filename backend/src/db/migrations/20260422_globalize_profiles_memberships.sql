@@ -51,7 +51,7 @@ SET search_path = public
 AS $$
   SELECT cm.company_id
   FROM public.company_memberships cm
-  WHERE cm.user_id = user_id
+  WHERE cm.user_id = $1
     AND cm.is_active = true
   ORDER BY cm.created_at ASC
   LIMIT 1;

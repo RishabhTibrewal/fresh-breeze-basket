@@ -11,6 +11,17 @@ import {
   pendingDeliveries,
   salesReturns,
   salesDashboard,
+  hourlyHeatmap,
+  paymentMix,
+  fulfillmentMix,
+  discountImpact,
+  cashierPerformance,
+  categoryBrandSales,
+  basketMetrics,
+  modifierRevenue,
+  trendComparison,
+  topBottomMovers,
+  outletLeaderboard,
 } from '../../controllers/reports/salesReportController';
 
 const router = express.Router();
@@ -26,6 +37,21 @@ router.get('/product-wise',            protect, validateReportQuery, requireRepo
 router.get('/target-vs-achievement',   protect, validateReportQuery, requireReportPermission('sales.target_vs_achievement.view'), targetVsAchievement);
 router.get('/pending-deliveries',      protect, validateReportQuery, requireReportPermission('sales.pending_deliveries.view'),    pendingDeliveries);
 router.get('/returns',                 protect, validateReportQuery, requireReportPermission('sales.returns.view'),               salesReturns);
+
+// High-impact POS analytics reports
+router.get('/hourly-heatmap',          protect, validateReportQuery, requireReportPermission('sales.hourly_heatmap.view'),        hourlyHeatmap);
+router.get('/payment-mix',             protect, validateReportQuery, requireReportPermission('sales.payment_mix.view'),           paymentMix);
+router.get('/fulfillment-mix',         protect, validateReportQuery, requireReportPermission('sales.fulfillment_mix.view'),       fulfillmentMix);
+router.get('/discount-impact',         protect, validateReportQuery, requireReportPermission('sales.discount_impact.view'),       discountImpact);
+router.get('/cashier-performance',     protect, validateReportQuery, requireReportPermission('pos.cashier_performance.view'),     cashierPerformance);
+
+// Medium-effort insight reports (Batch B)
+router.get('/category-brand',          protect, validateReportQuery, requireReportPermission('sales.category_brand.view'),        categoryBrandSales);
+router.get('/basket-metrics',          protect, validateReportQuery, requireReportPermission('sales.basket_metrics.view'),        basketMetrics);
+router.get('/modifier-revenue',        protect, validateReportQuery, requireReportPermission('sales.modifier_revenue.view'),      modifierRevenue);
+router.get('/trend-comparison',        protect, validateReportQuery, requireReportPermission('sales.trend_comparison.view'),      trendComparison);
+router.get('/movers',                  protect, validateReportQuery, requireReportPermission('sales.movers.view'),                topBottomMovers);
+router.get('/outlet-leaderboard',      protect, validateReportQuery, requireReportPermission('sales.outlet_leaderboard.view'),    outletLeaderboard);
 
 // Stub endpoints for Phase 3+
 router.get('/price-variance',          protect, validateReportQuery, requireReportPermission('sales.price_variance.view'),        async (req, res) => {

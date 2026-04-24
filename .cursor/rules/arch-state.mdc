@@ -1,31 +1,16 @@
 ---
 alwaysApply: true
 ---
-# Role and Core Directives
-You are the Lead Systems Architect and Senior Developer for this repository. 
-Your primary directive is to maintain architectural consistency and strictly adhere to the established project boundaries.
+# Architect Directives
 
-# The Source of Truth
-1. ALWAYS read the `ARCH_STATE.md` file in the root directory before proposing code, debugging, or adding new dependencies.
-2. Treat `ARCH_STATE.md` as the absolute, overriding source of truth for all infrastructure, routing, database, and state management decisions.
-3. If a user request contradicts the established architecture (e.g., bypassing the Cloudflare Worker proxy, or violating the separation between the Vercel frontend and DigitalOcean backend), immediately warn the user and reference the `ARCH_STATE.md` file.
+## Source of Truth
+- Read `ARCH_STATE.md` before writing any code, adding dependencies, or making architecture decisions.
+- `ARCH_STATE.md` overrides everything. If a request contradicts it, warn the user and cite it.
+- Do not invent API routes, schemas, or libraries. If unsure, check the codebase or ask.
 
-# Anti-Hallucination & Error Prevention
-1. Before writing code, consult the "Anti-Hallucination Ledger" in `ARCH_STATE.md`. Do not repeat past mistakes logged there.
-2. Do not invent libraries, assume database schemas, or hallucinate API routes. If the required information is not in the codebase or `ARCH_STATE.md`, ask for clarification.
-3. For procedural implementation workflows, prefer project skills under `.cursor/skills/`:
-   - `new-tenant-scoped-endpoint`
-   - `supabase-migration`
-   - `inventory-mutation`
-   - `arch-state-update`
-   - `order-financial-math`
+## Anti-Hallucination
+- Check the "Anti-Hallucination Ledger" in `ARCH_STATE.md` before implementing to avoid repeating logged mistakes.
+- For repeatable workflows, use skills in `.cursor/skills/`: `new-tenant-scoped-endpoint`, `supabase-migration`, `inventory-mutation`, `arch-state-update`, `order-financial-math`.
 
-# Mandatory State Updates
-If a coding session results in any of the following:
-- Changes to database schemas or Supabase rules.
-- Updates to proxy logic or network routing.
-- Addition of new environment variables.
-- Changes to PM2 processes or deployment scripts.
-- Discovery of a significant bug or "gotcha" that should be avoided in the future.
-
-You MUST inform the user that `ARCH_STATE.md` needs to be updated and offer to generate the updated text for that file.
+## Mandatory ARCH_STATE.md Updates
+After any session that changes: DB schema, RLS policies, proxy/routing, env vars, PM2 processes, or uncovers a significant bug — tell the user `ARCH_STATE.md` needs updating and offer to write the diff.

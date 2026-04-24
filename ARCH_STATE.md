@@ -968,6 +968,86 @@ Standardize the Quotation module so its financial logic, UI, and document output
   - Payment records include transaction details (transaction_id, cheque_no, payment_date) based on payment method
   - **Critical:** Payment record creation during order creation uses `preserveOrderPaymentStatus: true` to maintain order's intended payment status (prevents 'partial' from being overwritten to 'paid')
 
+### Recent Changes (2026-04-23) - POS High-Impact Reports (Batch A)
+
+- **New Sales Report Endpoints (`/api/reports/sales/*`):**
+  - `GET /hourly-heatmap` -> permission `sales.hourly_heatmap.view`
+  - `GET /payment-mix` -> permission `sales.payment_mix.view` (split-aware via `payments` table)
+  - `GET /fulfillment-mix` -> permission `sales.fulfillment_mix.view`
+  - `GET /discount-impact` -> permission `sales.discount_impact.view`
+  - `GET /cashier-performance` -> permission `pos.cashier_performance.view`
+  - All endpoints reuse existing `ReportQuery` (`from_date`, `to_date`, `branch_ids`, `order_source`, `pos_session_id`, export, pagination)
+
+- **Returns Report Enhancement (`GET /api/reports/sales/returns`):**
+  - Now honors `order_source`, `branch_ids`, and `pos_session_id`
+  - Enriched rows include `outlet_name`, `items_count`, and `reason` (from `credit_notes.reason` when present)
+  - Summary includes reason-wise breakdown (`reasons_json`)
+
+- **Permission Seed Migration:**
+  - Added `backend/src/db/migrations/20260423_add_high_impact_report_permissions.sql`
+  - Idempotently seeds:
+    - `sales.hourly_heatmap.view`
+    - `sales.payment_mix.view`
+    - `sales.fulfillment_mix.view`
+    - `sales.discount_impact.view`
+    - `pos.cashier_performance.view`
+  - Grants these to `sales` and `accounts` roles via `role_permissions`
+  - `admin` remains full-access via `requireReportPermission` admin bypass
+
+- **Frontend Report Surfaces:**
+  - New full pages:
+    - `frontend/src/pages/admin/reports/sales/HourlySalesHeatmap.tsx`
+    - `frontend/src/pages/admin/reports/sales/PaymentMethodMix.tsx`
+    - `frontend/src/pages/admin/reports/sales/FulfillmentMix.tsx`
+    - `frontend/src/pages/admin/reports/sales/DiscountImpact.tsx`
+    - `frontend/src/pages/admin/reports/sales/CashierPerformance.tsx`
+  - New POS Analytics widget bundle:
+    - `frontend/src/pages/pos/PosAnalyticsBatchAWidgets.tsx`
+    - Wired into `frontend/src/pages/pos/CreatePOSOrder.tsx`
+  - New API wrappers and types in `frontend/src/api/reports.ts`
+
+### Recent Changes (2026-04-23) - POS Medium-Effort Reports (Batch B)
+
+- **New Sales Report Endpoints (`/api/reports/sales/*`):**
+  - `GET /category-brand` -> permission `sales.category_brand.view` (returns category/brand rollups + margin retention %)
+  - `GET /basket-metrics` -> permission `sales.basket_metrics.view` (per-day avg basket, items/order, unique SKUs/order)
+  - `GET /modifier-revenue` -> permission `sales.modifier_revenue.view` (attach rate from `order_item_modifiers`)
+  - `GET /trend-comparison` -> permission `sales.trend_comparison.view` (hour + weekday buckets vs previous equivalent period)
+  - `GET /movers` -> permission `sales.movers.view` (top/bottom gainers/decliners vs previous period with `MIN_SIGNAL` noise filter)
+  - `GET /outlet-leaderboard` -> permission `sales.outlet_leaderboard.view` (outlet ranking vs previous period; UI surfaces admin-only)
+  - All reuse existing `ReportQuery` filters (`from_date`, `to_date`, `branch_ids`, `order_source`, `pos_session_id`, export, pagination)
+  - All trend/mover/leaderboard reports include `period_from/period_to/previous_from/previous_to` in summary for UX
+
+- **Comparison Default (Period over Period):**
+  - Default comparison is current selected period vs **immediately previous equivalent period** of equal length (adjacent, not same-day-last-year)
+  - Shared helpers added in `backend/src/services/reports/salesReportService.ts`:
+    - `previousEquivalentPeriod(q)` returns `{ from_date, to_date, days }`
+    - `withDateWindow(q, from, to)` clones a `ReportQuery` with shifted dates but preserves all other scope filters
+    - `safePct(prev, curr)` computes robust % delta (returns 0 when `prev === 0 && curr === 0`, `+100` when growing from 0)
+
+- **Margin Insight (Category Margin Consolidation):**
+  - `CategoryMarginInsights` was **consolidated into** `category-brand` because item-level cost data is not present in the schema.
+  - Margin is computed as **effective margin retention** against list price: `margin_retention_pct = 100 * (1 - (list_value - total_revenue) / list_value)` where `list_value = Σ products.price * qty`.
+  - This is retention of list price, NOT gross profit margin. Treat as a discount-effectiveness KPI, not a profitability KPI.
+
+- **Permission Seed Migration:**
+  - Added `backend/src/db/migrations/20260424_add_medium_effort_report_permissions.sql`
+  - Idempotently seeds Batch B permissions and grants:
+    - `sales` role: all Batch B **except** `sales.outlet_leaderboard.view`
+    - `accounts` role: all Batch B permissions
+  - `admin`/`super_admin` bypass via `requireReportPermission`
+
+- **Frontend Report Surfaces:**
+  - New full-page reports under `frontend/src/pages/admin/reports/sales/`:
+    - `CategoryBrandSales.tsx`, `AverageBasketMetrics.tsx`, `ModifierRevenue.tsx`,
+      `HourlyWeekdayTrend.tsx`, `TopBottomMovers.tsx`, `OutletLeaderboard.tsx`
+  - New POS Analytics widget bundle: `frontend/src/pages/pos/PosAnalyticsBatchBWidgets.tsx`
+    - Wired into `frontend/src/pages/pos/CreatePOSOrder.tsx` next to Batch A widgets
+    - Reuses `buildPosReportFilters(reportPeriod)` so all Batch B widgets follow the POS date/outlet/session scope
+    - Outlet Leaderboard widget **and** dashboard link are gated behind `canViewAllPosSessions` (admin) on the UI; backend permission still enforced
+  - New API wrappers/types for all six endpoints in `frontend/src/api/reports.ts`
+  - `SalesReportsDashboard.tsx` shows the six new links for every role and an additional admin-only Outlet Leaderboard tile
+
 ---
 
 ## AI Rules & Anti-Hallucination Ledger
@@ -1316,6 +1396,52 @@ await paymentService.processPayment({
 - `backend/src/controllers/partyController.ts`
 - `backend/src/controllers/customerController.ts`
 - `backend/src/controllers/suppliers.ts`
+
+#### 16. POS Report Aggregation & Filter Integrity
+
+**NEVER:**
+- Aggregate split-payment orders from `orders.total_amount` under `payment_method='split'`.
+- Build report services without `.eq('order.company_id', companyId)` when querying through joined `order` relations.
+- Assume customer name fields are `first_name` / `last_name` in report joins for customer records.
+- Diverge POS widget filtering from `buildPosReportFilters(reportPeriod)`.
+
+**ALWAYS:**
+- For payment mix, aggregate non-split orders from `orders.payment_method` + `orders.total_amount`, and split orders from `payments.payment_method` + `payments.amount` (exclude failed payment rows).
+- Reuse the shared order-scope pattern (`company_id`, `order_type='sales'`, `status != cancelled`, `from_date/to_date`, optional `order_source`, `branch_ids`, `pos_session_id`) across all report services.
+- Use `customers:customer_id(id, name, email)` for customer display fields in sales returns report enrichment.
+- Keep POS analytics widgets and full report pages backed by the same filter contract (`ReportQuery`) and endpoint responses.
+
+**Reference files:**
+- `backend/src/services/reports/salesReportService.ts`
+- `backend/src/controllers/reports/salesReportController.ts`
+- `backend/src/routes/reports/salesReports.ts`
+- `backend/src/db/migrations/20260423_add_high_impact_report_permissions.sql`
+- `frontend/src/pages/pos/CreatePOSOrder.tsx`
+- `frontend/src/pages/pos/PosAnalyticsBatchAWidgets.tsx`
+- `frontend/src/api/reports.ts`
+
+#### 17. POS Batch B Reports – Period-over-Period & Margin Guardrails
+
+**NEVER:**
+- Re-derive the previous period ad-hoc per report. Always use the shared `previousEquivalentPeriod(q)` helper so all comparisons are consistent.
+- Treat `margin_retention_pct` from `getCategoryBrandSales` as gross-profit margin. The schema has no reliable item-level cost; it represents list-price retention only.
+- Surface Outlet Comparison Leaderboard UI (widget or dashboard card) to non-admin users; the backend permission alone is not a visibility UX (accounts can still access the full page).
+- Return movers without a `MIN_SIGNAL` threshold – low-volume SKUs create noise in % deltas.
+
+**ALWAYS:**
+- Use `safePct(prev, curr)` for delta percentages – it handles the 0/0 and 0→N cases consistently.
+- Include `period_from/period_to/previous_from/previous_to` in the summary of every comparison report so the UI can label the "vs …" clearly.
+- Keep POS analytics Batch B widgets fed by `buildPosReportFilters(reportPeriod)` – the same contract as Batch A – so period/outlet/session toggles stay coherent across widgets.
+- When adding more comparison reports, reuse `withDateWindow(q, from, to)` to clone the filter context; do not rebuild filter objects manually.
+
+**Reference files:**
+- `backend/src/services/reports/salesReportService.ts` (`previousEquivalentPeriod`, `safePct`, Batch B services)
+- `backend/src/controllers/reports/salesReportController.ts` (Batch B controllers, export column maps)
+- `backend/src/routes/reports/salesReports.ts` (Batch B routes)
+- `backend/src/db/migrations/20260424_add_medium_effort_report_permissions.sql`
+- `frontend/src/pages/admin/reports/sales/{CategoryBrandSales,AverageBasketMetrics,ModifierRevenue,HourlyWeekdayTrend,TopBottomMovers,OutletLeaderboard}.tsx`
+- `frontend/src/pages/pos/PosAnalyticsBatchBWidgets.tsx`
+- `frontend/src/pages/pos/CreatePOSOrder.tsx`
 
 ---
 

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -10,7 +9,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -25,13 +23,11 @@ import {
   TrendingUp,
   TrendingDown,
   Users,
-  CreditCard,
-  Package,
-  BarChart3,
   Calendar,
   User
 } from 'lucide-react';
 import apiClient from '@/lib/apiClient';
+import { fetchReport } from '@/api/reports';
 import { formatCurrency } from '@/lib/utils';
 
 const PERIOD_OPTIONS = [
@@ -94,144 +90,139 @@ export default function SalesAnalysis() {
   const { data: analytics, isLoading, error } = useQuery<SalesAnalytics>({
     queryKey: ['adminSalesAnalytics', period],
     queryFn: async () => {
-      // First get all sales executives
-      const execResponse = await apiClient.get('/admin/sales-executives');
-      const executives: SalesExecutive[] = execResponse.data.data || [];
-
-      // Get all orders for the period to calculate aggregate analytics
       const endDate = new Date();
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - period);
-      
-      const ordersResponse = await apiClient.get('/orders', {
-        params: {
-          from_date: startDate.toISOString(),
-          to_date: endDate.toISOString(),
-          limit: 10000
-        }
-      });
-      const allOrders = ordersResponse.data.data || [];
+      const from_date = startDate.toISOString().split('T')[0];
+      const to_date = endDate.toISOString().split('T')[0];
 
-      // Get per-executive breakdown
+      const reportFilters = {
+        from_date,
+        to_date,
+        page_size: 500,
+        sort_dir: 'desc' as const,
+        export: 'none' as const,
+        currency: 'AED',
+      };
+
+      // Fetch all report data and customer count in parallel
+      const [
+        execResponse,
+        orderSummaryReport,
+        customerWiseReport,
+        productWiseReport,
+        customersResponse,
+      ] = await Promise.all([
+        apiClient.get('/admin/sales-executives'),
+        fetchReport('/reports/sales/order-summary', reportFilters),
+        fetchReport('/reports/sales/customer-wise', { ...reportFilters, page_size: 10 }),
+        fetchReport('/reports/sales/product-wise', {
+          ...reportFilters,
+          page_size: 10,
+          sort_by: 'total_revenue',
+        }),
+        apiClient.get('/customers'),
+      ]);
+
+      const executives: SalesExecutive[] = execResponse.data.data || [];
+      const allCustomers: any[] = customersResponse.data.data || [];
+
+      // ── Revenue & Order totals from report summary ─────────────────────────
+      const totalRevenue = Number(orderSummaryReport.summary.total_revenue ?? 0);
+      const totalOrders = Number(orderSummaryReport.summary.total_orders ?? 0);
+
+      // ── Build daily & monthly revenue trends from per-order report rows ────
+      const orderRows = orderSummaryReport.data as any[];
+      const dailyMap = new Map<string, number>();
+      const monthlyMap = new Map<string, number>();
+      orderRows.forEach((row: any) => {
+        const dateStr = String(row.date || '');
+        if (!dateStr) return;
+        const amount = Number(row.total_amount ?? 0);
+        dailyMap.set(dateStr, (dailyMap.get(dateStr) || 0) + amount);
+        const month = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+          month: 'long',
+          year: 'numeric',
+        });
+        monthlyMap.set(month, (monthlyMap.get(month) || 0) + amount);
+      });
+      const daily = Array.from(dailyMap.entries())
+        .map(([date, amount]) => ({ date, amount }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      const monthly = Array.from(monthlyMap.entries())
+        .map(([month, amount]) => ({ month, amount }));
+
+      // ── Growth (first-half vs second-half of returned rows) ────────────────
+      const mid = Math.floor(orderRows.length / 2);
+      const fhRev = orderRows.slice(0, mid).reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+      const shRev = orderRows.slice(mid).reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+      const revenueGrowth = fhRev > 0 ? ((shRev - fhRev) / fhRev) * 100 : 0;
+      const fhOrders = orderRows.slice(0, mid).length;
+      const shOrders = orderRows.slice(mid).length;
+      const orderGrowth = fhOrders > 0 ? ((shOrders - fhOrders) / fhOrders) * 100 : 0;
+
+      // ── Top Customers from customer-wise report ────────────────────────────
+      const topCustomers = (customerWiseReport.data as any[]).slice(0, 10).map((r: any) => ({
+        id: r.customer_id || String(r.customer_name),
+        name: r.customer_name || 'Unknown',
+        revenue: Number(r.total_revenue ?? 0),
+        orderCount: Number(r.order_count ?? 0),
+      }));
+
+      // ── Top Products from product-wise report ─────────────────────────────
+      const topProducts = (productWiseReport.data as any[]).slice(0, 10).map((r: any) => ({
+        id: r.variant_id || r.product_id,
+        name: r.product_name + (r.variant_name && r.variant_name !== 'Default' ? ` – ${r.variant_name}` : ''),
+        revenue: Number(r.total_revenue ?? 0),
+        quantity: Number(r.total_qty ?? 0),
+      }));
+
+      // ── Per-executive breakdown (lightweight: customers count + order-summary scoped by exec) ──
       const executiveBreakdown = await Promise.all(
         executives.map(async (exec) => {
           try {
-            // Get customers for this executive
-            const customersResponse = await apiClient.get('/customers', {
-              params: { sales_executive_id: exec.id }
-            });
-            const customers = customersResponse.data.data || [];
-            const customerUserIds = customers.map((c: any) => c.user_id);
-            
-            // Get orders for these customers
-            const execOrders = allOrders.filter((order: any) => 
-              customerUserIds.includes(order.user_id)
-            );
-            
-            const revenue = execOrders.reduce((sum: number, order: any) => 
-              sum + parseFloat(order.total_amount || '0'), 0
-            );
-            
+            const [execCustomers, execOrders] = await Promise.all([
+              apiClient.get('/customers', { params: { sales_executive_id: exec.id } }),
+              fetchReport('/reports/sales/order-summary', {
+                ...reportFilters,
+                page_size: 1,
+                // The summary total_revenue covers the whole period for this company;
+                // filter client-side using the customer list for this exec
+              }),
+            ]);
+            const customers: any[] = execCustomers.data.data || [];
+            const customerIds = new Set(customers.map((c: any) => c.id));
+
+            // Revenue = sum of order-summary rows whose customer_id belongs to this exec
+            const execRevenue = (orderRows as any[]).reduce((sum, row) => {
+              return customerIds.has(row.customer_id) ? sum + Number(row.total_amount || 0) : sum;
+            }, 0);
+            const execOrderCount = (orderRows as any[]).filter((row) =>
+              customerIds.has(row.customer_id)
+            ).length;
+
             return {
               executive: exec,
-              revenue,
-              orders: execOrders.length,
+              revenue: execRevenue,
+              orders: execOrderCount,
               customers: customers.length,
             };
-          } catch (err) {
-            console.error(`Error fetching data for executive ${exec.id}:`, err);
-            return {
-              executive: exec,
-              revenue: 0,
-              orders: 0,
-              customers: 0,
-            };
+          } catch {
+            return { executive: exec, revenue: 0, orders: 0, customers: 0 };
           }
         })
       );
 
-      // Calculate aggregate metrics
-      const filteredOrders = allOrders.filter((o: any) => o.status !== 'cancelled');
-      const totalRevenue = filteredOrders.reduce((sum: number, o: any) => 
-        sum + parseFloat(o.total_amount || '0'), 0
-      );
-      
-      // Group by date for daily revenue
-      const dailyRevenueMap = new Map<string, number>();
-      filteredOrders.forEach((order: any) => {
-        const date = new Date(order.created_at).toISOString().split('T')[0];
-        dailyRevenueMap.set(date, (dailyRevenueMap.get(date) || 0) + parseFloat(order.total_amount || '0'));
-      });
-      const daily = Array.from(dailyRevenueMap.entries())
-        .map(([date, amount]) => ({ date, amount }))
-        .sort((a, b) => a.date.localeCompare(b.date));
-
-      // Group by month
-      const monthlyMap = new Map<string, number>();
-      filteredOrders.forEach((order: any) => {
-        const date = new Date(order.created_at);
-        const month = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        monthlyMap.set(month, (monthlyMap.get(month) || 0) + parseFloat(order.total_amount || '0'));
-      });
-      const monthly = Array.from(monthlyMap.entries())
-        .map(([month, amount]) => ({ month, amount }))
-        .sort((a, b) => {
-          const dateA = new Date(a.month);
-          const dateB = new Date(b.month);
-          return dateA.getTime() - dateB.getTime();
-        });
-
-      // Calculate trends (compare first half vs second half)
-      const midPoint = Math.floor(filteredOrders.length / 2);
-      const firstHalf = filteredOrders.slice(0, midPoint);
-      const secondHalf = filteredOrders.slice(midPoint);
-      const firstHalfRevenue = firstHalf.reduce((sum: number, o: any) => 
-        sum + parseFloat(o.total_amount || '0'), 0
-      );
-      const secondHalfRevenue = secondHalf.reduce((sum: number, o: any) => 
-        sum + parseFloat(o.total_amount || '0'), 0
-      );
-      const revenueGrowth = firstHalfRevenue > 0 
-        ? ((secondHalfRevenue - firstHalfRevenue) / firstHalfRevenue) * 100 
-        : 0;
-      const orderGrowth = firstHalf.length > 0 
-        ? ((secondHalf.length - firstHalf.length) / firstHalf.length) * 100 
-        : 0;
-
-      // Get all customers
-      const customersResponse = await apiClient.get('/customers');
-      const allCustomers = customersResponse.data.data || [];
-
       return {
-        revenue: {
-          total: totalRevenue,
-          paid: totalRevenue, // Simplified - would need payment status to calculate properly
-          credit: 0,
-          daily,
-          monthly,
-        },
-        orders: {
-          total: filteredOrders.length,
-          byStatus: {},
-          byPaymentMethod: {},
-          daily: [],
-        },
+        revenue: { total: totalRevenue, paid: totalRevenue, credit: 0, daily, monthly },
+        orders: { total: totalOrders, byStatus: {}, byPaymentMethod: {}, daily: [] },
         customers: {
           total: allCustomers.length,
-          topCustomers: [],
-          creditSummary: {
-            totalCredit: 0,
-            totalLimit: 0,
-            utilizationRate: 0,
-          },
+          topCustomers,
+          creditSummary: { totalCredit: 0, totalLimit: 0, utilizationRate: 0 },
         },
-        products: {
-          topProducts: [],
-        },
-        trends: {
-          revenueGrowth,
-          orderGrowth,
-        },
+        products: { topProducts },
+        trends: { revenueGrowth, orderGrowth },
         salesExecutives: executiveBreakdown,
       };
     },

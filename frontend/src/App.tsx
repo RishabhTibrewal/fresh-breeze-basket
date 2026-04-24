@@ -108,6 +108,17 @@ const SalespersonPerformance = lazy(() => import("./pages/admin/reports/sales/Sa
 const CustomerWiseSales = lazy(() => import("./pages/admin/reports/sales/CustomerWiseSales"));
 const ProductWiseSales = lazy(() => import("./pages/admin/reports/sales/ProductWiseSales"));
 const TargetVsAchievement = lazy(() => import("./pages/admin/reports/sales/TargetVsAchievement"));
+const HourlySalesHeatmap = lazy(() => import("./pages/admin/reports/sales/HourlySalesHeatmap"));
+const PaymentMethodMix = lazy(() => import("./pages/admin/reports/sales/PaymentMethodMix"));
+const FulfillmentMix = lazy(() => import("./pages/admin/reports/sales/FulfillmentMix"));
+const DiscountImpact = lazy(() => import("./pages/admin/reports/sales/DiscountImpact"));
+const CashierPerformance = lazy(() => import("./pages/admin/reports/sales/CashierPerformance"));
+const CategoryBrandSales = lazy(() => import("./pages/admin/reports/sales/CategoryBrandSales"));
+const AverageBasketMetrics = lazy(() => import("./pages/admin/reports/sales/AverageBasketMetrics"));
+const ModifierRevenue = lazy(() => import("./pages/admin/reports/sales/ModifierRevenue"));
+const HourlyWeekdayTrend = lazy(() => import("./pages/admin/reports/sales/HourlyWeekdayTrend"));
+const TopBottomMovers = lazy(() => import("./pages/admin/reports/sales/TopBottomMovers"));
+const OutletLeaderboard = lazy(() => import("./pages/admin/reports/sales/OutletLeaderboard"));
 
 // Inventory Reports pages - lazy loaded
 const InventoryReportsDashboard = lazy(() => import("./pages/admin/reports/inventory/InventoryReportsDashboard"));
@@ -262,6 +273,17 @@ const App: React.FC = () => {
                       <Route path="reports/sales/target-vs-achievement" element={<TargetVsAchievement />} />
                       <Route path="reports/sales/pending-deliveries" element={<PlaceholderPage />} />
                       <Route path="reports/sales/returns" element={<PlaceholderPage />} />
+                      <Route path="reports/sales/hourly-heatmap" element={<HourlySalesHeatmap />} />
+                      <Route path="reports/sales/payment-mix" element={<PaymentMethodMix />} />
+                      <Route path="reports/sales/fulfillment-mix" element={<FulfillmentMix />} />
+                      <Route path="reports/sales/discount-impact" element={<DiscountImpact />} />
+                      <Route path="reports/sales/cashier-performance" element={<CashierPerformance />} />
+                      <Route path="reports/sales/category-brand" element={<CategoryBrandSales />} />
+                      <Route path="reports/sales/basket-metrics" element={<AverageBasketMetrics />} />
+                      <Route path="reports/sales/modifier-revenue" element={<ModifierRevenue />} />
+                      <Route path="reports/sales/trend-comparison" element={<HourlyWeekdayTrend />} />
+                      <Route path="reports/sales/movers" element={<TopBottomMovers />} />
+                      <Route path="reports/sales/outlet-leaderboard" element={<OutletLeaderboard />} />
                       {/* Real Inventory Reports */}
                       <Route path="reports/inventory" element={<InventoryReportsDashboard />} />
                       <Route path="reports/inventory/stock-ledger" element={<StockLedger />} />
@@ -468,6 +490,17 @@ const App: React.FC = () => {
                       <Route path="sales/target-vs-achievement" element={<TargetVsAchievement />} />
                       <Route path="sales/pending-deliveries" element={<PlaceholderPage />} />
                       <Route path="sales/returns" element={<PlaceholderPage />} />
+                      <Route path="sales/hourly-heatmap" element={<HourlySalesHeatmap />} />
+                      <Route path="sales/payment-mix" element={<PaymentMethodMix />} />
+                      <Route path="sales/fulfillment-mix" element={<FulfillmentMix />} />
+                      <Route path="sales/discount-impact" element={<DiscountImpact />} />
+                      <Route path="sales/cashier-performance" element={<CashierPerformance />} />
+                      <Route path="sales/category-brand" element={<CategoryBrandSales />} />
+                      <Route path="sales/basket-metrics" element={<AverageBasketMetrics />} />
+                      <Route path="sales/modifier-revenue" element={<ModifierRevenue />} />
+                      <Route path="sales/trend-comparison" element={<HourlyWeekdayTrend />} />
+                      <Route path="sales/movers" element={<TopBottomMovers />} />
+                      <Route path="sales/outlet-leaderboard" element={<OutletLeaderboard />} />
                       {/* Inventory */}
                       <Route path="inventory" element={<InventoryReportsDashboard />} />
                       <Route path="inventory/stock-ledger" element={<StockLedger />} />

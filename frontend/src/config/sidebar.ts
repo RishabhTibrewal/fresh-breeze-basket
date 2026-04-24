@@ -32,7 +32,13 @@ import {
   Truck,
   BookOpen,
   LineChart,
-  Layers
+  Layers,
+  Clock,
+  RotateCcw,
+  PlusSquare,
+  CalendarClock,
+  Trophy,
+  Boxes
 } from 'lucide-react';
 
 export interface SidebarMenuItem {
@@ -442,6 +448,97 @@ const reportsGroup: SidebarGroup = {
           icon: Target,
           path: '/reports/sales/target-vs-achievement',
           roles: ['admin', 'sales']
+        },
+        {
+          id: 'report-pending-deliveries',
+          label: 'Pending Deliveries',
+          icon: Clock,
+          path: '/reports/sales/pending-deliveries',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-sales-returns',
+          label: 'Sales Returns',
+          icon: RotateCcw,
+          path: '/reports/sales/returns',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-hourly-heatmap',
+          label: 'Hourly Sales Heatmap',
+          icon: Clock,
+          path: '/reports/sales/hourly-heatmap',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-payment-mix',
+          label: 'Payment Method Mix',
+          icon: CreditCard,
+          path: '/reports/sales/payment-mix',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-fulfillment-mix',
+          label: 'Fulfillment Breakdown',
+          icon: Truck,
+          path: '/reports/sales/fulfillment-mix',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-discount-impact',
+          label: 'Discount Impact',
+          icon: Tag,
+          path: '/reports/sales/discount-impact',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-cashier-performance',
+          label: 'Cashier Performance',
+          icon: UserCheck,
+          path: '/reports/sales/cashier-performance',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-category-brand',
+          label: 'Category & Brand Sales',
+          icon: Layers,
+          path: '/reports/sales/category-brand',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-basket-metrics',
+          label: 'Average Basket Metrics',
+          icon: Boxes,
+          path: '/reports/sales/basket-metrics',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-modifier-revenue',
+          label: 'Modifier / Add-on Revenue',
+          icon: PlusSquare,
+          path: '/reports/sales/modifier-revenue',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-trend-comparison',
+          label: 'Hourly & Weekday Trend',
+          icon: CalendarClock,
+          path: '/reports/sales/trend-comparison',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-movers',
+          label: 'Top / Bottom Movers',
+          icon: TrendingUp,
+          path: '/reports/sales/movers',
+          roles: ['admin', 'sales', 'accounts']
+        },
+        {
+          id: 'report-outlet-leaderboard',
+          label: 'Outlet Leaderboard',
+          icon: Trophy,
+          path: '/reports/sales/outlet-leaderboard',
+          roles: ['admin']
         }
       ]
     },

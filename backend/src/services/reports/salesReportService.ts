@@ -343,11 +343,11 @@ export interface ProductWiseSalesRow {
 }
 
 export async function getProductWiseSales(q: ReportQuery, companyId: string) {
-  const { data: items, error } = await db()
+  let query = db()
     .from('order_items')
     .select(`
-      product_id, variant_id, quantity, unit_price, tax_amount,
-      order:order_id!inner(company_id, order_type, status, created_at, outlet_id),
+      order_id, product_id, variant_id, quantity, unit_price, tax_amount,
+      order:order_id!inner(company_id, order_type, status, created_at, outlet_id, order_source, pos_session_id),
       products:product_id(id, name),
       product_variants:variant_id(id, name, sku)
     `)
@@ -356,6 +356,18 @@ export async function getProductWiseSales(q: ReportQuery, companyId: string) {
     .neq('order.status', 'cancelled')
     .gte('order.created_at', q.from_date)
     .lte('order.created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.order_source) {
+    query = query.eq('order.order_source', q.order_source);
+  }
+  if (q.pos_session_id) {
+    query = query.eq('order.pos_session_id', q.pos_session_id);
+  }
+  if (q.branch_ids?.length) {
+    query = query.in('order.outlet_id', q.branch_ids);
+  }
+
+  const { data: items, error } = await query;
 
   if (error) throw toServiceError('Product-wise sales query', error);
 
@@ -557,25 +569,56 @@ export interface SalesReturnRow {
   original_order_id: string;
   return_date: string;
   customer_name: string;
+  outlet_name: string;
+  order_source: string;
+  items_count: number;
   total_amount: number;
   payment_status: string;
+  reason: string;
 }
 
 export async function getSalesReturns(q: ReportQuery, companyId: string) {
-  const { data, count, error } = await db()
+  let query = db()
     .from('orders')
     .select(`
       id, created_at, total_amount, payment_status, original_order_id,
-      customers:user_id(first_name, last_name, email)
+      order_source, outlet_id,
+      warehouses:outlet_id(name),
+      customers:customer_id(id, name, email),
+      order_items(id)
     `, { count: 'exact' })
     .eq('company_id', companyId)
     .eq('order_type', 'return')
     .gte('created_at', q.from_date)
-    .lte('created_at', q.to_date + 'T23:59:59Z')
+    .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.order_source) {
+    query = query.eq('order_source', q.order_source);
+  }
+  if (q.pos_session_id) {
+    query = query.eq('pos_session_id', q.pos_session_id);
+  }
+  if (q.branch_ids?.length) {
+    query = query.in('outlet_id', q.branch_ids);
+  }
+
+  query = query
     .order('created_at', { ascending: false })
     .range((q.page - 1) * q.page_size, q.page * q.page_size - 1);
 
+  const { data, count, error } = await query;
+
   if (error) throw toServiceError('Sales returns query', error);
+
+  // Fetch reasons from credit_notes (if any) for these return orders
+  const returnIds = (data ?? []).map((o: any) => o.id);
+  const { data: cnRows } = returnIds.length
+    ? await db().from('credit_notes').select('order_id, reason').in('order_id', returnIds)
+    : { data: [] };
+  const reasonMap = new Map<string, string>();
+  (cnRows ?? []).forEach((cn: any) => {
+    if (cn.order_id && cn.reason) reasonMap.set(cn.order_id, cn.reason);
+  });
 
   const rows: SalesReturnRow[] = (data ?? []).map((o: any) => {
     const c = o.customers;
@@ -583,11 +626,24 @@ export async function getSalesReturns(q: ReportQuery, companyId: string) {
       order_id: o.id,
       original_order_id: o.original_order_id ?? '—',
       return_date: o.created_at?.split('T')[0] ?? '',
-      customer_name: c ? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.email : 'N/A',
+      customer_name: c ? (c.name || c.email || 'N/A') : 'N/A',
+      outlet_name: o.warehouses?.name ?? '—',
+      order_source: o.order_source ?? '—',
+      items_count: Array.isArray(o.order_items) ? o.order_items.length : 0,
       total_amount: Number(o.total_amount),
       payment_status: o.payment_status ?? '—',
+      reason: reasonMap.get(o.id) ?? '—',
     };
   });
+
+  // Summary: breakdown by reason
+  const reasonBreakdown = rows.reduce<Record<string, { count: number; value: number }>>((acc, r) => {
+    const key = r.reason || '—';
+    if (!acc[key]) acc[key] = { count: 0, value: 0 };
+    acc[key].count += 1;
+    acc[key].value += r.total_amount;
+    return acc;
+  }, {});
 
   return {
     rows,
@@ -595,6 +651,8 @@ export async function getSalesReturns(q: ReportQuery, companyId: string) {
     summary: {
       total_returns: count ?? 0,
       total_return_value: rows.reduce((s, r) => s + r.total_amount, 0),
+      avg_return_value: rows.length ? rows.reduce((s, r) => s + r.total_amount, 0) / rows.length : 0,
+      reasons_json: JSON.stringify(reasonBreakdown),
     },
   };
 }
@@ -646,7 +704,1239 @@ export async function getSalesDashboardKpis(q: ReportQuery, companyId: string): 
     orders_growth_pct: growth(prev.length, curr.length),
     avg_order_value: curr.length > 0 ? revCurr / curr.length : 0,
     returns_value: returnVal,
-    top_product: '—',   // computed separately in Phase 2 if needed
+    top_product: '—',
     top_customer: '—',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper: apply POS-compatible filters to an orders query builder
+// ---------------------------------------------------------------------------
+function applyOrderScope(query: any, q: ReportQuery, companyId: string, opts?: { prefix?: string }) {
+  const p = opts?.prefix ? `${opts.prefix}.` : '';
+  let qb = query
+    .eq(`${p}company_id`, companyId)
+    .eq(`${p}order_type`, 'sales')
+    .neq(`${p}status`, 'cancelled')
+    .gte(`${p}created_at`, q.from_date)
+    .lte(`${p}created_at`, q.to_date + 'T23:59:59Z');
+
+  if (q.order_source) qb = qb.eq(`${p}order_source`, q.order_source);
+  if (q.pos_session_id) qb = qb.eq(`${p}pos_session_id`, q.pos_session_id);
+  if (q.branch_ids?.length) qb = qb.in(`${p}outlet_id`, q.branch_ids);
+
+  return qb;
+}
+
+// ---------------------------------------------------------------------------
+// 9. Hourly Sales Heatmap
+// ---------------------------------------------------------------------------
+export interface HourlyHeatmapRow {
+  weekday: number;      // 0 = Sun … 6 = Sat
+  weekday_label: string;
+  hour: number;         // 0-23
+  order_count: number;
+  revenue: number;
+}
+
+export async function getHourlyHeatmap(q: ReportQuery, companyId: string) {
+  const base = db()
+    .from('orders')
+    .select('created_at, total_amount');
+
+  const { data, error } = await applyOrderScope(base, q, companyId);
+
+  if (error) throw toServiceError('Hourly heatmap query', error);
+
+  const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const buckets = new Map<string, { weekday: number; hour: number; count: number; revenue: number }>();
+
+  (data ?? []).forEach((o: any) => {
+    if (!o.created_at) return;
+    const d = new Date(o.created_at);
+    if (Number.isNaN(d.getTime())) return;
+    const weekday = d.getDay();
+    const hour = d.getHours();
+    const key = `${weekday}-${hour}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, { weekday, hour, count: 0, revenue: 0 });
+    }
+    const b = buckets.get(key)!;
+    b.count += 1;
+    b.revenue += Number(o.total_amount || 0);
+  });
+
+  const rows: HourlyHeatmapRow[] = Array.from(buckets.values())
+    .map((b) => ({
+      weekday: b.weekday,
+      weekday_label: WEEKDAYS[b.weekday],
+      hour: b.hour,
+      order_count: b.count,
+      revenue: b.revenue,
+    }))
+    .sort((a, b) => (a.weekday - b.weekday) || (a.hour - b.hour));
+
+  // Peak computations
+  let peakRow: HourlyHeatmapRow | null = null;
+  rows.forEach((r) => {
+    if (!peakRow || r.revenue > peakRow.revenue) peakRow = r;
+  });
+
+  // Weekday totals for "peak day"
+  const weekdayTotals = new Map<number, { count: number; revenue: number }>();
+  rows.forEach((r) => {
+    if (!weekdayTotals.has(r.weekday)) weekdayTotals.set(r.weekday, { count: 0, revenue: 0 });
+    const w = weekdayTotals.get(r.weekday)!;
+    w.count += r.order_count;
+    w.revenue += r.revenue;
+  });
+  let peakWeekday = -1;
+  let peakWeekdayRevenue = 0;
+  weekdayTotals.forEach((v, k) => {
+    if (v.revenue > peakWeekdayRevenue) { peakWeekdayRevenue = v.revenue; peakWeekday = k; }
+  });
+
+  const totalOrders = rows.reduce((s, r) => s + r.order_count, 0);
+  const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      total_orders: totalOrders,
+      total_revenue: totalRevenue,
+      peak_hour: peakRow ? (peakRow as HourlyHeatmapRow).hour : 0,
+      peak_weekday: peakWeekday >= 0 ? WEEKDAYS[peakWeekday] : '—',
+      peak_revenue: peakRow ? (peakRow as HourlyHeatmapRow).revenue : 0,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 10. Payment Method Mix  (split-aware via payments table)
+// ---------------------------------------------------------------------------
+export interface PaymentMixRow {
+  payment_method: string;
+  order_count: number;
+  amount: number;
+  share_pct: number;
+}
+
+export async function getPaymentMix(q: ReportQuery, companyId: string) {
+  // Pull orders in scope with their payment_method + id + total_amount
+  const base = db()
+    .from('orders')
+    .select('id, payment_method, total_amount');
+
+  const { data: orders, error } = await applyOrderScope(base, q, companyId);
+  if (error) throw toServiceError('Payment mix orders query', error);
+
+  const orderList = orders ?? [];
+  const totals = new Map<string, { amount: number; orders: Set<string> }>();
+
+  const bump = (method: string, amount: number, orderId: string) => {
+    const key = (method || 'other').toLowerCase();
+    if (!totals.has(key)) totals.set(key, { amount: 0, orders: new Set() });
+    const b = totals.get(key)!;
+    b.amount += amount;
+    b.orders.add(orderId);
+  };
+
+  const splitOrderIds: string[] = [];
+  orderList.forEach((o: any) => {
+    if ((o.payment_method || '').toLowerCase() === 'split') {
+      splitOrderIds.push(o.id);
+    } else {
+      bump(o.payment_method, Number(o.total_amount || 0), o.id);
+    }
+  });
+
+  // For split orders, fetch actual tendered rows from payments
+  if (splitOrderIds.length) {
+    const { data: payments, error: pe } = await db()
+      .from('payments')
+      .select('order_id, payment_method, amount, status')
+      .in('order_id', splitOrderIds);
+    if (pe) throw toServiceError('Payment mix payments query', pe);
+
+    (payments ?? []).forEach((p: any) => {
+      if (p.status && String(p.status).toLowerCase() === 'failed') return;
+      bump(p.payment_method, Number(p.amount || 0), p.order_id);
+    });
+  }
+
+  const grand = Array.from(totals.values()).reduce((s, b) => s + b.amount, 0);
+
+  const rows: PaymentMixRow[] = Array.from(totals.entries())
+    .map(([method, b]) => ({
+      payment_method: method,
+      order_count: b.orders.size,
+      amount: b.amount,
+      share_pct: grand > 0 ? (b.amount / grand) * 100 : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      total_amount: grand,
+      total_orders: orderList.length,
+      split_orders: splitOrderIds.length,
+      method_count: rows.length,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 11. Fulfillment Type Breakdown
+// ---------------------------------------------------------------------------
+export interface FulfillmentMixRow {
+  fulfillment_type: string;
+  order_count: number;
+  revenue: number;
+  avg_order_value: number;
+  share_pct: number;
+}
+
+export async function getFulfillmentMix(q: ReportQuery, companyId: string) {
+  const base = db()
+    .from('orders')
+    .select('fulfillment_type, total_amount');
+
+  const { data, error } = await applyOrderScope(base, q, companyId);
+  if (error) throw toServiceError('Fulfillment mix query', error);
+
+  const buckets = new Map<string, { count: number; revenue: number }>();
+  (data ?? []).forEach((o: any) => {
+    const key = (o.fulfillment_type || 'unspecified').toLowerCase();
+    if (!buckets.has(key)) buckets.set(key, { count: 0, revenue: 0 });
+    const b = buckets.get(key)!;
+    b.count += 1;
+    b.revenue += Number(o.total_amount || 0);
+  });
+
+  const totalOrders = Array.from(buckets.values()).reduce((s, b) => s + b.count, 0);
+  const totalRevenue = Array.from(buckets.values()).reduce((s, b) => s + b.revenue, 0);
+
+  const rows: FulfillmentMixRow[] = Array.from(buckets.entries())
+    .map(([type, b]) => ({
+      fulfillment_type: type,
+      order_count: b.count,
+      revenue: b.revenue,
+      avg_order_value: b.count > 0 ? b.revenue / b.count : 0,
+      share_pct: totalRevenue > 0 ? (b.revenue / totalRevenue) * 100 : 0,
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      total_orders: totalOrders,
+      total_revenue: totalRevenue,
+      fulfillment_types: rows.length,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 12. Discount Impact
+// ---------------------------------------------------------------------------
+export interface DiscountImpactRow {
+  outlet_id: string;
+  outlet_name: string;
+  order_count: number;
+  orders_with_discount: number;
+  gross_sales: number;
+  line_discount: number;
+  extra_discount: number;
+  cd_amount: number;
+  total_discount: number;
+  net_sales: number;
+  discount_rate_pct: number;
+}
+
+export async function getDiscountImpact(q: ReportQuery, companyId: string) {
+  const base = db()
+    .from('orders')
+    .select(`
+      id, outlet_id, subtotal, total_amount, total_discount,
+      extra_discount_amount, cd_amount,
+      warehouses:outlet_id(name),
+      order_items(discount_amount)
+    `);
+
+  const { data, error } = await applyOrderScope(base, q, companyId);
+  if (error) throw toServiceError('Discount impact query', error);
+
+  const buckets = new Map<string, DiscountImpactRow>();
+
+  (data ?? []).forEach((o: any) => {
+    const key = o.outlet_id ?? 'unassigned';
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        outlet_id: key,
+        outlet_name: o.warehouses?.name ?? '—',
+        order_count: 0,
+        orders_with_discount: 0,
+        gross_sales: 0,
+        line_discount: 0,
+        extra_discount: 0,
+        cd_amount: 0,
+        total_discount: 0,
+        net_sales: 0,
+        discount_rate_pct: 0,
+      });
+    }
+    const b = buckets.get(key)!;
+    const lineDisc = (o.order_items ?? []).reduce((s: number, li: any) => s + Number(li.discount_amount || 0), 0);
+    const extraDisc = Number(o.extra_discount_amount || 0);
+    const cdAmt = Number(o.cd_amount || 0);
+    const totalDisc = Number(o.total_discount || 0) || (lineDisc + extraDisc + cdAmt);
+    const gross = Number(o.subtotal || 0) || (Number(o.total_amount || 0) + totalDisc);
+
+    b.order_count += 1;
+    if (totalDisc > 0) b.orders_with_discount += 1;
+    b.gross_sales += gross;
+    b.line_discount += lineDisc;
+    b.extra_discount += extraDisc;
+    b.cd_amount += cdAmt;
+    b.total_discount += totalDisc;
+    b.net_sales += Number(o.total_amount || 0);
+  });
+
+  const rows: DiscountImpactRow[] = Array.from(buckets.values()).map((b) => ({
+    ...b,
+    discount_rate_pct: b.gross_sales > 0 ? (b.total_discount / b.gross_sales) * 100 : 0,
+  })).sort((a, b) => b.total_discount - a.total_discount);
+
+  const sumRows = <K extends keyof DiscountImpactRow>(k: K) =>
+    rows.reduce((s, r) => s + Number(r[k] || 0), 0);
+
+  const totalGross = sumRows('gross_sales');
+  const totalDisc = sumRows('total_discount');
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      total_orders: sumRows('order_count'),
+      orders_with_discount: sumRows('orders_with_discount'),
+      gross_sales: totalGross,
+      total_discount: totalDisc,
+      net_sales: sumRows('net_sales'),
+      discount_rate_pct: totalGross > 0 ? (totalDisc / totalGross) * 100 : 0,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 13. Cashier / Session Performance
+// ---------------------------------------------------------------------------
+export interface CashierPerformanceRow {
+  session_id: string;
+  cashier_id: string;
+  cashier_name: string;
+  outlet_id: string;
+  outlet_name: string;
+  status: string;
+  opened_at: string;
+  closed_at: string | null;
+  duration_min: number;
+  orders_count: number;
+  gross_sales: number;
+  avg_ticket: number;
+  opening_cash: number;
+  closing_cash: number | null;
+  expected_cash: number | null;
+  cash_variance: number | null;
+}
+
+export async function getCashierPerformance(q: ReportQuery, companyId: string) {
+  let sessionQuery = db()
+    .from('pos_sessions')
+    .select(`
+      id, company_id, outlet_id, cashier_id, status,
+      opened_at, closed_at, opening_cash, closing_cash, expected_cash,
+      warehouses:outlet_id(name)
+    `)
+    .eq('company_id', companyId)
+    .gte('opened_at', q.from_date)
+    .lte('opened_at', q.to_date + 'T23:59:59Z');
+
+  if (q.branch_ids?.length) sessionQuery = sessionQuery.in('outlet_id', q.branch_ids);
+  if (q.pos_session_id) sessionQuery = sessionQuery.eq('id', q.pos_session_id);
+
+  const { data: sessions, error: se } = await sessionQuery.order('opened_at', { ascending: false });
+  if (se) throw toServiceError('Cashier sessions query', se);
+
+  const sessionList = sessions ?? [];
+  if (sessionList.length === 0) {
+    return {
+      rows: [] as CashierPerformanceRow[],
+      total: 0,
+      summary: {
+        total_sessions: 0,
+        total_orders: 0,
+        total_sales: 0,
+        total_cash_variance: 0,
+        avg_ticket: 0,
+      },
+    };
+  }
+
+  const sessionIds = sessionList.map((s: any) => s.id);
+  const cashierIds = [...new Set(sessionList.map((s: any) => s.cashier_id).filter(Boolean))];
+
+  const [ordersRes, profilesRes] = await Promise.all([
+    db().from('orders')
+      .select('pos_session_id, total_amount')
+      .eq('company_id', companyId)
+      .eq('order_type', 'sales')
+      .neq('status', 'cancelled')
+      .in('pos_session_id', sessionIds),
+    cashierIds.length
+      ? db().from('profiles').select('id, first_name, last_name, email').in('id', cashierIds)
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
+
+  if (ordersRes.error) throw toServiceError('Cashier session orders query', ordersRes.error);
+
+  const orderAgg = new Map<string, { count: number; revenue: number }>();
+  (ordersRes.data ?? []).forEach((o: any) => {
+    const key = o.pos_session_id as string;
+    if (!orderAgg.has(key)) orderAgg.set(key, { count: 0, revenue: 0 });
+    const b = orderAgg.get(key)!;
+    b.count += 1;
+    b.revenue += Number(o.total_amount || 0);
+  });
+
+  const profileMap = new Map<string, any>();
+  (profilesRes.data ?? []).forEach((p: any) => profileMap.set(p.id, p));
+
+  const rows: CashierPerformanceRow[] = sessionList.map((s: any) => {
+    const profile = profileMap.get(s.cashier_id);
+    const name = profile
+      ? `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email || 'Cashier'
+      : 'Cashier';
+    const agg = orderAgg.get(s.id) ?? { count: 0, revenue: 0 };
+    const opened = s.opened_at ? new Date(s.opened_at).getTime() : null;
+    const closed = s.closed_at ? new Date(s.closed_at).getTime() : null;
+    const durationMin = opened && closed ? Math.max(0, Math.round((closed - opened) / 60000)) : 0;
+    const closingCash = s.closing_cash != null ? Number(s.closing_cash) : null;
+    const expectedCash = s.expected_cash != null ? Number(s.expected_cash) : null;
+    const variance = closingCash != null && expectedCash != null ? closingCash - expectedCash : null;
+
+    return {
+      session_id: s.id,
+      cashier_id: s.cashier_id,
+      cashier_name: name,
+      outlet_id: s.outlet_id,
+      outlet_name: s.warehouses?.name ?? '—',
+      status: s.status ?? 'open',
+      opened_at: s.opened_at ?? '',
+      closed_at: s.closed_at ?? null,
+      duration_min: durationMin,
+      orders_count: agg.count,
+      gross_sales: agg.revenue,
+      avg_ticket: agg.count > 0 ? agg.revenue / agg.count : 0,
+      opening_cash: Number(s.opening_cash || 0),
+      closing_cash: closingCash,
+      expected_cash: expectedCash,
+      cash_variance: variance,
+    };
+  });
+
+  const totalSales = rows.reduce((s, r) => s + r.gross_sales, 0);
+  const totalOrders = rows.reduce((s, r) => s + r.orders_count, 0);
+  const totalVariance = rows.reduce((s, r) => s + (r.cash_variance ?? 0), 0);
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      total_sessions: rows.length,
+      total_orders: totalOrders,
+      total_sales: totalSales,
+      total_cash_variance: totalVariance,
+      avg_ticket: totalOrders > 0 ? totalSales / totalOrders : 0,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shared: previous-equivalent period bounds (Batch B comparison helper)
+// ---------------------------------------------------------------------------
+function previousEquivalentPeriod(q: ReportQuery): { from_date: string; to_date: string; days: number } {
+  const from = new Date(q.from_date + 'T00:00:00Z');
+  const to = new Date(q.to_date + 'T00:00:00Z');
+  const msPerDay = 86400000;
+  // Inclusive day count.
+  const days = Math.max(1, Math.floor((to.getTime() - from.getTime()) / msPerDay) + 1);
+  const prevTo = new Date(from.getTime() - msPerDay);
+  const prevFrom = new Date(prevTo.getTime() - (days - 1) * msPerDay);
+  const toIso = (d: Date) => d.toISOString().split('T')[0];
+  return { from_date: toIso(prevFrom), to_date: toIso(prevTo), days };
+}
+
+function withDateWindow(q: ReportQuery, from_date: string, to_date: string): ReportQuery {
+  return { ...q, from_date, to_date };
+}
+
+const safePct = (prev: number, curr: number) =>
+  prev > 0 ? ((curr - prev) / prev) * 100 : (curr > 0 ? 100 : 0);
+
+// ---------------------------------------------------------------------------
+// 14. Category-wise & Brand-wise Sales (Batch B)
+// ---------------------------------------------------------------------------
+export interface CategoryBrandSalesRow {
+  category_id: string;
+  category_name: string;
+  brand_id: string;
+  brand_name: string;
+  total_qty: number;
+  total_revenue: number;
+  list_value: number;          // sum of products.price * qty (undiscounted list value, when list price known)
+  total_discount: number;      // list_value - total_revenue (effective discount given off list)
+  discount_pct: number;        // total_discount / list_value (0-100)
+  margin_retention_pct: number;// 100 - discount_pct (effective retention of list price)
+  order_count: number;
+}
+
+export async function getCategoryBrandSales(q: ReportQuery, companyId: string) {
+  // Pull order items in scope joined to orders + products for category/brand tags.
+  let query = db()
+    .from('order_items')
+    .select(`
+      product_id, quantity, unit_price, tax_amount, discount_amount,
+      order:order_id!inner(id, company_id, order_type, status, created_at, outlet_id, order_source, pos_session_id),
+      products:product_id(id, name, price, category_id, brand_id)
+    `)
+    .eq('order.company_id', companyId)
+    .eq('order.order_type', 'sales')
+    .neq('order.status', 'cancelled')
+    .gte('order.created_at', q.from_date)
+    .lte('order.created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.order_source)   query = query.eq('order.order_source', q.order_source);
+  if (q.pos_session_id) query = query.eq('order.pos_session_id', q.pos_session_id);
+  if (q.branch_ids?.length) query = query.in('order.outlet_id', q.branch_ids);
+
+  const { data: items, error } = await query;
+  if (error) throw toServiceError('Category/brand sales query', error);
+
+  const itemList = items ?? [];
+
+  // Collect category and brand ids for label lookup
+  const categoryIds = new Set<string>();
+  const brandIds = new Set<string>();
+  itemList.forEach((it: any) => {
+    if (it.products?.category_id) categoryIds.add(it.products.category_id);
+    if (it.products?.brand_id) brandIds.add(it.products.brand_id);
+  });
+
+  const [categoriesRes, brandsRes] = await Promise.all([
+    categoryIds.size
+      ? db().from('categories').select('id, name').in('id', Array.from(categoryIds))
+      : Promise.resolve({ data: [] as any[] }),
+    brandIds.size
+      ? db().from('brands').select('id, name').in('id', Array.from(brandIds))
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
+
+  const categoryMap = new Map<string, string>();
+  (categoriesRes.data ?? []).forEach((c: any) => categoryMap.set(c.id, c.name));
+  const brandMap = new Map<string, string>();
+  (brandsRes.data ?? []).forEach((b: any) => brandMap.set(b.id, b.name));
+
+  // Aggregate by (category_id, brand_id).
+  const buckets = new Map<string, CategoryBrandSalesRow & { orders: Set<string> }>();
+  itemList.forEach((it: any) => {
+    const catId = it.products?.category_id ?? 'uncategorized';
+    const brandId = it.products?.brand_id ?? 'no_brand';
+    const key = `${catId}__${brandId}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        category_id: catId,
+        category_name: categoryMap.get(catId) ?? (catId === 'uncategorized' ? 'Uncategorized' : '—'),
+        brand_id: brandId,
+        brand_name: brandMap.get(brandId) ?? (brandId === 'no_brand' ? 'No brand' : '—'),
+        total_qty: 0,
+        total_revenue: 0,
+        list_value: 0,
+        total_discount: 0,
+        discount_pct: 0,
+        margin_retention_pct: 0,
+        order_count: 0,
+        orders: new Set<string>(),
+      });
+    }
+    const b = buckets.get(key)!;
+    const qty = Number(it.quantity || 0);
+    const listPrice = Number(it.products?.price ?? it.unit_price ?? 0);
+    const unitPrice = Number(it.unit_price || 0);
+    const revenue = qty * unitPrice;
+    const listValue = qty * listPrice;
+    b.total_qty += qty;
+    b.total_revenue += revenue;
+    b.list_value += listValue;
+    b.total_discount += Math.max(0, listValue - revenue);
+    if (it.order?.id) b.orders.add(it.order.id);
+  });
+
+  const rows: CategoryBrandSalesRow[] = Array.from(buckets.values()).map((b) => {
+    const discPct = b.list_value > 0 ? (b.total_discount / b.list_value) * 100 : 0;
+    return {
+      category_id: b.category_id,
+      category_name: b.category_name,
+      brand_id: b.brand_id,
+      brand_name: b.brand_name,
+      total_qty: b.total_qty,
+      total_revenue: b.total_revenue,
+      list_value: b.list_value,
+      total_discount: b.total_discount,
+      discount_pct: discPct,
+      margin_retention_pct: 100 - discPct,
+      order_count: b.orders.size,
+    };
+  }).sort((a, b) => b.total_revenue - a.total_revenue);
+
+  // Build category + brand rollups for the summary.
+  const rollup = (dim: 'category' | 'brand') => {
+    const map = new Map<string, { label: string; revenue: number; qty: number }>();
+    rows.forEach((r) => {
+      const id = dim === 'category' ? r.category_id : r.brand_id;
+      const label = dim === 'category' ? r.category_name : r.brand_name;
+      if (!map.has(id)) map.set(id, { label, revenue: 0, qty: 0 });
+      const x = map.get(id)!;
+      x.revenue += r.total_revenue;
+      x.qty += r.total_qty;
+    });
+    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
+  };
+  const byCategory = rollup('category');
+  const byBrand = rollup('brand');
+
+  const totalRevenue = rows.reduce((s, r) => s + r.total_revenue, 0);
+  const totalList = rows.reduce((s, r) => s + r.list_value, 0);
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      total_revenue: totalRevenue,
+      total_qty: rows.reduce((s, r) => s + r.total_qty, 0),
+      total_discount: rows.reduce((s, r) => s + r.total_discount, 0),
+      avg_discount_pct: totalList > 0 ? ((totalList - totalRevenue) / totalList) * 100 : 0,
+      top_category: byCategory[0]?.label ?? '—',
+      top_brand: byBrand[0]?.label ?? '—',
+      categories_json: JSON.stringify(byCategory.slice(0, 10)),
+      brands_json: JSON.stringify(byBrand.slice(0, 10)),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 15. Average Basket Metrics (Batch B)
+// ---------------------------------------------------------------------------
+export interface AverageBasketRow {
+  day: string;            // YYYY-MM-DD
+  orders: number;
+  items: number;
+  unique_skus: number;
+  revenue: number;
+  avg_basket_value: number;
+  avg_items_per_order: number;
+  avg_unique_skus: number;
+}
+
+export async function getAverageBasketMetrics(q: ReportQuery, companyId: string) {
+  let query = db()
+    .from('orders')
+    .select(`
+      id, created_at, total_amount,
+      order_items(product_id, variant_id, quantity)
+    `);
+  query = applyOrderScope(query, q, companyId);
+
+  const { data, error } = await query;
+  if (error) throw toServiceError('Average basket metrics query', error);
+
+  const orderList = data ?? [];
+
+  // Per-day aggregates.
+  const daily = new Map<string, {
+    orders: number; items: number; skuSum: number; revenue: number;
+  }>();
+
+  let globalOrders = 0;
+  let globalItems = 0;
+  let globalSku = 0;
+  let globalRevenue = 0;
+
+  orderList.forEach((o: any) => {
+    const day = (o.created_at ?? '').split('T')[0] || '';
+    if (!day) return;
+    const items = o.order_items ?? [];
+    const itemCount = items.reduce((s: number, it: any) => s + Number(it.quantity || 0), 0);
+    const uniqueSkus = new Set<string>();
+    items.forEach((it: any) => {
+      const key = `${it.product_id ?? ''}__${it.variant_id ?? ''}`;
+      if (key !== '__') uniqueSkus.add(key);
+    });
+    if (!daily.has(day)) daily.set(day, { orders: 0, items: 0, skuSum: 0, revenue: 0 });
+    const d = daily.get(day)!;
+    d.orders += 1;
+    d.items += itemCount;
+    d.skuSum += uniqueSkus.size;
+    d.revenue += Number(o.total_amount || 0);
+
+    globalOrders += 1;
+    globalItems += itemCount;
+    globalSku += uniqueSkus.size;
+    globalRevenue += Number(o.total_amount || 0);
+  });
+
+  const rows: AverageBasketRow[] = Array.from(daily.entries())
+    .map(([day, d]) => ({
+      day,
+      orders: d.orders,
+      items: d.items,
+      unique_skus: d.skuSum,
+      revenue: d.revenue,
+      avg_basket_value: d.orders > 0 ? d.revenue / d.orders : 0,
+      avg_items_per_order: d.orders > 0 ? d.items / d.orders : 0,
+      avg_unique_skus: d.orders > 0 ? d.skuSum / d.orders : 0,
+    }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      total_orders: globalOrders,
+      total_items: globalItems,
+      total_revenue: globalRevenue,
+      avg_basket_value: globalOrders > 0 ? globalRevenue / globalOrders : 0,
+      avg_items_per_order: globalOrders > 0 ? globalItems / globalOrders : 0,
+      avg_unique_skus_per_order: globalOrders > 0 ? globalSku / globalOrders : 0,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 16. Modifier / Add-on Revenue (Batch B)
+// ---------------------------------------------------------------------------
+export interface ModifierRevenueRow {
+  modifier_id: string;
+  modifier_name: string;
+  group_name: string;
+  attach_count: number;      // total times attached across orders
+  orders_attached: number;   // distinct orders using this modifier
+  total_adjust: number;
+  avg_adjust: number;
+  attach_rate_pct: number;   // % of in-scope orders that used this modifier
+}
+
+export async function getModifierAddonRevenue(q: ReportQuery, companyId: string) {
+  // 1) In-scope orders
+  const { data: orders, error: oe } = await applyOrderScope(
+    db().from('orders').select('id'),
+    q,
+    companyId,
+  );
+  if (oe) throw toServiceError('Modifier revenue order scope query', oe);
+  const orderIds = (orders ?? []).map((o: any) => o.id as string);
+  const totalOrdersInScope = orderIds.length;
+
+  if (!totalOrdersInScope) {
+    return {
+      rows: [] as ModifierRevenueRow[],
+      total: 0,
+      summary: {
+        total_orders: 0,
+        orders_with_modifiers: 0,
+        total_attach_count: 0,
+        total_adjust: 0,
+        attach_rate_pct: 0,
+      },
+    };
+  }
+
+  // 2) Order items belonging to scoped orders (needed to link modifiers → orders)
+  const { data: lineItems, error: lie } = await db()
+    .from('order_items')
+    .select('id, order_id')
+    .in('order_id', orderIds);
+  if (lie) throw toServiceError('Modifier revenue order_items query', lie);
+  const itemToOrder = new Map<string, string>();
+  (lineItems ?? []).forEach((li: any) => itemToOrder.set(li.id, li.order_id));
+  const itemIds = Array.from(itemToOrder.keys());
+  if (!itemIds.length) {
+    return {
+      rows: [] as ModifierRevenueRow[],
+      total: 0,
+      summary: {
+        total_orders: totalOrdersInScope,
+        orders_with_modifiers: 0,
+        total_attach_count: 0,
+        total_adjust: 0,
+        attach_rate_pct: 0,
+      },
+    };
+  }
+
+  // 3) Modifier line rows
+  const { data: modLines, error: me } = await db()
+    .from('order_item_modifiers')
+    .select('modifier_id, order_item_id, price_adjust')
+    .eq('company_id', companyId)
+    .in('order_item_id', itemIds);
+  if (me) throw toServiceError('Modifier revenue order_item_modifiers query', me);
+  const modRowsRaw = modLines ?? [];
+
+  // 4) Modifier metadata
+  const modifierIds = [...new Set(modRowsRaw.map((m: any) => m.modifier_id).filter(Boolean))] as string[];
+  const { data: modifiers, error: mde } = modifierIds.length
+    ? await db().from('modifiers').select('id, name, modifier_group_id').in('id', modifierIds)
+    : { data: [] as any[], error: null };
+  if (mde) throw toServiceError('Modifiers lookup query', mde);
+  const groupIds = [...new Set((modifiers ?? []).map((m: any) => m.modifier_group_id).filter(Boolean))] as string[];
+  const { data: groups } = groupIds.length
+    ? await db().from('modifier_groups').select('id, name').in('id', groupIds)
+    : { data: [] as any[] };
+  const groupMap = new Map<string, string>();
+  (groups ?? []).forEach((g: any) => groupMap.set(g.id, g.name));
+  const modifierMeta = new Map<string, { name: string; group: string }>();
+  (modifiers ?? []).forEach((m: any) =>
+    modifierMeta.set(m.id, {
+      name: m.name ?? '—',
+      group: groupMap.get(m.modifier_group_id) ?? '—',
+    }),
+  );
+
+  // 5) Aggregate
+  const buckets = new Map<string, {
+    row: ModifierRevenueRow;
+    orders: Set<string>;
+  }>();
+  const globalOrders = new Set<string>();
+
+  modRowsRaw.forEach((m: any) => {
+    const modId = m.modifier_id ?? 'unknown';
+    const orderId = itemToOrder.get(m.order_item_id) ?? '';
+    const meta = modifierMeta.get(modId);
+    if (!buckets.has(modId)) {
+      buckets.set(modId, {
+        row: {
+          modifier_id: modId,
+          modifier_name: meta?.name ?? '—',
+          group_name: meta?.group ?? '—',
+          attach_count: 0,
+          orders_attached: 0,
+          total_adjust: 0,
+          avg_adjust: 0,
+          attach_rate_pct: 0,
+        },
+        orders: new Set<string>(),
+      });
+    }
+    const b = buckets.get(modId)!;
+    b.row.attach_count += 1;
+    b.row.total_adjust += Number(m.price_adjust || 0);
+    if (orderId) {
+      b.orders.add(orderId);
+      globalOrders.add(orderId);
+    }
+  });
+
+  const rows: ModifierRevenueRow[] = Array.from(buckets.values()).map(({ row, orders }) => {
+    row.orders_attached = orders.size;
+    row.avg_adjust = row.attach_count > 0 ? row.total_adjust / row.attach_count : 0;
+    row.attach_rate_pct = totalOrdersInScope > 0 ? (orders.size / totalOrdersInScope) * 100 : 0;
+    return row;
+  }).sort((a, b) => b.total_adjust - a.total_adjust);
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      total_orders: totalOrdersInScope,
+      orders_with_modifiers: globalOrders.size,
+      total_attach_count: rows.reduce((s, r) => s + r.attach_count, 0),
+      total_adjust: rows.reduce((s, r) => s + r.total_adjust, 0),
+      attach_rate_pct: totalOrdersInScope > 0 ? (globalOrders.size / totalOrdersInScope) * 100 : 0,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 17. Hourly & Weekday Trend Comparison (Batch B)
+// ---------------------------------------------------------------------------
+export interface TrendComparisonRow {
+  dimension: 'hour' | 'weekday';
+  bucket: number;              // 0-23 for hour, 0-6 for weekday
+  label: string;               // '08:00' or 'Mon'
+  current_orders: number;
+  current_revenue: number;
+  previous_orders: number;
+  previous_revenue: number;
+  orders_delta_pct: number;
+  revenue_delta_pct: number;
+}
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+async function fetchHourWeekdayBuckets(q: ReportQuery, companyId: string) {
+  const { data, error } = await applyOrderScope(
+    db().from('orders').select('created_at, total_amount'),
+    q,
+    companyId,
+  );
+  if (error) throw toServiceError('Trend comparison query', error);
+
+  const byHour = new Map<number, { orders: number; revenue: number }>();
+  const byWeekday = new Map<number, { orders: number; revenue: number }>();
+  (data ?? []).forEach((o: any) => {
+    if (!o.created_at) return;
+    const d = new Date(o.created_at);
+    if (Number.isNaN(d.getTime())) return;
+    const h = d.getHours();
+    const w = d.getDay();
+    if (!byHour.has(h)) byHour.set(h, { orders: 0, revenue: 0 });
+    if (!byWeekday.has(w)) byWeekday.set(w, { orders: 0, revenue: 0 });
+    const bh = byHour.get(h)!;
+    const bw = byWeekday.get(w)!;
+    const rev = Number(o.total_amount || 0);
+    bh.orders += 1; bh.revenue += rev;
+    bw.orders += 1; bw.revenue += rev;
+  });
+  return { byHour, byWeekday };
+}
+
+export async function getHourlyWeekdayTrendComparison(q: ReportQuery, companyId: string) {
+  const prevBounds = previousEquivalentPeriod(q);
+  const prevQuery = withDateWindow(q, prevBounds.from_date, prevBounds.to_date);
+
+  const [curr, prev] = await Promise.all([
+    fetchHourWeekdayBuckets(q, companyId),
+    fetchHourWeekdayBuckets(prevQuery, companyId),
+  ]);
+
+  const hourRows: TrendComparisonRow[] = [];
+  for (let h = 0; h < 24; h++) {
+    const c = curr.byHour.get(h) ?? { orders: 0, revenue: 0 };
+    const p = prev.byHour.get(h) ?? { orders: 0, revenue: 0 };
+    if (c.orders === 0 && p.orders === 0) continue;
+    hourRows.push({
+      dimension: 'hour',
+      bucket: h,
+      label: `${String(h).padStart(2, '0')}:00`,
+      current_orders: c.orders,
+      current_revenue: c.revenue,
+      previous_orders: p.orders,
+      previous_revenue: p.revenue,
+      orders_delta_pct: safePct(p.orders, c.orders),
+      revenue_delta_pct: safePct(p.revenue, c.revenue),
+    });
+  }
+
+  const weekdayRows: TrendComparisonRow[] = [];
+  for (let w = 0; w < 7; w++) {
+    const c = curr.byWeekday.get(w) ?? { orders: 0, revenue: 0 };
+    const p = prev.byWeekday.get(w) ?? { orders: 0, revenue: 0 };
+    if (c.orders === 0 && p.orders === 0) continue;
+    weekdayRows.push({
+      dimension: 'weekday',
+      bucket: w,
+      label: WEEKDAY_LABELS[w],
+      current_orders: c.orders,
+      current_revenue: c.revenue,
+      previous_orders: p.orders,
+      previous_revenue: p.revenue,
+      orders_delta_pct: safePct(p.orders, c.orders),
+      revenue_delta_pct: safePct(p.revenue, c.revenue),
+    });
+  }
+
+  const rows = [...hourRows, ...weekdayRows];
+
+  const sumField = (arr: TrendComparisonRow[], k: keyof TrendComparisonRow) =>
+    arr.reduce((s, r) => s + Number(r[k] as number || 0), 0);
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      period_from: q.from_date,
+      period_to: q.to_date,
+      previous_from: prevBounds.from_date,
+      previous_to: prevBounds.to_date,
+      current_orders: sumField(hourRows, 'current_orders'),
+      previous_orders: sumField(hourRows, 'previous_orders'),
+      current_revenue: sumField(hourRows, 'current_revenue'),
+      previous_revenue: sumField(hourRows, 'previous_revenue'),
+      orders_delta_pct: safePct(sumField(hourRows, 'previous_orders'), sumField(hourRows, 'current_orders')),
+      revenue_delta_pct: safePct(sumField(hourRows, 'previous_revenue'), sumField(hourRows, 'current_revenue')),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 18. Top / Bottom Movers (Batch B)
+// ---------------------------------------------------------------------------
+export interface MoverRow {
+  product_id: string;
+  variant_id: string;
+  product_name: string;
+  sku: string;
+  current_qty: number;
+  previous_qty: number;
+  qty_delta: number;
+  qty_delta_pct: number;
+  current_revenue: number;
+  previous_revenue: number;
+  revenue_delta: number;
+  revenue_delta_pct: number;
+  direction: 'up' | 'down' | 'flat';
+}
+
+async function fetchItemsWithinScope(q: ReportQuery, companyId: string) {
+  let query = db()
+    .from('order_items')
+    .select(`
+      product_id, variant_id, quantity, unit_price,
+      order:order_id!inner(company_id, order_type, status, created_at, outlet_id, order_source, pos_session_id),
+      products:product_id(id, name),
+      product_variants:variant_id(id, name, sku)
+    `)
+    .eq('order.company_id', companyId)
+    .eq('order.order_type', 'sales')
+    .neq('order.status', 'cancelled')
+    .gte('order.created_at', q.from_date)
+    .lte('order.created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.order_source) query = query.eq('order.order_source', q.order_source);
+  if (q.pos_session_id) query = query.eq('order.pos_session_id', q.pos_session_id);
+  if (q.branch_ids?.length) query = query.in('order.outlet_id', q.branch_ids);
+
+  const { data, error } = await query;
+  if (error) throw toServiceError('Movers items query', error);
+  return data ?? [];
+}
+
+export async function getTopBottomMovers(q: ReportQuery, companyId: string) {
+  const prevBounds = previousEquivalentPeriod(q);
+  const prevQuery = withDateWindow(q, prevBounds.from_date, prevBounds.to_date);
+
+  const [currItems, prevItems] = await Promise.all([
+    fetchItemsWithinScope(q, companyId),
+    fetchItemsWithinScope(prevQuery, companyId),
+  ]);
+
+  const bucketKey = (it: any) => `${it.product_id}__${it.variant_id ?? 'null'}`;
+
+  type Bucket = {
+    product_id: string; variant_id: string;
+    product_name: string; sku: string;
+    qty: number; revenue: number;
+  };
+
+  const makeBucket = (it: any): Bucket => ({
+    product_id: it.product_id ?? '',
+    variant_id: it.variant_id ?? '',
+    product_name: it.products?.name ?? '—',
+    sku: it.product_variants?.sku ?? '—',
+    qty: 0,
+    revenue: 0,
+  });
+
+  const currMap = new Map<string, Bucket>();
+  const prevMap = new Map<string, Bucket>();
+
+  currItems.forEach((it: any) => {
+    const key = bucketKey(it);
+    if (!currMap.has(key)) currMap.set(key, makeBucket(it));
+    const b = currMap.get(key)!;
+    b.qty += Number(it.quantity || 0);
+    b.revenue += Number(it.quantity || 0) * Number(it.unit_price || 0);
+  });
+  prevItems.forEach((it: any) => {
+    const key = bucketKey(it);
+    if (!prevMap.has(key)) prevMap.set(key, makeBucket(it));
+    const b = prevMap.get(key)!;
+    b.qty += Number(it.quantity || 0);
+    b.revenue += Number(it.quantity || 0) * Number(it.unit_price || 0);
+  });
+
+  const allKeys = new Set<string>([...currMap.keys(), ...prevMap.keys()]);
+  const MIN_SIGNAL = 2; // avoid pure-noise SKUs (combined qty across periods >= 2)
+
+  const rows: MoverRow[] = [];
+  allKeys.forEach((key) => {
+    const c = currMap.get(key);
+    const p = prevMap.get(key);
+    const meta = c ?? p!;
+    const curQty = c?.qty ?? 0;
+    const prvQty = p?.qty ?? 0;
+    if (curQty + prvQty < MIN_SIGNAL) return;
+    const curRev = c?.revenue ?? 0;
+    const prvRev = p?.revenue ?? 0;
+    const qtyDelta = curQty - prvQty;
+    const revDelta = curRev - prvRev;
+    const qtyPct = safePct(prvQty, curQty);
+    const revPct = safePct(prvRev, curRev);
+
+    rows.push({
+      product_id: meta.product_id,
+      variant_id: meta.variant_id,
+      product_name: meta.product_name,
+      sku: meta.sku,
+      current_qty: curQty,
+      previous_qty: prvQty,
+      qty_delta: qtyDelta,
+      qty_delta_pct: qtyPct,
+      current_revenue: curRev,
+      previous_revenue: prvRev,
+      revenue_delta: revDelta,
+      revenue_delta_pct: revPct,
+      direction: revDelta > 0 ? 'up' : revDelta < 0 ? 'down' : 'flat',
+    });
+  });
+
+  rows.sort((a, b) => b.revenue_delta - a.revenue_delta);
+
+  const topGainers = rows.slice(0, 10);
+  const topDecliners = [...rows].sort((a, b) => a.revenue_delta - b.revenue_delta).slice(0, 10);
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      period_from: q.from_date,
+      period_to: q.to_date,
+      previous_from: prevBounds.from_date,
+      previous_to: prevBounds.to_date,
+      skus_tracked: rows.length,
+      gainers: rows.filter(r => r.direction === 'up').length,
+      decliners: rows.filter(r => r.direction === 'down').length,
+      top_gainer: topGainers[0]?.product_name ?? '—',
+      top_decliner: topDecliners[0]?.product_name ?? '—',
+      top_gainers_json: JSON.stringify(topGainers.map(r => ({ name: r.product_name, delta: r.revenue_delta, delta_pct: r.revenue_delta_pct }))),
+      top_decliners_json: JSON.stringify(topDecliners.map(r => ({ name: r.product_name, delta: r.revenue_delta, delta_pct: r.revenue_delta_pct }))),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 19. Outlet Comparison Leaderboard (Batch B — admin-gated in UI)
+// ---------------------------------------------------------------------------
+export interface OutletLeaderboardRow {
+  rank: number;
+  outlet_id: string;
+  outlet_name: string;
+  current_revenue: number;
+  previous_revenue: number;
+  revenue_delta_pct: number;
+  current_orders: number;
+  previous_orders: number;
+  orders_delta_pct: number;
+  items_sold: number;
+  avg_ticket: number;
+  items_per_order: number;
+}
+
+async function fetchOutletAggregates(q: ReportQuery, companyId: string) {
+  let query = db()
+    .from('orders')
+    .select(`
+      id, outlet_id, total_amount,
+      warehouses:outlet_id(name),
+      order_items(quantity)
+    `);
+  query = applyOrderScope(query, q, companyId);
+
+  const { data, error } = await query;
+  if (error) throw toServiceError('Outlet leaderboard query', error);
+
+  const map = new Map<string, {
+    outlet_id: string; outlet_name: string;
+    orders: number; revenue: number; items: number;
+  }>();
+  (data ?? []).forEach((o: any) => {
+    const key = o.outlet_id ?? 'unassigned';
+    if (!map.has(key)) {
+      map.set(key, {
+        outlet_id: key,
+        outlet_name: o.warehouses?.name ?? (key === 'unassigned' ? 'Unassigned' : '—'),
+        orders: 0, revenue: 0, items: 0,
+      });
+    }
+    const b = map.get(key)!;
+    b.orders += 1;
+    b.revenue += Number(o.total_amount || 0);
+    b.items += (o.order_items ?? []).reduce((s: number, it: any) => s + Number(it.quantity || 0), 0);
+  });
+  return map;
+}
+
+export async function getOutletLeaderboard(q: ReportQuery, companyId: string) {
+  const prevBounds = previousEquivalentPeriod(q);
+  const prevQuery = withDateWindow(q, prevBounds.from_date, prevBounds.to_date);
+
+  const [curr, prev] = await Promise.all([
+    fetchOutletAggregates(q, companyId),
+    fetchOutletAggregates(prevQuery, companyId),
+  ]);
+
+  const keys = new Set<string>([...curr.keys(), ...prev.keys()]);
+  const rows: OutletLeaderboardRow[] = [];
+  keys.forEach((key) => {
+    const c = curr.get(key);
+    const p = prev.get(key);
+    const meta = c ?? p!;
+    const curRev = c?.revenue ?? 0;
+    const prvRev = p?.revenue ?? 0;
+    const curOrd = c?.orders ?? 0;
+    const prvOrd = p?.orders ?? 0;
+    const items = c?.items ?? 0;
+
+    rows.push({
+      rank: 0,
+      outlet_id: meta.outlet_id,
+      outlet_name: meta.outlet_name,
+      current_revenue: curRev,
+      previous_revenue: prvRev,
+      revenue_delta_pct: safePct(prvRev, curRev),
+      current_orders: curOrd,
+      previous_orders: prvOrd,
+      orders_delta_pct: safePct(prvOrd, curOrd),
+      items_sold: items,
+      avg_ticket: curOrd > 0 ? curRev / curOrd : 0,
+      items_per_order: curOrd > 0 ? items / curOrd : 0,
+    });
+  });
+
+  rows.sort((a, b) => b.current_revenue - a.current_revenue);
+  rows.forEach((r, i) => { r.rank = i + 1; });
+
+  const totalCurr = rows.reduce((s, r) => s + r.current_revenue, 0);
+  const totalPrev = rows.reduce((s, r) => s + r.previous_revenue, 0);
+
+  return {
+    rows,
+    total: rows.length,
+    summary: {
+      period_from: q.from_date,
+      period_to: q.to_date,
+      previous_from: prevBounds.from_date,
+      previous_to: prevBounds.to_date,
+      outlets_active: rows.length,
+      total_revenue: totalCurr,
+      total_revenue_prev: totalPrev,
+      revenue_delta_pct: safePct(totalPrev, totalCurr),
+      top_outlet: rows[0]?.outlet_name ?? '—',
+    },
   };
 }

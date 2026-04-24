@@ -34,7 +34,13 @@ import {
   Truck,
   BookOpen,
   LineChart,
-  Layers
+  Layers,
+  Clock,
+  RotateCcw,
+  PlusSquare,
+  CalendarClock,
+  Trophy,
+  Boxes
 } from 'lucide-react';
 
 export interface ModuleKPI {
@@ -55,6 +61,7 @@ export interface SidebarItem {
   route: string;
   icon: LucideIcon;
   permission?: string;
+  roles?: string[];
   badge?: string;
   children?: SidebarItem[];
 }
@@ -73,6 +80,28 @@ export interface ModuleConfig {
   ctas: ModuleCTA[];
   sidebarItems?: SidebarItem[];
 }
+
+const SALES_REPORT_SIDEBAR_ITEMS: SidebarItem[] = [
+  { label: 'Dashboard', route: '/reports/sales', icon: BarChart3, permission: 'reports.read' },
+  { label: 'Order Summary', route: '/reports/sales/order-summary', icon: ShoppingCart, permission: 'reports.read' },
+  { label: 'Salesperson Performance', route: '/reports/sales/salesperson-performance', icon: Users, permission: 'reports.read' },
+  { label: 'Customer-wise Sales', route: '/reports/sales/customer-wise', icon: Users, permission: 'reports.read' },
+  { label: 'Product-wise Sales', route: '/reports/sales/product-wise', icon: Package, permission: 'reports.read' },
+  { label: 'Target vs Achievement', route: '/reports/sales/target-vs-achievement', icon: Target, permission: 'reports.read' },
+  { label: 'Pending Deliveries', route: '/reports/sales/pending-deliveries', icon: Clock, permission: 'reports.read' },
+  { label: 'Sales Returns', route: '/reports/sales/returns', icon: RotateCcw, permission: 'reports.read' },
+  { label: 'Hourly Sales Heatmap', route: '/reports/sales/hourly-heatmap', icon: Clock, permission: 'reports.read' },
+  { label: 'Payment Method Mix', route: '/reports/sales/payment-mix', icon: CreditCard, permission: 'reports.read' },
+  { label: 'Fulfillment Breakdown', route: '/reports/sales/fulfillment-mix', icon: Truck, permission: 'reports.read' },
+  { label: 'Discount Impact', route: '/reports/sales/discount-impact', icon: Tag, permission: 'reports.read' },
+  { label: 'Cashier Performance', route: '/reports/sales/cashier-performance', icon: UserCheck, permission: 'reports.read' },
+  { label: 'Category & Brand Sales', route: '/reports/sales/category-brand', icon: Layers, permission: 'reports.read' },
+  { label: 'Average Basket Metrics', route: '/reports/sales/basket-metrics', icon: Boxes, permission: 'reports.read' },
+  { label: 'Modifier / Add-on Revenue', route: '/reports/sales/modifier-revenue', icon: PlusSquare, permission: 'reports.read' },
+  { label: 'Hourly & Weekday Trend', route: '/reports/sales/trend-comparison', icon: CalendarClock, permission: 'reports.read' },
+  { label: 'Top / Bottom Movers', route: '/reports/sales/movers', icon: TrendingUp, permission: 'reports.read' },
+  { label: 'Outlet Leaderboard', route: '/reports/sales/outlet-leaderboard', icon: Trophy, permission: 'reports.read', roles: ['admin', 'super_admin'] },
+];
 
 export const modulesConfig: Record<string, ModuleConfig> = {
   ecommerce: {
@@ -151,14 +180,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
         route: '/reports/sales',
         icon: TrendingUp,
         permission: 'reports.read',
-        children: [
-          { label: 'Dashboard',              route: '/reports/sales',                           icon: BarChart3,     permission: 'reports.read' },
-          { label: 'Order Summary',          route: '/reports/sales/order-summary',             icon: ShoppingCart,  permission: 'reports.read' },
-          { label: 'Salesperson Performance',route: '/reports/sales/salesperson-performance',  icon: Users,         permission: 'reports.read' },
-          { label: 'Customer-wise Sales',    route: '/reports/sales/customer-wise',            icon: Users,         permission: 'reports.read' },
-          { label: 'Product-wise Sales',     route: '/reports/sales/product-wise',             icon: Package,       permission: 'reports.read' },
-          { label: 'Target vs Achievement',  route: '/reports/sales/target-vs-achievement',    icon: Target,        permission: 'reports.read' },
-        ]
+        children: SALES_REPORT_SIDEBAR_ITEMS
       }
     ]
   },
@@ -315,14 +337,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
         route: '/reports/sales',
         icon: TrendingUp,
         permission: 'reports.read',
-        children: [
-          { label: 'Dashboard',              route: '/reports/sales',                           icon: BarChart3,     permission: 'reports.read' },
-          { label: 'Order Summary',          route: '/reports/sales/order-summary',             icon: ShoppingCart,  permission: 'reports.read' },
-          { label: 'Salesperson Performance',route: '/reports/sales/salesperson-performance',  icon: Users,         permission: 'reports.read' },
-          { label: 'Customer-wise Sales',    route: '/reports/sales/customer-wise',            icon: Users,         permission: 'reports.read' },
-          { label: 'Product-wise Sales',     route: '/reports/sales/product-wise',             icon: Package,       permission: 'reports.read' },
-          { label: 'Target vs Achievement',  route: '/reports/sales/target-vs-achievement',    icon: Target,        permission: 'reports.read' },
-        ]
+        children: SALES_REPORT_SIDEBAR_ITEMS
       },
 
       {
