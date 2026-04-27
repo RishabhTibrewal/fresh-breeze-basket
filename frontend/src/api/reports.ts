@@ -246,6 +246,89 @@ export async function downloadReport(
 }
 
 // ---------------------------------------------------------------------------
+// Batch C — KOT, POS Pool & Menu Performance rows
+// ---------------------------------------------------------------------------
+export interface KotVolumeByCounterRow {
+  counter_id: string;
+  counter_name: string;
+  outlet_id: string;
+  outlet_name: string;
+  total_tickets: number;
+  open_tickets: number;
+  completed_tickets: number;
+  voided_tickets: number;
+  avg_items_per_ticket: number;
+  total_items: number;
+}
+
+export interface KotStatusBreakdownRow {
+  outlet_id: string;
+  outlet_name: string;
+  status: string;
+  ticket_count: number;
+  share_pct: number;
+}
+
+export interface KotTopItemRow {
+  product_id: string;
+  product_name: string;
+  variant_name: string;
+  total_qty: number;
+  ticket_count: number;
+  avg_qty_per_ticket: number;
+}
+
+export interface KotThroughputRow {
+  counter_id: string;
+  counter_name: string;
+  outlet_name: string;
+  completed_tickets: number;
+  avg_fulfilment_min: number;
+  min_fulfilment_min: number;
+  max_fulfilment_min: number;
+}
+
+export interface PosPoolStockRow {
+  variant_id: string;
+  product_name: string;
+  variant_name: string;
+  sku: string;
+  outlet_id: string;
+  outlet_name: string;
+  qty: number;
+  stock_status: 'ok' | 'low' | 'zero' | 'negative';
+}
+
+export interface PosPoolMovementRow {
+  movement_id: string;
+  movement_date: string;
+  movement_type: string;
+  product_name: string;
+  variant_name: string;
+  sku: string;
+  outlet_name: string;
+  qty_change: number;
+  reference_id: string;
+  notes: string;
+}
+
+export interface MenuItemPerformanceRow {
+  menu_id: string;
+  menu_name: string;
+  product_id: string;
+  variant_id: string;
+  product_name: string;
+  variant_name: string;
+  sku: string;
+  is_visible: boolean;
+  pos_price: number;
+  times_ordered: number;
+  total_qty: number;
+  total_revenue: number;
+  performance_tag: 'star' | 'hidden_gem' | 'ghost' | 'invisible';
+}
+
+// ---------------------------------------------------------------------------
 // Module-specific typed fetchers (add more as modules are implemented)
 // ---------------------------------------------------------------------------
 export const reportsApi = {
@@ -290,6 +373,16 @@ export const reportsApi = {
   invoiceAgeing: (f?: ReportFilter) => fetchReport('/reports/procurement/invoice-ageing', f),
   pendingReceipts: (f?: ReportFilter) => fetchReport('/reports/procurement/pending-receipts', f),
   rateComparison: (f?: ReportFilter) => fetchReport('/reports/procurement/rate-comparison', f),
+
+  // KOT & POS Pool & Menu reports (Batch C)
+  kotVolumeByCounter: (f?: ReportFilter) => fetchReport<KotVolumeByCounterRow>('/reports/sales/kot-volume-by-counter', f),
+  kotStatusBreakdown: (f?: ReportFilter) => fetchReport<KotStatusBreakdownRow>('/reports/sales/kot-status-breakdown', f),
+  kotTopItems: (f?: ReportFilter) => fetchReport<KotTopItemRow>('/reports/sales/kot-top-items', f),
+  kotThroughput: (f?: ReportFilter) => fetchReport<KotThroughputRow>('/reports/sales/kot-throughput', f),
+  posPoolStock: (f?: ReportFilter) => fetchReport<PosPoolStockRow>('/reports/sales/pos-pool-stock', f),
+  posPoolMovements: (f?: ReportFilter) => fetchReport<PosPoolMovementRow>('/reports/sales/pos-pool-movements', f),
+  menuItemPerformance: (f?: ReportFilter) => fetchReport<MenuItemPerformanceRow>('/reports/sales/menu-item-performance', f),
 };
 
 export default reportsApi;
+

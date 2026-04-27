@@ -474,3 +474,132 @@ export const salesDashboard = async (req: Request, res: Response, next: NextFunc
     res.json({ success: true, data: kpis });
   } catch (err) { next(err); }
 };
+
+// ---------------------------------------------------------------------------
+// KOT Reports (Batch C)
+// ---------------------------------------------------------------------------
+
+const KOT_VOLUME_COLS: ExportColumn[] = [
+  { key: 'counter_name', label: 'Counter', width: 22 },
+  { key: 'outlet_name', label: 'Outlet', width: 20 },
+  { key: 'total_tickets', label: 'Total Tickets', format: 'number', align: 'right', width: 14 },
+  { key: 'open_tickets', label: 'Open', format: 'number', align: 'right', width: 10 },
+  { key: 'completed_tickets', label: 'Completed', format: 'number', align: 'right', width: 12 },
+  { key: 'voided_tickets', label: 'Voided', format: 'number', align: 'right', width: 10 },
+  { key: 'avg_items_per_ticket', label: 'Avg Items', format: 'number', align: 'right', width: 12 },
+  { key: 'total_items', label: 'Total Items', format: 'number', align: 'right', width: 12 },
+];
+
+export const kotVolumeByCounter = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rows, total, summary } = await svc.getKotVolumeByCounter(req.reportQuery!, req.companyId!);
+    await respond(req, res, next, { rows, total, summary, reportKey: 'pos.kot_volume_by_counter', reportTitle: 'KOT Volume by Counter', columns: KOT_VOLUME_COLS });
+  } catch (err) { next(err); }
+};
+
+const KOT_STATUS_COLS: ExportColumn[] = [
+  { key: 'outlet_name', label: 'Outlet', width: 20 },
+  { key: 'status', label: 'Status', width: 14 },
+  { key: 'ticket_count', label: 'Count', format: 'number', align: 'right', width: 12 },
+  { key: 'share_pct', label: 'Share %', format: 'percent', align: 'right', width: 12 },
+];
+
+export const kotStatusBreakdown = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rows, total, summary } = await svc.getKotStatusBreakdown(req.reportQuery!, req.companyId!);
+    await respond(req, res, next, { rows, total, summary, reportKey: 'pos.kot_status_breakdown', reportTitle: 'KOT Ticket Status Breakdown', columns: KOT_STATUS_COLS });
+  } catch (err) { next(err); }
+};
+
+const KOT_ITEMS_COLS: ExportColumn[] = [
+  { key: 'product_name', label: 'Product', width: 26 },
+  { key: 'variant_name', label: 'Variant', width: 20 },
+  { key: 'total_qty', label: 'Total Qty', format: 'number', align: 'right', width: 12 },
+  { key: 'ticket_count', label: 'Tickets', format: 'number', align: 'right', width: 10 },
+  { key: 'avg_qty_per_ticket', label: 'Avg Qty/Ticket', format: 'number', align: 'right', width: 16 },
+];
+
+export const kotTopItems = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rows, total, summary } = await svc.getKotTopItems(req.reportQuery!, req.companyId!);
+    await respond(req, res, next, { rows, total, summary, reportKey: 'pos.kot_top_items', reportTitle: 'KOT Top Items (Kitchen Frequency)', columns: KOT_ITEMS_COLS });
+  } catch (err) { next(err); }
+};
+
+const KOT_THROUGHPUT_COLS: ExportColumn[] = [
+  { key: 'counter_name', label: 'Counter', width: 22 },
+  { key: 'outlet_name', label: 'Outlet', width: 20 },
+  { key: 'completed_tickets', label: 'Completed', format: 'number', align: 'right', width: 12 },
+  { key: 'avg_fulfilment_min', label: 'Avg (min)', format: 'number', align: 'right', width: 12 },
+  { key: 'min_fulfilment_min', label: 'Min (min)', format: 'number', align: 'right', width: 12 },
+  { key: 'max_fulfilment_min', label: 'Max (min)', format: 'number', align: 'right', width: 12 },
+];
+
+export const kotThroughput = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rows, total, summary } = await svc.getKotThroughput(req.reportQuery!, req.companyId!);
+    await respond(req, res, next, { rows, total, summary, reportKey: 'pos.kot_throughput', reportTitle: 'KOT Throughput / Fulfilment Time', columns: KOT_THROUGHPUT_COLS });
+  } catch (err) { next(err); }
+};
+
+// ---------------------------------------------------------------------------
+// POS Inventory Pool Reports (Batch C)
+// ---------------------------------------------------------------------------
+
+const POOL_STOCK_COLS: ExportColumn[] = [
+  { key: 'product_name', label: 'Product', width: 26 },
+  { key: 'variant_name', label: 'Variant', width: 20 },
+  { key: 'sku', label: 'SKU', width: 16 },
+  { key: 'outlet_name', label: 'Outlet', width: 20 },
+  { key: 'qty', label: 'Qty in Pool', format: 'number', align: 'right', width: 14 },
+  { key: 'stock_status', label: 'Status', width: 10 },
+];
+
+export const posPoolStock = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rows, total, summary } = await svc.getPosPoolStockLevels(req.reportQuery!, req.companyId!);
+    await respond(req, res, next, { rows, total, summary, reportKey: 'pos.pool_stock_levels', reportTitle: 'POS Pool Stock Levels', columns: POOL_STOCK_COLS });
+  } catch (err) { next(err); }
+};
+
+const POOL_MOVEMENTS_COLS: ExportColumn[] = [
+  { key: 'movement_date', label: 'Date', format: 'date', width: 14 },
+  { key: 'movement_type', label: 'Type', width: 18 },
+  { key: 'product_name', label: 'Product', width: 26 },
+  { key: 'variant_name', label: 'Variant', width: 20 },
+  { key: 'sku', label: 'SKU', width: 16 },
+  { key: 'outlet_name', label: 'Outlet', width: 20 },
+  { key: 'qty_change', label: 'Qty Δ', format: 'number', align: 'right', width: 10 },
+  { key: 'reference_id', label: 'Reference', width: 20 },
+];
+
+export const posPoolMovements = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rows, total, summary } = await svc.getPosPoolMovements(req.reportQuery!, req.companyId!);
+    await respond(req, res, next, { rows, total, summary, reportKey: 'pos.pool_movements', reportTitle: 'POS Pool Movement Log', columns: POOL_MOVEMENTS_COLS });
+  } catch (err) { next(err); }
+};
+
+// ---------------------------------------------------------------------------
+// Menu Performance Report (Batch C)
+// ---------------------------------------------------------------------------
+
+const MENU_PERF_COLS: ExportColumn[] = [
+  { key: 'menu_name', label: 'Menu', width: 20 },
+  { key: 'product_name', label: 'Product', width: 26 },
+  { key: 'variant_name', label: 'Variant', width: 20 },
+  { key: 'sku', label: 'SKU', width: 16 },
+  { key: 'is_visible', label: 'Visible', width: 10 },
+  { key: 'pos_price', label: 'POS Price', format: 'currency', align: 'right', width: 14 },
+  { key: 'times_ordered', label: 'Times Ordered', format: 'number', align: 'right', width: 14 },
+  { key: 'total_qty', label: 'Total Qty', format: 'number', align: 'right', width: 12 },
+  { key: 'total_revenue', label: 'Revenue', format: 'currency', align: 'right', width: 18 },
+  { key: 'performance_tag', label: 'Tag', width: 14 },
+];
+
+export const menuItemPerformance = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rows, total, summary } = await svc.getMenuItemPerformance(req.reportQuery!, req.companyId!);
+    await respond(req, res, next, { rows, total, summary, reportKey: 'pos.menu_item_performance', reportTitle: 'Menu Item Performance', columns: MENU_PERF_COLS });
+  } catch (err) { next(err); }
+};

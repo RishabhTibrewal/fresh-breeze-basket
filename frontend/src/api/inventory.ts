@@ -28,6 +28,39 @@ export interface TransferStockInput {
   notes?: string;
 }
 
+// ── POS Outlet Inventory Pool ────────────────────────────────────────────────
+
+export interface PosPoolItem {
+  id: string;
+  company_id: string;
+  warehouse_id: string;
+  product_id: string;
+  variant_id: string;
+  qty: number;
+  created_at: string;
+  updated_at: string;
+  product_variants?: { id: string; name: string; sku: string | null };
+  products?: { id: string; name: string };
+}
+
+export interface PosTransferItem {
+  product_id: string;
+  variant_id: string;
+  quantity: number;
+}
+
+export interface PosTransferInput {
+  warehouse_id: string;
+  items: PosTransferItem[];
+  notes?: string;
+}
+
+export interface PosTransferResponse {
+  transfer_id: string;
+  movements: Array<{ productId: string; variantId: string; quantity: number }>;
+  message: string;
+}
+
 export interface TransferStockMovement {
   product_id: string;
   variant_id: string;
@@ -184,6 +217,26 @@ export const inventoryService = {
    */
   async transferStock(transferData: TransferStockInput): Promise<TransferStockResponse> {
     const { data: response } = await apiClient.post<ApiResponse<TransferStockResponse>>('/inventory/transfer', transferData);
+    return response.data;
+  },
+
+  /**
+   * Get POS outlet inventory pool rows for a company/warehouse.
+   * GET /inventory/pos-pool?warehouse_id=
+   */
+  async getPosPool(warehouseId?: string): Promise<PosPoolItem[]> {
+    const { data: response } = await apiClient.get<ApiResponse<PosPoolItem[]>>('/inventory/pos-pool', {
+      params: warehouseId ? { warehouse_id: warehouseId } : undefined,
+    });
+    return response.data || [];
+  },
+
+  /**
+   * Transfer stock from global warehouse_inventory to POS outlet pool.
+   * POST /inventory/pos-transfer
+   */
+  async transferToPosPool(input: PosTransferInput): Promise<PosTransferResponse> {
+    const { data: response } = await apiClient.post<ApiResponse<PosTransferResponse>>('/inventory/pos-transfer', input);
     return response.data;
   },
 

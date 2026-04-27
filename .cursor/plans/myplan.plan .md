@@ -97,3 +97,10 @@ Pick the top 3 you like and implement them end-to-end, or
 Start with one quick win like Payment Method Mix or Category-wise Sales (both use existing endpoints and can be added in ~1 change).
 
 add item cost
+
+1 - Add to the backend spec: KotService.generateTickets() must resolve product names from variant.name before building the JSONB snapshot, since the snapshot is the kitchen's source of truth — it shouldn't require any further lookups at print time.
+2 - Fallback for unmapped products: the plan says "default counter or validation block, to be decided." Decide before writing backend code — a validation block (reject order if product has no counter mapping) is safer than silently routing to a default counter, especially if your kitchen relies on this for routing accuracy.
+3 - KOT to be globally unique per outlet per day, not per counter. If so, counter_id should not be part of the sequence key.
+4 - instead fo warehouse_id use outlet_id in migrations
+5 - Update the Frontend Changes -> KDS Realtime section. The KDS frontend must listen for WebSocket reconnect events. Every time the connection is re-established, it must immediately fire a standard GET request to fetch any open tickets it might have missed while offline.
+update the plan for these recommendations

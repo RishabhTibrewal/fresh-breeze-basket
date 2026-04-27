@@ -40,7 +40,9 @@ import {
   PlusSquare,
   CalendarClock,
   Trophy,
-  Boxes
+  Boxes,
+  ListOrdered,
+  Monitor
 } from 'lucide-react';
 
 export interface ModuleKPI {
@@ -416,6 +418,11 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     ],
     ctas: [
       { label: 'Open POS', route: '/pos', variant: 'primary' }
+    ],
+    sidebarItems: [
+      { label: 'POS terminal', route: '/pos', icon: Store, permission: 'pos.access' },
+      { label: 'KOT setup', route: '/pos/kot-settings', icon: ListOrdered, permission: 'pos.access' },
+      { label: 'Kitchen (KDS)', route: '/pos/kds', icon: Monitor, permission: 'pos.access' },
     ]
   },
   

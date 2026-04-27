@@ -98,59 +98,58 @@ export class OrderService {
         throw new Error('No items provided');
       }
 
-      // Validate and calculate totals
+      // ── PERF: Batch-fetch all products in a single query ──────────────────
+      const allProductIds = [...new Set(items.map((i) => i.productId))];
+      const { data: productRows } = await supabaseAdmin
+        .from('products')
+        .select('id, name')
+        .eq('company_id', this.companyId)
+        .in('id', allProductIds);
+      const productMap = new Map((productRows ?? []).map((p: { id: string; name: string }) => [p.id, p]));
+
+      for (const item of items) {
+        if (!productMap.has(item.productId)) {
+          throw new Error(`Product ${item.productId} not found`);
+        }
+      }
+
+      // ── PERF: Resolve variantIds + validate prices + calculate tax in parallel ──
       let calculatedSubtotal = 0;
       let calculatedTax = 0;
       const validatedItems: Array<CreateOrderItem & { taxAmount: number }> = [];
 
-      for (const item of items) {
-        // Validate product exists
-        const { data: product } = await supabaseAdmin
-          .from('products')
-          .select('id, name')
-          .eq('id', item.productId)
-          .eq('company_id', this.companyId)
-          .single();
+      const resolvedResults = await Promise.all(
+        items.map(async (item) => {
+          // Resolve variantId (use provided or fetch DEFAULT variant)
+          let finalVariantId: string | null = item.variantId || null;
+          if (!finalVariantId) {
+            const defaultVariant = await this.productService.getDefaultVariant(item.productId);
+            finalVariantId = defaultVariant.id;
+          }
 
-        if (!product) {
-          throw new Error(`Product ${item.productId} not found`);
-        }
+          const itemOutletId = item.outletId || outletId || null;
 
-        // Get variantId - use provided or get DEFAULT variant
-        let finalVariantId: string | null = item.variantId || null;
-        if (!finalVariantId) {
-          const defaultVariant = await this.productService.getDefaultVariant(item.productId);
-          finalVariantId = defaultVariant.id;
-        }
+          // Run price validation and tax calculation in parallel
+          const [isValidPrice, { taxAmount }] = await Promise.all([
+            this.pricingService.validatePrice(item.productId, finalVariantId, itemOutletId, item.unitPrice),
+            this.pricingService.calculateLineTotal(item.productId, item.quantity, item.unitPrice, finalVariantId),
+          ]);
 
-        // Validate price (optional - can be disabled for flexibility)
-        const itemOutletId = item.outletId || outletId || null;
-        const isValidPrice = await this.pricingService.validatePrice(
-          item.productId,
-          finalVariantId,
-          itemOutletId,
-          item.unitPrice
-        );
+          if (!isValidPrice) {
+            console.warn(`Price validation failed for product ${item.productId}, but continuing`);
+          }
 
-        if (!isValidPrice) {
-          console.warn(`Price validation failed for product ${item.productId}, but continuing`);
-        }
+          return { item, finalVariantId, taxAmount };
+        })
+      );
 
-        // Calculate tax
+      for (const { item, finalVariantId, taxAmount } of resolvedResults) {
         const lineSubtotal = item.quantity * item.unitPrice;
-        const { taxAmount } = await this.pricingService.calculateLineTotal(
-          item.productId,
-          item.quantity,
-          item.unitPrice,
-          finalVariantId
-        );
-
         calculatedSubtotal += lineSubtotal;
         calculatedTax += taxAmount;
-
         validatedItems.push({
           ...item,
-          variantId: finalVariantId, // Ensure variantId is set
+          variantId: finalVariantId,
           taxAmount: Math.round(taxAmount * 100) / 100,
         });
       }
@@ -285,15 +284,63 @@ export class OrderService {
         throw new Error(`Failed to create order items: ${itemsError.message}`);
       }
 
-      // POS orders: record stock movement immediately (direct subtraction)
+      // POS orders: record stock movement immediately (direct subtraction).
+      // If a POS outlet pool row exists for the variant, deduct from pos_outlet_inventory
+      // and record a POS_SALE movement.  Fall back to global warehouse_inventory (SALE
+      // movement) for outlets that have not set up a pool.
       if (orderSource === 'pos' && orderType === 'sales' && industryContext === 'retail') {
-        const movementItems = validatedItems.map(item => ({
-          productId: item.productId,
-          variantId: item.variantId as string,
-          outletId: item.outletId || (finalOutletId as string),
-          quantity: item.quantity,
-        }));
-        await this.inventoryService.handleOrderStockMovement(order.id, 'sales', movementItems);
+        const posPoolItems: Array<{ productId: string; variantId: string; quantity: number }> = [];
+        const globalItems: Array<{ productId: string; variantId: string; outletId: string; quantity: number }> = [];
+
+        // ── PERF: Batch-check all POS pool rows in a single query ─────────────
+        const variantIdsForPool = validatedItems
+          .map((i) => i.variantId as string)
+          .filter(Boolean);
+        const effectiveOutletForPool = finalOutletId as string;
+        const poolVariantSet = new Set<string>();
+        if (effectiveOutletForPool && variantIdsForPool.length > 0) {
+          const { data: poolRows } = await supabaseAdmin
+            .from('pos_outlet_inventory')
+            .select('variant_id')
+            .eq('company_id', this.companyId)
+            .eq('warehouse_id', effectiveOutletForPool)
+            .in('variant_id', variantIdsForPool);
+          for (const row of poolRows ?? []) {
+            poolVariantSet.add((row as { variant_id: string }).variant_id);
+          }
+        }
+
+        for (const item of validatedItems) {
+          const itemOutletId = item.outletId || (finalOutletId as string);
+          const hasPool = poolVariantSet.has(item.variantId as string);
+
+          if (hasPool && itemOutletId) {
+            posPoolItems.push({
+              productId: item.productId,
+              variantId: item.variantId as string,
+              quantity: item.quantity,
+            });
+          } else {
+            globalItems.push({
+              productId: item.productId,
+              variantId: item.variantId as string,
+              outletId: itemOutletId,
+              quantity: item.quantity,
+            });
+          }
+        }
+
+        if (posPoolItems.length > 0 && finalOutletId) {
+          await this.inventoryService.deductFromPosPool({
+            orderId: order.id,
+            warehouseId: finalOutletId,
+            items: posPoolItems,
+          });
+        }
+
+        if (globalItems.length > 0) {
+          await this.inventoryService.handleOrderStockMovement(order.id, 'sales', globalItems);
+        }
       }
 
       // Process payment if payment_intent_id is provided

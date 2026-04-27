@@ -2,6 +2,27 @@ import { Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../lib/supabase';
 import { ApiError, ValidationError } from '../middleware/error';
 import { OrderService } from '../services/core/OrderService';
+import { KotService } from '../services/core/KotService';
+
+async function resolvePosOutletId(
+  companyId: string,
+  outletIdBody: string | undefined,
+  items: Array<{ warehouse_id?: string; outlet_id?: string }>
+): Promise<string | null> {
+  if (outletIdBody) return outletIdBody;
+  const first = items[0];
+  const fromLine = first?.warehouse_id || first?.outlet_id;
+  if (fromLine) return fromLine;
+  const { data } = await supabaseAdmin
+    .from('warehouses')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return data?.id ?? null;
+}
 
 /**
  * Create POS order
@@ -12,6 +33,7 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
     const {
       items,
       payment_method = 'cash',
+      payment_status,
       notes,
       outlet_id,
       // New fields
@@ -36,6 +58,25 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
     if (!userId) throw new ValidationError('User ID is required');
     if (!req.companyId) throw new ValidationError('Company context is required');
 
+    const effectiveOutletId = await resolvePosOutletId(req.companyId, outlet_id, items);
+    if (!effectiveOutletId) {
+      throw new ValidationError('outlet_id is required for POS (select an outlet or configure a default warehouse).');
+    }
+
+    // ── PERF: Prefetch KOT settings once; reuse in generateTickets ──────────
+    const { data: kotSettings, error: kotSettingsErr } = await supabaseAdmin
+      .from('pos_kot_settings')
+      .select('id, reset_frequency, timezone, number_prefix, default_counter_id')
+      .eq('company_id', req.companyId)
+      .eq('outlet_id', effectiveOutletId)
+      .maybeSingle();
+
+    if (kotSettingsErr || !kotSettings?.id) {
+      throw new ValidationError(
+        'Configure KOT settings and default counter for this outlet before taking POS orders (KOT settings in POS).'
+      );
+    }
+
     // Build order notes
     let orderNotes = notes || '';
     if (table_number) orderNotes = `Table: ${table_number}${orderNotes ? ' | ' + orderNotes : ''}`;
@@ -59,7 +100,7 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
       variantId: item.variant_id || null,
       quantity: item.quantity,
       unitPrice: item.price || item.unit_price,
-      outletId: item.warehouse_id || item.outlet_id || outlet_id || null,
+      outletId: item.warehouse_id || item.outlet_id || effectiveOutletId,
       taxPercentage: item.tax_percentage || 0,
     }));
 
@@ -67,13 +108,14 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
       {
         items: orderItems,
         paymentMethod: payment_method,
-        paymentStatus: 'paid', // POS orders are always paid at the counter
+        paymentStatus: payment_status
+          || (payment_method === 'credit' ? 'full_credit' : 'paid'),
         notes: orderNotes,
         extraDiscountPercentage: parseFloat(extra_discount_percentage) || 0,
       },
       {
         userId: null,
-        outletId: outlet_id || null,
+        outletId: effectiveOutletId,
         industryContext: 'retail',
         orderType: 'sales',
         orderSource: 'pos',
@@ -164,12 +206,36 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
       }
     }
 
-    // Fetch complete order
-    const order = await orderService.getOrderById(orderId);
+    const { data: orderItemRows, error: oiErr } = await supabaseAdmin
+      .from('order_items')
+      .select('id, product_id, variant_id, quantity, created_at')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: true });
 
+    if (oiErr || !orderItemRows?.length) {
+      throw new ApiError(500, 'Failed to load order lines for KOT');
+    }
+    if (orderItemRows.length !== items.length) {
+      throw new ApiError(500, 'KOT: order line count does not match cart; aborting ticket generation');
+    }
+
+    const kotService = new KotService(req.companyId);
+    const kotTickets = await kotService.generateTickets({
+      orderId,
+      outletId: effectiveOutletId,
+      requestItems: items,
+      orderItemRows: orderItemRows,
+      prefetchedSettings: kotSettings, // ─ reuse the already-fetched settings row
+    });
+
+    // ── PERF: Skip expensive getOrderById join ─ return lightweight response ──
     res.status(201).json({
       success: true,
-      data: { ...order, receipt_number },
+      data: {
+        id: orderId,
+        receipt_number,
+        kot_tickets: kotTickets,
+      },
       invoice_url: `/api/invoices/pos/${orderId}`
     });
   } catch (error: any) {

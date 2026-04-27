@@ -68,6 +68,13 @@ export const invoicesService = {
     return response.data;
   },
 
+  async getKitchenKOTByTicketHTML(ticketId: string): Promise<string> {
+    const response = await apiClient.get(`/invoices/kot/ticket/${ticketId}/kitchen`, {
+      responseType: 'text',
+    });
+    return response.data;
+  },
+
   /**
    * Get Customer KOT/Bill (Thermal HTML)
    */

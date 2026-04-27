@@ -20,7 +20,10 @@ import {
   Banknote, Layers, CheckCircle2, Tag,
   MapPin, Package, Pencil, ChevronDown,
   SlidersHorizontal, Receipt, BarChart3, User,
-  Loader2, Play, Calendar, Download, Utensils, Filter, FileDown
+  Loader2, Play, Calendar, Download, Utensils, Filter, FileDown,
+  UtensilsCrossed,
+  ListOrdered,
+  Monitor,
 } from "lucide-react";
 import { toast } from "sonner";
 import apiClient from '@/lib/apiClient';
@@ -35,6 +38,9 @@ import {
 } from '@/api/reports';
 import PosAnalyticsBatchAWidgets from './PosAnalyticsBatchAWidgets';
 import PosAnalyticsBatchBWidgets from './PosAnalyticsBatchBWidgets';
+import PosAnalyticsBatchCWidgets from './PosAnalyticsBatchCWidgets';
+import MenuManagement from './MenuManagement';
+import { posMenusApi, type ActiveMenu } from '@/api/posMenus';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
 
@@ -71,7 +77,7 @@ interface CartItem {
   notes?: string;
 }
 
-type PaymentMethod = 'cash' | 'card' | 'upi' | 'split';
+type PaymentMethod = 'cash' | 'card' | 'upi' | 'credit';
 type OrderType = 'dine_in' | 'take_away' | 'delivery';
 
 interface DeliveryAddress {
@@ -92,6 +98,23 @@ interface SplitPayment {
 const genId = () => Math.random().toString(36).substring(2, 10);
 
 const formatPrice = (p: number) => `₹${p.toFixed(2)}`;
+const normalizePaymentStatus = (status?: string) => {
+  switch ((status || '').toLowerCase()) {
+    case 'paid':
+    case 'full_payment':
+      return { label: 'PAID', className: 'bg-green-500/20 text-green-400' };
+    case 'credit':
+    case 'full_credit':
+      return { label: 'CREDIT', className: 'bg-amber-500/20 text-amber-400' };
+    case 'partial':
+    case 'partial_payment':
+      return { label: 'PARTIAL', className: 'bg-yellow-500/20 text-yellow-400' };
+    case 'pending':
+      return { label: 'PENDING', className: 'bg-slate-500/20 text-slate-300' };
+    default:
+      return { label: status?.toUpperCase() || 'UNKNOWN', className: 'bg-slate-500/20 text-slate-300' };
+  }
+};
 const toLocalDate = (value: Date = new Date()) => {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, '0');
@@ -157,7 +180,7 @@ export default function CreatePOSOrder() {
 
   // ── modals ──
   // ── views ──
-  const [activeView, setActiveView] = useState<'sale' | 'history' | 'customers' | 'reports' | 'settings'>('sale');
+  const [activeView, setActiveView] = useState<'sale' | 'history' | 'customers' | 'reports' | 'settings' | 'menus'>('sale');
   const [customPriceModal, setCustomPriceModal] = useState<{ product: any } | null>(null);
   const [customPriceValue, setCustomPriceValue] = useState('');
   const [deliveryModal, setDeliveryModal] = useState(false);
@@ -165,8 +188,14 @@ export default function CreatePOSOrder() {
     name: '', phone: '', address: '', city: '', notes: ''
   });
   const [modifierModal, setModifierModal] = useState<{ item: CartItem } | null>(null);
+  const [variantPickerModal, setVariantPickerModal] = useState<{ product: any; variants: any[] } | null>(null);
   const [paymentModal, setPaymentModal] = useState(false);
-  const [paymentSuccess, setPaymentSuccess] = useState<{ orderId: string; receiptNumber: string; change: number } | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState<{
+    orderId: string;
+    receiptNumber: string;
+    change: number;
+    kotTickets?: Array<{ id: string; kot_number_text: string; counter_id: string }>;
+  } | null>(null);
   const [historyDetailsOrderId, setHistoryDetailsOrderId] = useState<string | null>(null);
 
   // ── outlet ──
@@ -322,6 +351,17 @@ export default function CreatePOSOrder() {
   const { data: warehouses = [] } = useQuery({
     queryKey: ['warehouses'],
     queryFn: () => warehousesService.getAll(true),
+  });
+
+  const { data: activeMenu } = useQuery<ActiveMenu | null>({
+    queryKey: ['pos-active-menu', selectedOutletId || (warehouses[0] as any)?.id],
+    queryFn: async () => {
+      const wid = selectedOutletId || (warehouses[0] as any)?.id;
+      if (!wid) return null;
+      return posMenusApi.getActive(wid);
+    },
+    enabled: !!(selectedOutletId || (warehouses[0] as any)?.id),
+    staleTime: 30000,
   });
 
   const { data: customers = [] } = useQuery({
@@ -918,6 +958,49 @@ export default function CreatePOSOrder() {
     enabled: activeView === 'reports' && canViewAllPosSessions,
   });
 
+  // --- Batch C: KOT, POS Pool & Menu Performance ---
+  const kotVolumeQuery = useQuery({
+    queryKey: ['pos-kot-volume', posWidgetFilters],
+    queryFn: () => reportsApi.kotVolumeByCounter(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const kotStatusQuery = useQuery({
+    queryKey: ['pos-kot-status', posWidgetFilters],
+    queryFn: () => reportsApi.kotStatusBreakdown(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const kotTopItemsQuery = useQuery({
+    queryKey: ['pos-kot-top-items', posWidgetFilters],
+    queryFn: () => reportsApi.kotTopItems(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const kotThroughputQuery = useQuery({
+    queryKey: ['pos-kot-throughput', posWidgetFilters],
+    queryFn: () => reportsApi.kotThroughput(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const posPoolStockQuery = useQuery({
+    queryKey: ['pos-pool-stock', posWidgetFilters],
+    queryFn: () => reportsApi.posPoolStock(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const posPoolMovementsQuery = useQuery({
+    queryKey: ['pos-pool-movements', posWidgetFilters],
+    queryFn: () => reportsApi.posPoolMovements(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
+  const menuItemPerfQuery = useQuery({
+    queryKey: ['pos-menu-item-perf', posWidgetFilters],
+    queryFn: () => reportsApi.menuItemPerformance(posWidgetFilters),
+    enabled: activeView === 'reports',
+  });
+
   // ─── Derived memos that depend on itemWiseReport (must come after its useQuery) ─
   const itemWiseRows = useMemo(() => {
     const rows = (itemWiseReport?.data || []) as SalesProductWiseRow[];
@@ -1048,13 +1131,72 @@ export default function CreatePOSOrder() {
 
   // ─── Computed ───────────────────────────────────────────────────────────────
 
-  const filteredProducts = variants.filter((v: any) => {
-    const matchSearch = !searchQuery ||
-      v.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      v.sku?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchCat = activeCategory === 'all' || v.category_id === activeCategory;
-    return matchSearch && matchCat;
-  });
+  // Group flat variants into per-product catalog entries, applying active menu filter + price override
+  const groupedProducts = useMemo(() => {
+    // Build a quick lookup from active menu items: variant_id -> { is_visible, pos_price }
+    const menuItemMap = new Map<string, { is_visible: boolean; pos_price: number | null }>();
+    const hasMenu = !!(activeMenu?.items?.length);
+    if (hasMenu) {
+      for (const item of activeMenu!.items) {
+        menuItemMap.set(item.variant_id, { is_visible: item.is_visible, pos_price: item.pos_price });
+      }
+    }
+
+    const productMap = new Map<string, {
+      product_id: string;
+      product_name: string;
+      category_id: string;
+      image_url: string | null;
+      variants: any[];
+    }>();
+
+    for (const rawV of variants as any[]) {
+      // If there's an active menu, skip variants not in it or explicitly hidden
+      let v = rawV;
+      if (hasMenu) {
+        const menuItem = menuItemMap.get(v.variant_id);
+        if (!menuItem || !menuItem.is_visible) continue;
+        // Apply POS price override if set
+        if (menuItem.pos_price !== null && menuItem.pos_price !== undefined) {
+          v = { ...v, sale_price: menuItem.pos_price };
+        }
+      }
+
+      if (!productMap.has(v.product_id)) {
+        productMap.set(v.product_id, {
+          product_id: v.product_id,
+          product_name: v.product_name,
+          category_id: v.category_id,
+          image_url: v.image_url || null,
+          variants: [],
+        });
+      }
+      productMap.get(v.product_id)!.variants.push(v);
+    }
+    return Array.from(productMap.values());
+  }, [variants, activeMenu]);
+
+  const filteredProducts = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return groupedProducts.filter(p => {
+      const matchSearch = !q ||
+        p.product_name?.toLowerCase().includes(q) ||
+        p.variants.some((v: any) =>
+          v.name?.toLowerCase().includes(q) ||
+          v.sku?.toLowerCase().includes(q)
+        );
+      const matchCat = activeCategory === 'all' || p.category_id === activeCategory;
+      return matchSearch && matchCat;
+    });
+  }, [groupedProducts, searchQuery, activeCategory]);
+
+  const handleProductCardClick = (product: { product_id: string; product_name: string; image_url: string | null; category_id: string; variants: any[] }) => {
+    if (product.variants.length === 1) {
+      addToCart(product.variants[0]);
+    } else {
+      setVariantPickerModal({ product, variants: product.variants });
+    }
+  };
 
   const effectiveDiscount = customDiscount !== '' ? parseFloat(customDiscount) || 0 : discountPct;
 
@@ -1077,6 +1219,27 @@ export default function CreatePOSOrder() {
 
   const defaultWarehouseId = selectedOutletId || (warehouses[0] as any)?.id;
   const selectedOutlet = (warehouses as any[]).find(w => w.id === defaultWarehouseId);
+
+  // ─── Inventory stock map for selected outlet ─────────────────────────────
+  const { data: outletInventory = [] } = useQuery({
+    queryKey: ['pos-outlet-inventory', defaultWarehouseId],
+    queryFn: async () => {
+      const res = await apiClient.get('/inventory/pos-pool', {
+        params: { warehouse_id: defaultWarehouseId },
+      });
+      return res.data?.data || [];
+    },
+    enabled: !!defaultWarehouseId,
+    staleTime: 60000,
+  });
+
+  const variantStockMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const row of outletInventory as any[]) {
+      if (row.variant_id) map[row.variant_id] = row.qty ?? 0;
+    }
+    return map;
+  }, [outletInventory]);
 
   // ─── Cart Actions ───────────────────────────────────────────────────────────
 
@@ -1254,8 +1417,9 @@ export default function CreatePOSOrder() {
         payload.change_given = changeDue;
       } else if (paymentMethod === 'upi') {
         payload.transaction_id = upiRef;
-      } else if (paymentMethod === 'split') {
-        payload.split_payments = splitPayments.filter(s => parseFloat(s.amount) > 0);
+      } else if (paymentMethod === 'credit') {
+        // Credit sale — no immediate payment, amount owed by customer
+        payload.payment_status = 'full_credit';
       }
 
       const res = await apiClient.post('/pos/orders', payload);
@@ -1264,20 +1428,32 @@ export default function CreatePOSOrder() {
     onSuccess: (data) => {
       const orderId = data?.data?.id;
       const receiptNo = data?.data?.receipt_number || `RCP-${Date.now().toString().slice(-6)}`;
-      setPaymentSuccess({ orderId, receiptNumber: receiptNo, change: changeDue });
+      const kot = data?.data?.kot_tickets;
+      setPaymentSuccess({
+        orderId,
+        receiptNumber: receiptNo,
+        change: changeDue,
+        kotTickets: Array.isArray(kot) ? kot : undefined,
+      });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['pos-history'] });
       queryClient.invalidateQueries({ queryKey: ['pos-variants'] });
       queryClient.invalidateQueries({ queryKey: ['pos-customers'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
     },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.error || 'Failed to create order');
+    onError: (err: { response?: { data?: { error?: { message?: string } | string; message?: string } } }) => {
+      const payload = err.response?.data?.error;
+      const msg =
+        typeof payload === 'string' ? payload : payload?.message || err.response?.data?.message || 'Failed to create order';
+      toast.error(msg);
     }
   });
 
   const handleCharge = () => {
     if (cartItems.length === 0) { toast.error('Cart is empty'); return; }
+    if (paymentMethod === 'credit' && !selectedCustomer) {
+      toast.error('Select a customer to use credit payment'); return;
+    }
     if (orderType === 'delivery' && !deliveryAddress.address) {
       toast.error('Please enter a delivery address'); return;
     }
@@ -1291,6 +1467,15 @@ export default function CreatePOSOrder() {
       await invoicesService.printHTML(html);
     } catch {
       toast.error('Could not open Kitchen KOT');
+    }
+  };
+
+  const handlePrintKitchenKOTTicket = async (ticketId: string) => {
+    try {
+      const html = await invoicesService.getKitchenKOTByTicketHTML(ticketId);
+      await invoicesService.printHTML(html);
+    } catch {
+      toast.error('Could not print this ticket');
     }
   };
 
@@ -1342,6 +1527,7 @@ export default function CreatePOSOrder() {
     { id: 'sale', icon: <Store className="h-5 w-5" />, label: 'New Sale', action: () => setActiveView('sale') },
     { id: 'history', icon: <History className="h-5 w-5" />, label: 'Order History', action: () => setActiveView('history') },
     { id: 'customers', icon: <Users className="h-5 w-5" />, label: 'Customers', action: () => setActiveView('customers') },
+    { id: 'menus', icon: <UtensilsCrossed className="h-5 w-5" />, label: 'Menus', action: () => setActiveView('menus') },
     { id: 'reports', icon: <BarChart3 className="h-5 w-5" />, label: 'Reports', action: () => setActiveView('reports') },
     { id: 'settings', icon: <Settings className="h-5 w-5" />, label: 'Settings', action: () => setActiveView('settings') },
   ];
@@ -1474,24 +1660,26 @@ export default function CreatePOSOrder() {
         </div>
 
         {/* Category Tabs */}
-        <div className="flex-shrink-0 flex items-center gap-2 px-4 py-3 bg-[#0f1117] border-b border-white/5 overflow-x-auto scrollbar-none">
-          <button
-            onClick={() => setActiveCategory('all')}
-            className={`flex-shrink-0 px-4 py-1.5 rounded-md text-xs font-medium transition-all
-              ${activeCategory === 'all' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'}`}
-          >
-            All Products
-          </button>
-          {categories.map((cat: any) => (
+        <div className="flex-shrink-0 px-4 py-3 bg-[#0f1117] border-b border-white/5 overflow-x-auto overflow-y-hidden scrollbar-none">
+          <div className="flex items-center gap-2 min-w-max whitespace-nowrap pr-2">
             <button
-              key={cat.id}
-              onClick={() => setActiveCategory(cat.id)}
+              onClick={() => setActiveCategory('all')}
               className={`flex-shrink-0 px-4 py-1.5 rounded-md text-xs font-medium transition-all
-                ${activeCategory === cat.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'}`}
+                ${activeCategory === 'all' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'}`}
             >
-              {cat.name}
+              All Products
             </button>
-          ))}
+            {categories.map((cat: any) => (
+              <button
+                key={cat.id}
+                onClick={() => setActiveCategory(cat.id)}
+                className={`flex-shrink-0 px-4 py-1.5 rounded-md text-xs font-medium transition-all
+                  ${activeCategory === cat.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'}`}
+              >
+                {cat.name}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Product Grid */}
@@ -1509,32 +1697,53 @@ export default function CreatePOSOrder() {
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {filteredProducts.map((variant: any) => {
-                const price = variant.sale_price ?? 0;
+              {filteredProducts.map((product) => {
+                const isMultiVariant = product.variants.length > 1;
+                const singleVariant = isMultiVariant ? null : product.variants[0];
+                const price = singleVariant ? (singleVariant.sale_price ?? 0) : null;
                 const isZeroPrice = price === 0;
+                // Price range for multi-variant
+                const prices = product.variants.map((v: any) => v.sale_price ?? 0);
+                const minPrice = Math.min(...prices);
+                const maxPrice = Math.max(...prices);
+                const imageUrl = product.image_url || product.variants.find((v: any) => v.image_url)?.image_url || null;
+                // Stock: single variant = direct lookup; multi-variant = sum across all variants
+                const stock = isMultiVariant
+                  ? product.variants.reduce((sum: number, v: any) => sum + (variantStockMap[v.variant_id] ?? 0), 0)
+                  : (singleVariant ? (variantStockMap[singleVariant.variant_id] ?? null) : null);
+                const isOutOfStock = stock !== null && stock <= 0;
+                const isLowStock = stock !== null && stock > 0 && stock <= 5;
                 return (
                   <button
-                    key={variant.id}
-                    onClick={() => addToCart(variant)}
-                    className="group relative bg-[#1a1d27] hover:bg-[#22263a] border border-white/5 hover:border-indigo-500/50 rounded-xl p-3 text-left transition-all duration-150 hover:shadow-lg hover:shadow-indigo-500/10 active:scale-95"
+                    key={product.product_id}
+                    onClick={() => handleProductCardClick(product)}
+                    className={`group relative bg-[#1a1d27] hover:bg-[#22263a] border rounded-xl p-3 text-left transition-all duration-150 hover:shadow-lg active:scale-95
+                      ${isOutOfStock
+                        ? 'border-white/5 opacity-60'
+                        : 'border-white/5 hover:border-indigo-500/50 hover:shadow-indigo-500/10'}`}
                   >
-                    {/* Badge */}
-                    {variant.badge && (
-                      <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-medium">
-                        {variant.badge}
+                    {/* Multi-variant badge */}
+                    {isMultiVariant && (
+                      <span className="absolute top-2 right-2 bg-purple-600/90 text-white text-[10px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-0.5">
+                        <Layers className="h-2.5 w-2.5" /> {product.variants.length}
                       </span>
                     )}
-                    {isZeroPrice && (
+                    {!isMultiVariant && singleVariant?.badge && (
+                      <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-medium">
+                        {singleVariant.badge}
+                      </span>
+                    )}
+                    {!isMultiVariant && isZeroPrice && (
                       <span className="absolute top-2 right-2 bg-amber-500 text-black text-[10px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-0.5">
                         <Pencil className="h-2.5 w-2.5" /> Price
                       </span>
                     )}
 
                     {/* Image */}
-                    {variant.image_url ? (
+                    {imageUrl ? (
                       <img
-                        src={variant.image_url}
-                        alt={variant.display_name}
+                        src={imageUrl}
+                        alt={product.product_name}
                         className="w-full h-20 object-cover rounded-lg mb-2 bg-white/5"
                       />
                     ) : (
@@ -1544,25 +1753,45 @@ export default function CreatePOSOrder() {
                     )}
 
                     <p className="text-xs font-medium text-white line-clamp-2 leading-tight mb-0.5">
-                      {variant.product_name}
+                      {product.product_name}
                     </p>
-                    {variant.name !== variant.product_name && (
-                      <p className="text-[10px] text-indigo-300 mb-0.5 truncate">{variant.name}</p>
+                    {!isMultiVariant && singleVariant?.name && singleVariant.name !== product.product_name && (
+                      <p className="text-[10px] text-indigo-300 mb-0.5 truncate">{singleVariant.name}</p>
                     )}
-                    {variant.sku && (
-                      <p className="text-[10px] text-gray-500 mb-1">{variant.sku}</p>
+                    {isMultiVariant && (
+                      <p className="text-[10px] text-purple-400 mb-0.5">{product.variants.length} variants</p>
                     )}
-                    <div className="flex items-end justify-between gap-1">
-                      <p className={`text-sm font-bold ${isZeroPrice ? 'text-amber-400' : 'text-indigo-400'}`}>
-                        {isZeroPrice ? 'Custom' : formatPrice(price)}
+                    {!isMultiVariant && singleVariant?.sku && (
+                      <p className="text-[10px] text-gray-500 mb-0.5">{singleVariant.sku}</p>
+                    )}
+
+                    {/* Stock count */}
+                    {stock !== null && (
+                      <p className={`text-[10px] font-medium mb-1 ${
+                        isOutOfStock ? 'text-red-400' : isLowStock ? 'text-amber-400' : 'text-emerald-400'
+                      }`}>
+                        {isOutOfStock ? 'Out of stock' : isLowStock ? `Low: ${stock}` : `Stock: ${stock}`}
                       </p>
-                      {variant.tax_rate > 0 && (
+                    )}
+
+                    <div className="flex items-end justify-between gap-1">
+                      {isMultiVariant ? (
+                        <p className="text-sm font-bold text-indigo-400">
+                          {minPrice === maxPrice
+                            ? formatPrice(minPrice)
+                            : `${formatPrice(minPrice)}+`}
+                        </p>
+                      ) : (
+                        <p className={`text-sm font-bold ${isZeroPrice ? 'text-amber-400' : 'text-indigo-400'}`}>
+                          {isZeroPrice ? 'Custom' : formatPrice(price!)}
+                        </p>
+                      )}
+                      {!isMultiVariant && (singleVariant?.tax_rate ?? 0) > 0 && (
                         <p className="text-[9px] text-gray-500 leading-none mb-0.5">
-                          {variant.tax_rate}% tax
+                          {singleVariant!.tax_rate}% tax
                         </p>
                       )}
                     </div>
-
                   </button>
                 );
               })}
@@ -1868,16 +2097,18 @@ export default function CreatePOSOrder() {
                    ) : historyFilteredOrders.length === 0 ? (
                      <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No recent POS orders</td></tr>
                    ) : (
-                     historyFilteredOrders.map((order: any) => (
-                       <tr key={order.id} className="hover:bg-white/5 transition-colors">
+                    historyFilteredOrders.map((order: any) => {
+                      const paymentStatusUi = normalizePaymentStatus(order.payment_status);
+                      return (
+                      <tr key={order.id} className="hover:bg-white/5 transition-colors">
                          <td className="px-6 py-4 font-medium">{order.receipt_number || `POS-${order.id.slice(0, 5)}`}</td>
                          <td className="px-6 py-4 text-gray-400">
                            {order.profiles?.first_name ? `${order.profiles.first_name} ${order.profiles.last_name || ''}` : (order.customer?.name || 'Walk-in Customer')}
                          </td>
                          <td className="px-6 py-4 font-bold text-indigo-400">{formatPrice(order.total_amount)}</td>
                          <td className="px-6 py-4">
-                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${order.payment_status === 'paid' ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'}`}>
-                             {order.payment_status?.toUpperCase() || 'UNKNOWN'}
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${paymentStatusUi.className}`}>
+                            {paymentStatusUi.label}
                            </span>
                          </td>
                          <td className="px-6 py-4">
@@ -1889,7 +2120,7 @@ export default function CreatePOSOrder() {
                            </button>
                          </td>
                        </tr>
-                     ))
+                    )})
                    )}
                  </tbody>
                </table>
@@ -2409,6 +2640,17 @@ export default function CreatePOSOrder() {
               isAdmin={canViewAllPosSessions}
               handleDownloadPosWidget={handleDownloadPosWidget}
             />
+
+            <PosAnalyticsBatchCWidgets
+              kotVolumeQuery={kotVolumeQuery}
+              kotStatusQuery={kotStatusQuery}
+              kotTopItemsQuery={kotTopItemsQuery}
+              kotThroughputQuery={kotThroughputQuery}
+              posPoolStockQuery={posPoolStockQuery}
+              posPoolMovementsQuery={posPoolMovementsQuery}
+              menuItemPerfQuery={menuItemPerfQuery}
+              handleDownloadPosWidget={handleDownloadPosWidget}
+            />
           </div>
         )}
 
@@ -2461,6 +2703,45 @@ export default function CreatePOSOrder() {
                 </div>
               </div>
 
+              <div className="bg-[#1a1d27] border border-amber-500/20 p-6 rounded-3xl">
+                <h3 className="font-bold mb-2 flex items-center gap-2 text-amber-400">
+                  <Utensils className="h-4 w-4" /> Kitchen (KOT)
+                </h3>
+                <p className="text-xs text-gray-500 mb-4">
+                  Same shortcuts as the POS module menu: configure stations and defaults, or open the live kitchen board.
+                </p>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/pos/kot-settings')}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/25 text-left transition-colors"
+                  >
+                    <span className="flex items-center gap-3 min-w-0">
+                      <ListOrdered className="h-5 w-5 text-amber-400 shrink-0" />
+                      <span>
+                        <span className="block text-sm font-semibold text-white">KOT setup</span>
+                        <span className="block text-[11px] text-gray-500 truncate">Food counters, numbering, product routing</span>
+                      </span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-gray-500 shrink-0" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/pos/kds')}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-left transition-colors"
+                  >
+                    <span className="flex items-center gap-3 min-w-0">
+                      <Monitor className="h-5 w-5 text-indigo-400 shrink-0" />
+                      <span>
+                        <span className="block text-sm font-semibold text-white">Kitchen (KDS)</span>
+                        <span className="block text-[11px] text-gray-500 truncate">Open tickets for this company / outlet</span>
+                      </span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-gray-500 shrink-0" />
+                  </button>
+                </div>
+              </div>
+
               <div className="bg-[#1a1d27] border border-red-500/10 p-6 rounded-3xl">
                 <h3 className="font-bold mb-4 text-red-500">Danger Zone</h3>
                 <div className="space-y-4">
@@ -2490,6 +2771,13 @@ export default function CreatePOSOrder() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* MENUS VIEW */}
+        {activeView === 'menus' && (
+          <div className="flex-1 h-full overflow-hidden">
+            <MenuManagement warehouses={warehouses as any[]} />
           </div>
         )}
       </div>
@@ -2578,6 +2866,95 @@ export default function CreatePOSOrder() {
                 {createCustomerMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                 Save
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 0. Variant Picker Modal ─────────────────────────────────── */}
+      {variantPickerModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setVariantPickerModal(null)}
+        >
+          <div
+            className="bg-[#1a1d27] border border-white/10 rounded-2xl p-5 w-[420px] max-w-[95vw] shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-purple-600/20 rounded-full p-2">
+                  <Layers className="h-5 w-5 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white">{variantPickerModal.product.product_name}</h3>
+                  <p className="text-xs text-gray-400">Select a variant to add</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setVariantPickerModal(null)}
+                className="text-gray-500 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Variant Grid */}
+            <div className="grid grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1">
+              {variantPickerModal.variants.map((v: any) => {
+                const vPrice = v.sale_price ?? 0;
+                const isZero = vPrice === 0;
+                const vStock = variantStockMap[v.variant_id] ?? null;
+                const vOutOfStock = vStock !== null && vStock <= 0;
+                const vLowStock = vStock !== null && vStock > 0 && vStock <= 5;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => {
+                      setVariantPickerModal(null);
+                      addToCart(v);
+                    }}
+                    className={`group relative bg-[#0f1117] hover:bg-[#22263a] border rounded-xl p-3 text-left transition-all duration-150 hover:shadow-lg active:scale-95
+                      ${vOutOfStock ? 'border-white/5 opacity-60' : 'border-white/5 hover:border-purple-500/50 hover:shadow-purple-500/10'}`}
+                  >
+                    {v.image_url ? (
+                      <img
+                        src={v.image_url}
+                        alt={v.name}
+                        className="w-full h-16 object-cover rounded-lg mb-2 bg-white/5"
+                      />
+                    ) : (
+                      <div className="w-full h-16 rounded-lg mb-2 bg-white/5 flex items-center justify-center">
+                        <Package className="h-6 w-6 text-gray-600" />
+                      </div>
+                    )}
+                    <p className="text-xs font-medium text-white line-clamp-2 leading-tight mb-0.5">
+                      {v.name || variantPickerModal.product.product_name}
+                    </p>
+                    {v.sku && (
+                      <p className="text-[10px] text-gray-500 mb-0.5">{v.sku}</p>
+                    )}
+                    {vStock !== null && (
+                      <p className={`text-[10px] font-medium mb-1 ${
+                        vOutOfStock ? 'text-red-400' : vLowStock ? 'text-amber-400' : 'text-emerald-400'
+                      }`}>
+                        {vOutOfStock ? 'Out of stock' : vLowStock ? `Low: ${vStock}` : `Stock: ${vStock}`}
+                      </p>
+                    )}
+                    <div className="flex items-end justify-between gap-1">
+                      <p className={`text-sm font-bold ${isZero ? 'text-amber-400' : 'text-purple-400'}`}>
+                        {isZero ? 'Custom' : formatPrice(vPrice)}
+                      </p>
+                      {(v.tax_rate ?? 0) > 0 && (
+                        <p className="text-[9px] text-gray-500 leading-none mb-0.5">
+                          {v.tax_rate}% tax
+                        </p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -2903,12 +3280,29 @@ export default function CreatePOSOrder() {
                   </div>
                 )}
                 <div className="flex flex-col gap-3 w-full mt-6">
+                  {paymentSuccess.kotTickets && paymentSuccess.kotTickets.length > 0 && (
+                    <div className="w-full text-left space-y-2">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Tickets</p>
+                      <div className="flex flex-col gap-2 max-h-40 overflow-y-auto">
+                        {paymentSuccess.kotTickets.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => handlePrintKitchenKOTTicket(t.id)}
+                            className="w-full text-left px-3 py-2 rounded-lg bg-white/5 border border-white/10 hover:border-amber-500/40 text-sm text-amber-300 font-mono"
+                          >
+                            Print {t.kot_number_text}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex gap-2 w-full">
                     <button
                       onClick={handlePrintKitchenKOT}
                       className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 font-bold transition-colors border border-amber-500/20"
                     >
-                      <Utensils className="h-4 w-4" /> Kitchen KOT
+                      <Utensils className="h-4 w-4" /> All kitchen KOT
                     </button>
                     <button
                       onClick={handlePrintCustomerBill}
@@ -2948,18 +3342,37 @@ export default function CreatePOSOrder() {
                       { key: 'cash', icon: <Banknote className="h-5 w-5" />, label: 'Cash' },
                       { key: 'card', icon: <CreditCard className="h-5 w-5" />, label: 'Card' },
                       { key: 'upi', icon: <Smartphone className="h-5 w-5" />, label: 'UPI' },
-                      { key: 'split', icon: <Layers className="h-5 w-5" />, label: 'Split' },
-                    ] as { key: PaymentMethod; icon: React.ReactNode; label: string }[]).map(m => (
-                      <button
-                        key={m.key}
-                        onClick={() => setPaymentMethod(m.key)}
-                        className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border transition-all
-                          ${paymentMethod === m.key ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white/5 border-white/5 text-gray-400 hover:border-white/20 hover:text-white'}`}
-                      >
-                        {m.icon}
-                        <span className="text-[10px] font-medium">{m.label}</span>
-                      </button>
-                    ))}
+                      { key: 'credit', icon: <Tag className="h-5 w-5" />, label: 'Credit', customerOnly: true },
+                    ] as { key: PaymentMethod; icon: React.ReactNode; label: string; customerOnly?: boolean }[]).map(m => {
+                      const disabled = m.customerOnly && !selectedCustomer;
+                      return (
+                        <button
+                          key={m.key}
+                          onClick={() => {
+                            if (disabled) {
+                              toast.error('Select a customer to use Credit');
+                              return;
+                            }
+                            setPaymentMethod(m.key);
+                          }}
+                          title={disabled ? 'Requires a selected customer' : undefined}
+                          className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border transition-all relative
+                            ${paymentMethod === m.key
+                              ? 'bg-indigo-600 border-indigo-500 text-white'
+                              : disabled
+                                ? 'bg-white/5 border-white/5 text-gray-600 cursor-not-allowed'
+                                : 'bg-white/5 border-white/5 text-gray-400 hover:border-white/20 hover:text-white'}`}
+                        >
+                          {m.icon}
+                          <span className="text-[10px] font-medium">{m.label}</span>
+                          {disabled && (
+                            <span className="absolute -top-1 -right-1 bg-gray-700 text-gray-400 text-[8px] px-1 rounded-full leading-4">
+                              customer
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {/* Method-specific inputs */}
@@ -3025,45 +3438,19 @@ export default function CreatePOSOrder() {
                     </div>
                   )}
 
-                  {paymentMethod === 'split' && (
-                    <div className="space-y-2">
-                      {splitPayments.map((sp, idx) => (
-                        <div key={idx} className="flex gap-2">
-                          <select
-                            value={sp.method}
-                            onChange={e => {
-                              const updated = [...splitPayments];
-                              updated[idx] = { ...updated[idx], method: e.target.value as any };
-                              setSplitPayments(updated);
-                            }}
-                            className="bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 flex-shrink-0"
-                          >
-                            <option value="cash">Cash</option>
-                            <option value="card">Card</option>
-                            <option value="upi">UPI</option>
-                          </select>
-                          <div className="relative flex-1">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">₹</span>
-                            <input
-                              type="number"
-                              placeholder="Amount"
-                              value={sp.amount}
-                              onChange={e => {
-                                const updated = [...splitPayments];
-                                updated[idx] = { ...updated[idx], amount: e.target.value };
-                                setSplitPayments(updated);
-                              }}
-                              className="w-full bg-white/5 border border-white/10 rounded-xl pl-7 pr-3 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                            />
-                          </div>
-                        </div>
-                      ))}
-                      <div className="flex justify-between text-xs mt-1">
-                        <span className="text-gray-500">Allocated: ₹{splitPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0).toFixed(2)}</span>
-                        <span className={`font-medium ${splitPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0) >= grandTotal ? 'text-green-400' : 'text-amber-400'}`}>
-                          Remaining: ₹{Math.max(0, grandTotal - splitPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)).toFixed(2)}
-                        </span>
+                  {paymentMethod === 'credit' && selectedCustomer && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Tag className="h-4 w-4 text-amber-400 flex-shrink-0" />
+                        <p className="text-sm text-amber-300 font-medium">Credit Sale</p>
                       </div>
+                      <p className="text-xs text-gray-400">
+                        <span className="text-white font-medium">{selectedCustomer.name}</span> will be invoiced{' '}
+                        <span className="text-amber-300 font-medium">{formatPrice(grandTotal)}</span>. No payment collected now.
+                      </p>
+                      {selectedCustomer.phone && (
+                        <p className="text-[10px] text-gray-500">{selectedCustomer.phone}</p>
+                      )}
                     </div>
                   )}
 
@@ -3146,7 +3533,7 @@ export default function CreatePOSOrder() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                       <p className="text-gray-300">Bill No: <span className="text-white font-medium">{historyOrderDetails.receipt_number || '-'}</span></p>
                       <p className="text-gray-300">Order Status: <span className="text-white font-medium">{historyOrderDetails.status || '-'}</span></p>
-                      <p className="text-gray-300">Payment Status: <span className="text-white font-medium">{historyOrderDetails.payment_status || '-'}</span></p>
+                      <p className="text-gray-300">Payment Status: <span className="text-white font-medium">{normalizePaymentStatus(historyOrderDetails.payment_status).label}</span></p>
                       <p className="text-gray-300">Order Source: <span className="text-white font-medium">{historyOrderDetails.order_source || 'pos'}</span></p>
                     </div>
                   </div>

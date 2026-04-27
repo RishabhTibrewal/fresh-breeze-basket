@@ -1,6 +1,6 @@
 # Architecture State Document
 
-**Last Updated:** 2026-04-01 (13:10 IST)
+**Last Updated:** 2026-04-27 (Batch C POS Reports — KOT, POS Pool, Menu performance widgets added)
 **Purpose:** Technical reference for current system architecture, routing patterns, and critical implementation details to prevent architectural mistakes. This document serves as the long-term memory and architectural blueprint for all future AI interactions.
 
 ---
@@ -172,59 +172,39 @@ NODE_ENV=production
 
 ### Frontend → Backend API Flow
 
-```
-┌─────────────────┐
-│  React App      │
-│  (Vercel)       │
-└────────┬────────┘
-         │
-         │ 1. Extract subdomain from hostname
-         │ 2. Send X-Tenant-Subdomain header
-         │ 3. Include Authorization: Bearer <token>
-         │
-         ▼
-┌─────────────────┐
-│  apiClient.ts   │
-│  (Axios)        │
-└────────┬────────┘
-         │
-         │ HTTPS Request
-         │ Headers:
-         │ - X-Tenant-Subdomain: gulffresh
-         │ - Authorization: Bearer <jwt>
-         │
-         ▼
-┌─────────────────┐
-│  nginx          │
-│  (DigitalOcean) │
-└────────┬────────┘
-         │
-         │ Proxy to http://127.0.0.1:5000
-         │ Preserves X-Tenant-Subdomain header
-         │
-         ▼
-┌─────────────────┐
-│  Express API    │
-│  (Port 5000)    │
-└────────┬────────┘
-         │
-         │ 1. resolveTenant middleware
-         │    - Reads X-Tenant-Subdomain header
-         │    - Queries companies table
-         │    - Sets req.companyId
-         │
-         │ 2. Authentication middleware
-         │    - Verifies JWT token
-         │    - Sets req.user
-         │
-         │ 3. Route handler
-         │    - Uses req.companyId for all queries
-         │
-         ▼
-┌─────────────────┐
-│  Supabase       │
-│  (PostgreSQL)   │
-└─────────────────┘
+```mermaid
+sequenceDiagram
+    participant App as React App (Vercel)
+    participant APIClient as apiClient.ts (Axios)
+    participant Nginx as nginx (DigitalOcean)
+    participant API as Express API (Port 5000)
+    participant DB as Supabase (PostgreSQL)
+
+    App->>APIClient: Extract subdomain from hostname
+    Note over APIClient: Set X-Tenant-Subdomain header<br/>Set Authorization: Bearer <jwt>
+    APIClient->>Nginx: HTTPS Request
+    Nginx->>API: Proxy to http://127.0.0.1:5000
+    
+    rect rgb(30, 30, 40)
+    Note over API: 1. resolveTenant middleware
+    API->>DB: Query companies table (using Admin client)
+    DB-->>API: Return tenant data
+    Note over API: Set req.companyId
+    end
+    
+    rect rgb(30, 30, 40)
+    Note over API: 2. Authentication middleware
+    API->>API: Verify JWT token
+    Note over API: Set req.user
+    end
+    
+    rect rgb(30, 30, 40)
+    Note over API: 3. Route handler
+    API->>DB: Execute query with .eq('company_id', req.companyId)
+    DB-->>API: Return isolated data
+    end
+    
+    API-->>App: JSON Response
 ```
 
 ### Backend → Supabase Connection
@@ -427,10 +407,13 @@ fresh-breeze-basket/
    - ✅ **Integrated Sidebar**: Persistent navigation for administrative tasks (History, Customers, etc.) without leaving POS.
    - ✅ **Customer Management**: In-line customer search, creation, and order linking.
    - ✅ **Financial Engine**: Standardized `Subtotal - Discount + Tax` logic with round-off support.
-   - ✅ **Advanced Payments**: Cash tendered/change calculation, UPI reference tracking, and **Split Payments** (Multi-method).
+   - ✅ **Advanced Payments**: Cash tendered/change calculation, UPI reference tracking, and **Credit Payment** (customer-only, maps to `payment_status: 'full_credit'`).
    - ✅ **Fulfillment Types**: Context-aware UI for Dine-In (Table #), Take-Away, and Delivery (Address).
    - ✅ **Product Modifiers**: Support for variant-level add-ons with automated price adjustments.
    - ✅ **Stock Integration**: Direct linkage to `OrderService` for cross-outlet inventory reservation.
+   - ✅ **Multi-Variant Picker Modal**: Single product card per product in the grid; multi-variant products open an in-line modal for variant selection.
+   - ✅ **Live Inventory Display**: Per-product stock counts rendered on sale grid cards (colour-coded: green/amber/red) sourced from `warehouse_inventory`.
+   - ✅ **POS Menu Management**: Create named menus, assign per outlet/warehouse (one active menu per outlet enforced by DB unique constraint), control variant visibility and price overrides. Accessible via "Menus" sidebar item. Tables: `pos_menus`, `pos_menu_outlets`, `pos_menu_items`.
    - ✅ **Secure Reporting**: Authenticated Excel report exports (Daily, Weekly, Monthly, Session) using `apiClient` blobs.
    - ✅ **Live Dashboard**: Dynamic "Top Selling Items" analytics driven by live transaction data.
    - ✅ **Receipt System**: Auto-generated custom receipt numbering (`POS-XXXXXX`) and thermal-ready HTML with **3-column layout** (Item | Qty | Amount) and **Discount % visibility**.
@@ -463,6 +446,343 @@ fresh-breeze-basket/
 - ⚠️ Module defined in config
 - ⚠️ Basic structure in place
 - ⚠️ Full implementation pending
+
+### Recent Changes (2026-04-27) — POS Menu Management, Variant Picker, Inventory Display & Credit Payment
+
+#### POS Menu Management System
+
+##### Objective
+Allow operators to create named menus, assign them per outlet/warehouse, control which product variants appear in the POS sale view, set POS-specific price overrides, and update inventory stock counts — all from within the POS SPA.
+
+##### Database Migration (`20260427_create_pos_menu_tables.sql`)
+Three new tables with RLS scoped to `company_memberships (is_active = TRUE)`:
+- **`pos_menus`**: `id`, `company_id`, `name`, `description`, `created_at`, `updated_at` (auto-updated via trigger `trg_pos_menus_updated_at`).
+- **`pos_menu_outlets`**: `id`, `company_id`, `menu_id → pos_menus`, `warehouse_id → warehouses`. `UNIQUE (company_id, warehouse_id)` enforces one active menu per outlet. Assigning a new menu to an outlet automatically displaces the previous one (upsert on conflict).
+- **`pos_menu_items`**: `id`, `company_id`, `menu_id`, `product_id`, `variant_id` (NOT NULL — always at variant level), `is_visible BOOLEAN DEFAULT TRUE`, `pos_price NUMERIC(12,2)` (NULL = use default sale price), `sort_order INT`. `UNIQUE (menu_id, variant_id)`.
+
+New shared DB function: `public.set_updated_at()` — generic `BEFORE UPDATE` trigger function; attached to `pos_menus` and `pos_menu_items`.
+
+##### Backend
+- **New controller**: `backend/src/controllers/posMenuController.ts`
+- **New routes**: `backend/src/routes/posMenus.ts` — mounted at `/api/pos/menus` in `backend/src/index.ts`
+- All 9 endpoints are behind `protect` middleware:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/pos/menus` | List all menus with outlet assignments |
+| POST | `/api/pos/menus` | Create menu |
+| GET | `/api/pos/menus/active?warehouse_id=` | Active menu + items for outlet (POS sale view) |
+| GET | `/api/pos/menus/:id` | Menu detail + items |
+| PUT | `/api/pos/menus/:id` | Rename / re-describe |
+| DELETE | `/api/pos/menus/:id` | Delete (cascades items + outlet links) |
+| PUT | `/api/pos/menus/:id/items` | Bulk upsert items via `onConflict: 'menu_id,variant_id'` |
+| POST | `/api/pos/menus/:id/outlets/:warehouseId` | Assign outlet (upserts `pos_menu_outlets`) |
+| DELETE | `/api/pos/menus/:id/outlets/:warehouseId` | Unassign outlet |
+
+Inventory stock updates from Menu Management UI use the **existing** `POST /api/inventory/adjust` endpoint (calls `adjust_stock` RPC — creates `stock_movements` + updates `warehouse_inventory.stock_count`). No new inventory endpoint was added.
+
+##### Frontend
+- **New API client**: `frontend/src/api/posMenus.ts` — typed wrapper using `apiClient`.
+- **New component**: `frontend/src/pages/pos/MenuManagement.tsx` — two-panel dark SPA view:
+  - Left panel: menu list with inline create form.
+  - Right panel: editable name/description header, per-outlet toggle row (assign/unassign), warehouse selector for stock view, full product/variant table with visibility checkbox, POS price input (placeholder = default price), inline stock count field (calls `POST /api/inventory/adjust`), sticky "Save Menu Items" bar when draft is dirty.
+- **`frontend/src/pages/pos/CreatePOSOrder.tsx`** changes:
+  - `activeView` type extended to include `'menus'`.
+  - `UtensilsCrossed` icon added to imports; "Menus" entry added to `sidebarItems` array.
+  - `activeMenu` query: `GET /api/pos/menus/active?warehouse_id=<selectedOutlet>` — `staleTime: 30000`, keyed by warehouse ID, invalidated on menu save.
+  - `groupedProducts` useMemo: when `activeMenu` has items, filters variants to those with `is_visible = true` and applies `pos_price` override before the product grid renders.
+  - Menus view rendered **inside** the main content `<div className="flex-1 flex min-w-0 min-h-0 overflow-hidden relative">` — not as a sibling.
+
+**Critical layout rule**: All POS view blocks (`sale`, `history`, `customers`, `menus`, `reports`, `settings`) must be direct children of the main content flex container (line ~1502). Placing a view block outside this div causes it to render as an extra sibling in the root flex row, breaking layout.
+
+#### POS Product Cards — Multi-Variant Picker Modal
+- Product grid now shows **one card per product** (not per variant).
+- Single-variant products → click adds to cart directly.
+- Multi-variant products → click opens `variantPickerModal` (inline modal) showing variant cards with name, SKU, price, and stock count.
+- Multi-variant badge (purple `Layers` icon + count) shown on card; price displays lowest variant price with `+` suffix if range exists.
+
+#### POS Real-Time Inventory Display
+- New query `pos-outlet-inventory` (`GET /api/inventory?warehouse_id=<outlet>&limit=2000`, `staleTime: 60000`) builds a `variantStockMap` keyed by `variant_id`.
+- Stock count displayed on every product card in the sale grid:
+  - **Emerald** `Stock: N` — healthy stock.
+  - **Amber** `Low: N` — stock ≤ 5.
+  - **Red** `Out of stock` — stock ≤ 0; card also dims to 60% opacity.
+  - Multi-variant cards show **sum** across all variants.
+  - No pill shown when warehouse has no inventory record for that variant.
+- Same colour-coded stock labels appear on each variant card inside the variant picker modal.
+
+#### POS Payment — Credit Replaces Split
+- `PaymentMethod` type: `'split'` replaced by `'credit'`.
+- **Credit payment behaviour**:
+  - Only available when a named customer is selected (walk-in customers cannot use credit).
+  - Button is visually greyed-out with a `customer` micro-badge when no customer is selected; clicking shows a toast error.
+  - `handleCharge` guard: hard-blocks mutation and shows toast if credit is selected without a customer.
+  - Payload sends `payment_status: 'full_credit'` (existing enum handled by `OrderService` / `PaymentService` — no backend changes needed).
+  - Credit panel: amber info box showing customer name and amount owed; no cash input.
+- **Anti-hallucination note**: Split payment UI and `split_payments` array state remain in the file (unused) to avoid accidental breakage of unrelated query references; the `PaymentMethod` type no longer includes `'split'`.
+
+#### Anti-Hallucination Ledger Additions
+- `pos_menu_outlets.UNIQUE (company_id, warehouse_id)` — do not add a separate "is_active" boolean to this table; uniqueness constraint IS the "one active menu per outlet" mechanism.
+- `pos_menu_items.variant_id` is NOT NULL — menus always operate at variant level, never product level.
+- `pos_price = NULL` means "use default sale price from `product_prices`" — do not default to 0.
+- POS credit payment maps to `payment_status: 'full_credit'` on the backend, NOT a new payment method string. The backend `OrderService` already handles `full_credit` without creating a payment record.
+- `pos_outlet_inventory.UNIQUE (company_id, warehouse_id, variant_id)` — the pool is scoped to outlet+variant. Do NOT add a separate `is_active` flag; presence of a row means the pool is configured.
+- POS sale deduction is **fallback-safe**: if no `pos_outlet_inventory` row exists for a variant, the system falls through to the existing `warehouse_inventory` SALE movement (backwards compatible).
+- POS controller (`backend/src/controllers/pos.ts`) was previously hardcoding `paymentStatus: 'paid'`. It now reads `payment_status` from the request body, defaulting to `'full_credit'` when `payment_method === 'credit'`, otherwise `'paid'`.
+
+#### KOT (Kitchen Order Tickets) — 2026-04-28
+
+- **Migration**: `backend/src/db/migrations/20260428_kot_system.sql` (also applied via Supabase MCP as `kot_system_20260428`).
+- **Tables** (all tenant-scoped with `company_id`, `outlet_id` = `warehouses.id`): `pos_food_counters`, `pos_kot_settings` (includes required `default_counter_id` per outlet), `product_food_counters` (`UNIQUE (company_id, product_id)`), `pos_kot_sequence_state` (sequence key **excludes** `counter_id`: `company_id`, `outlet_id`, `reset_frequency`, `bucket_start`), `pos_kot_tickets` (`ticket_items_snapshot` JSONB — kitchen source of truth for print/KDS line labels).
+- **Functions**: `kot_local_bucket_start`, `next_kot_number` (SECURITY DEFINER; `GRANT EXECUTE` to `service_role` and `authenticated`).
+- **Default-counter policy**: Unmapped products route to `pos_kot_settings.default_counter_id`. **POS order creation requires** a `pos_kot_settings` row for the resolved outlet (validated in `createPOSOrder` before `OrderService.createOrder`).
+- **Backend**: `backend/src/services/core/KotService.ts`; `backend/src/controllers/kotController.ts`; router `backend/src/routes/posKot.ts` mounted at **`/api/pos/kot`** in `backend/src/index.ts`. `createPOSOrder` generates tickets after `order_items` exist and returns `kot_tickets` on the success payload.
+- **Kitchen print**: `GET /api/invoices/kot/kitchen/:orderId` uses ticket snapshots when `pos_kot_tickets` rows exist; **`GET /api/invoices/kot/ticket/:ticketId/kitchen`** prints a single ticket from JSONB only (`backend/src/routes/invoices.ts`).
+- **Thermal label format**: kitchen KOT and customer bill item lines now render **`Product Name (Variant Name)`** when both exist; if names are identical, only product name is shown; if variant is missing, product name is used. Implemented in:
+  - `backend/src/controllers/invoices.ts` (`formatThermalItemName` used by `generateThermalKOTHTML`)
+  - `backend/src/services/core/KotService.ts` (`kitchen_display_name` snapshot uses same naming rule)
+- **Realtime** ✅ **LIVE** (enabled 2026-04-27 via Supabase MCP migration `enable_realtime_pos_kot_tickets` + `pos_kot_tickets_realtime_replica_identity_full`):
+  - `public.pos_kot_tickets` is in the `supabase_realtime` publication (verified via `pg_publication_tables`).
+  - `REPLICA IDENTITY` is set to **`FULL`** — required for Supabase Realtime to correctly evaluate RLS on `UPDATE`/`DELETE` payloads (old row must be present).
+  - RLS SELECT policy (`pos_kot_tickets_select`) uses `company_memberships` check — only authenticated company members receive events; the Supabase Dashboard inspector will show **zero events** (expected — it has no membership).
+  - KDS channel pattern: `supabase.channel('pos_kot_tickets-${companyId}').on('postgres_changes', { event: '*', schema: 'public', table: 'pos_kot_tickets', filter: 'outlet_id=eq.${outletId}' }, handler).subscribe(status => { if (status === 'SUBSCRIBED') fetchOpenTickets(); })`
+  - **Reconnect refetch is mandatory**: every `SUBSCRIBED` event (first connect AND every reconnect) must trigger `GET /api/pos/kot/tickets?outlet_id=...&status=open` to backfill missed events.
+- **Frontend**: `frontend/src/api/kot.ts`, routes `/pos/kot-settings`, `/pos/kds` in `frontend/src/App.tsx`; POS Settings links in `CreatePOSOrder.tsx`; module sidebar entries in `frontend/src/config/modules.config.tsx` (`pos.sidebarItems`).
+  - `frontend/src/pages/pos/KotSettings.tsx` now uses POS-dark shell styling (`#0f1117` / `#1a1d27`) for visual consistency with terminal pages.
+  - Product mapping UX updated to table format (**Product** | **Counter station**) with a staged-edit model and explicit **Save changes** button (bulk apply), instead of immediate per-row writes.
+
+#### POS Outlet Inventory Pool (2026-04-27)
+
+##### Objective
+Maintain a separate per-outlet stock pool for the POS terminal, distinct from global `warehouse_inventory`. This allows operators to pre-load stock into the POS pool, and POS sales deduct from that pool before touching global inventory.
+
+##### Database
+- **New table**: `public.pos_outlet_inventory` — `id`, `company_id`, `warehouse_id`, `product_id`, `variant_id`, `qty`, `created_at`, `updated_at`. Unique on `(company_id, warehouse_id, variant_id)`. RLS via `company_memberships`. `updated_at` trigger via existing `set_updated_at()`.
+- **Migration**: `backend/src/db/migrations/20260427_create_pos_outlet_inventory.sql`
+- Two new `stock_movements.movement_type` values added: `POS_TRANSFER_IN`, `POS_SALE`.
+- New `stock_movements.source_type` value: `pos_transfer`.
+
+##### Backend
+New `InventoryService` methods:
+- `hasPosPoolRow(warehouseId, variantId)` — checks if a pool row exists.
+- `getPosPoolQty(warehouseId, variantId)` — returns current pool qty.
+- `transferToPosPool(params)` — deducts from `warehouse_inventory` (TRANSFER movement), upserts `pos_outlet_inventory`, logs `POS_TRANSFER_IN` movement.
+- `deductFromPosPool(params)` — decrements `pos_outlet_inventory.qty`, logs `POS_SALE` movement.
+
+New endpoints:
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/api/inventory/pos-pool` | protect | List pos_outlet_inventory rows for company |
+| POST | `/api/inventory/pos-transfer` | protect + adminOnly | Transfer global stock → POS pool |
+
+`OrderService.createOrder` POS deduction block now:
+1. For each item, checks `hasPosPoolRow(outletId, variantId)`.
+2. If pool row exists: calls `deductFromPosPool` (POS_SALE movement, no `warehouse_inventory` touch).
+3. If no pool row: falls through to `handleOrderStockMovement` (SALE movement on `warehouse_inventory`).
+
+##### Frontend
+- `frontend/src/api/inventory.ts`: added `PosPoolItem`, `PosTransferInput`, `PosTransferResponse` types and `inventoryService.getPosPool()`, `inventoryService.transferToPosPool()` helpers.
+- `frontend/src/pages/admin/StockTransfer.tsx`: mode toggle (Standard Transfer | To POS Pool). In POS Pool mode, only source warehouse is selected; on submit calls `POST /inventory/pos-transfer`.
+- `frontend/src/pages/pos/MenuManagement.tsx`: added `pos-outlet-inventory` query and `posPoolMap`. Table now shows two stock columns: **Global** (read-only, colour-coded) and **POS Pool** (current qty + transfer input). Transfer input moves qty from global → POS pool via `transferToPosPool`.
+
+### Recent Changes (2026-04-27) — Batch C POS Reports (KOT, POS Pool & Menu Performance)
+
+#### Objective
+Add 7 new analytical report endpoints and frontend widgets to the existing POS analytics view (`activeView === 'reports'`) covering the new tables introduced in the KOT system release (`pos_kot_tickets`, `pos_food_counters`, `pos_outlet_inventory`, `pos_menu_items`, `pos_menus`).
+
+#### Backend: Service (`backend/src/services/reports/salesReportService.ts`)
+Seven new exported async functions appended (after the Outlet Leaderboard function):
+
+| Function | Source Tables | Key Output |
+|---|---|---|
+| `getKotVolumeByCounter` | `pos_kot_tickets` + `pos_food_counters` | Tickets/day per counter, avg items/ticket, open/completed/cancelled split |
+| `getKotStatusBreakdown` | `pos_kot_tickets` | Total tickets per status (`open`/`preparing`/`ready`/`served`/`cancelled`) |
+| `getKotTopItems` | `pos_kot_tickets.ticket_items_snapshot` (JSONB unnest) | Top ordered items from kitchen perspective (product name, total qty, ticket count) |
+| `getKotThroughput` | `pos_kot_tickets` | Per-day ticket count, avg items per ticket, completion rate |
+| `getPosPoolStock` | `pos_outlet_inventory` | Current POS pool qty per variant per outlet |
+| `getPosPoolMovements` | `stock_movements` (WHERE `movement_type IN ('POS_TRANSFER_IN','POS_SALE')`) | Stock in/out of POS pool per variant |
+| `getMenuItemPerformance` | `pos_menu_items` + `pos_menus` + `order_items` | Per menu-item: ordered count, qty sold, revenue, performance tag (`star`/`hidden_gem`/`ghost`/`invisible`) |
+
+All functions follow the existing `ReportQuery` + `ReportResponse<T>` contract: accept `{ companyId, q: ReportQuery }`, apply `from_date/to_date/branch_ids` filters, return `{ data: Row[], summary: {} }`.
+
+**Critical implementation detail — `getKotTopItems` JSONB unnest:**  
+Because Supabase JS client cannot server-side unnest JSONB arrays, the function fetches raw `ticket_items_snapshot` rows and iterates them in TypeScript. Each element is expected to carry `{ product_id, kitchen_display_name, quantity }` — the snapshot format written by `KotService.generateTickets`.
+
+#### Backend: Controller (`backend/src/controllers/reports/salesReportController.ts`)
+Seven new controller handler functions added (appended before the Dashboard KPIs section):
+`kotVolumeByCounter`, `kotStatusBreakdown`, `kotTopItems`, `kotThroughput`, `posPoolStock`, `posPoolMovements`, `menuItemPerformance` — all follow the same `respond(res, fn(companyId, q))` pattern.
+
+#### Backend: Routes (`backend/src/routes/reports/salesReports.ts`)
+Seven new `GET` routes registered under the existing sales-reports router:
+
+| Route | Handler |
+|---|---|
+| `GET /reports/sales/kot-volume-by-counter` | `kotVolumeByCounter` |
+| `GET /reports/sales/kot-status-breakdown` | `kotStatusBreakdown` |
+| `GET /reports/sales/kot-top-items` | `kotTopItems` |
+| `GET /reports/sales/kot-throughput` | `kotThroughput` |
+| `GET /reports/sales/pos-pool-stock` | `posPoolStock` |
+| `GET /reports/sales/pos-pool-movements` | `posPoolMovements` |
+| `GET /reports/sales/menu-item-performance` | `menuItemPerformance` |
+
+All protected by `protect` + `validateReportQuery` + `requireReportPermission` middleware chain.
+
+#### Frontend: TypeScript Types (`frontend/src/api/reports.ts`)
+Seven new row interfaces added (before the `reportsApi` const):
+- `KotVolumeByCounterRow`, `KotStatusBreakdownRow`, `KotTopItemRow`, `KotThroughputRow`
+- `PosPoolStockRow`, `PosPoolMovementRow`, `MenuItemPerformanceRow`
+
+Seven new typed fetcher entries added to the `reportsApi` export object under the `// KOT & POS Pool & Menu reports (Batch C)` comment group.
+
+#### Frontend: Widget Components (Completed)
+- **`PosAnalyticsBatchCWidgets.tsx`** has been created and fully integrated into the POS reports view.
+- 7 `useQuery` hooks for these endpoints were added to `CreatePOSOrder.tsx` and are passed as props to the widgets.
+- **Client-Side Pagination**: Implemented local pagination (10 items per page with Lucide `ChevronLeft/Right` controls) for the `PosPoolMovementsWidget` and `MenuItemPerformanceWidget` to manage large result sets efficiently without backend cursor pagination.
+
+#### Backend Bug Fixes & Refinements
+- **`getKotTopItems`**: Updated to parse `kitchen_display_name` instead of legacy `product_name`/`variant_name` fields from the JSONB snapshot, resolving empty data issues.
+- **`getKotThroughput`**: Added the `'served'` status to the filter (alongside `completed`/`done`) to accurately capture tickets processed by the Kitchen KDS.
+- **`getPosPoolMovements` (Timestamp Fix)**: Resolved an issue where timestamps were displaying as `05:30` (UTC offset default) by returning the full ISO string from the backend instead of truncating it by splitting at `'T'`.
+- **Atomic POS Inventory Transfers (`transfer_to_pos_pool` RPC)**: Replaced sequential Node.js-based inventory transfers with a PostgreSQL RPC (`public.transfer_to_pos_pool`) to eliminate race conditions and partial state updates. The RPC handles global stock validation, ledger entries, and `pos_outlet_inventory` upserts in a single transaction. `InventoryService.ts` was refactored to consume this RPC natively, avoiding dependency on Node.js `crypto` for UUIDs.
+
+```mermaid
+sequenceDiagram
+    participant C as Client (Frontend)
+    participant API as Inventory Controller
+    participant IS as Inventory Service
+    participant DB as Supabase DB
+
+    C->>API: POST /api/inventory/pos-pool/transfer
+    API->>IS: transferToPosPool(params)
+    IS->>DB: rpc('transfer_to_pos_pool', params)
+    
+    rect rgb(0, 50, 0)
+    Note over DB: Atomic Transaction Execution
+    DB->>DB: Check global stock capacity
+    DB->>DB: UPDATE warehouse_inventory (Deduct)
+    DB->>DB: INSERT stock_movements (Global Out)
+    DB->>DB: UPSERT pos_outlet_inventory (Add)
+    DB->>DB: INSERT stock_movements (POS In)
+    end
+    
+    DB-->>IS: Return success & movements
+    IS-->>API: Return response
+    API-->>C: 200 OK Response
+```
+
+#### Anti-Hallucination Notes
+- The 7 frontend widgets are fully visible and active in the UI under `activeView === 'reports'`.
+- `getKotTopItems` does **not** use a SQL UNNEST — it fetches full rows and unnests `ticket_items_snapshot` in TypeScript. Do not attempt to write a Supabase `.rpc()` call for this.
+- `MenuItemPerformanceRow.performance_tag` is a frontend-computed classification, NOT a DB column.
+- The pagination for Batch C table widgets is handled entirely on the client-side using `slice()`.
+
+---
+
+### Recent Changes (2026-04-27) — POS Order Creation Performance Optimization
+
+#### Problem
+The `POST /api/pos/orders` endpoint ("Confirm Payment") was taking **15–25 seconds** to respond with a 4-item cart. Root cause: **~20+ sequential awaited database round trips**, each adding 300–800ms network latency between DigitalOcean and Supabase.
+
+#### Full Call Chain (Before & After)
+
+**Before (Sequential, ~20+ round trips, 15-25s latency):**
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as POS Controller
+    participant OS as Order Service
+    participant KS as KOT Service
+    participant DB as Database
+    
+    C->>API: POST /api/pos/orders
+    API->>DB: resolvePosOutletId()
+    API->>DB: hasKotSettingsForOutlet()
+    API->>OS: createOrder()
+    
+    rect rgb(50, 0, 0)
+    Note over OS, DB: Sequential Item Processing (N Items)
+    OS->>DB: SELECT products
+    OS->>DB: hasPosPoolRow()
+    end
+    
+    OS->>DB: INSERT orders
+    OS->>DB: INSERT order_items
+    OS->>DB: deductFromPosPool() / handleOrderStockMovement()
+    
+    OS->>KS: generateTickets()
+    rect rgb(50, 50, 0)
+    Note over KS, DB: Redundant & Sequential Queries
+    KS->>DB: SELECT pos_kot_settings
+    KS->>DB: SELECT pos_food_counters
+    KS->>DB: SELECT products
+    KS->>DB: RPC next_kot_number
+    end
+    
+    API->>DB: getOrderById() (Heavy JOIN)
+    API-->>C: Response (Full Order)
+```
+
+**After (Batched & Parallel, ~8-10 round trips, 2-4s latency):**
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as POS Controller
+    participant OS as Order Service
+    participant KS as KOT Service
+    participant DB as Database
+    
+    C->>API: POST /api/pos/orders
+    API->>DB: resolvePosOutletId() & getKotSettings (Prefetch)
+    
+    API->>OS: createOrder()
+    rect rgb(0, 50, 0)
+    Note over OS, DB: Batched Queries
+    OS->>DB: SELECT products WHERE id IN (...)
+    OS->>DB: SELECT pos_outlet_inventory WHERE variant_id IN (...)
+    end
+    
+    OS->>DB: INSERT orders & order_items
+    OS->>DB: deductFromPosPool() / handleOrderStockMovement()
+    
+    OS->>KS: generateTickets(prefetchedSettings)
+    rect rgb(0, 50, 0)
+    Note over KS, DB: Parallel Fetch
+    KS->>DB: Promise.all([counters, products, variants, modifiers])
+    KS->>DB: RPC next_kot_number
+    end
+    
+    API-->>C: Response { id, receipt_number, kot_tickets }
+```
+
+
+#### Fixes Applied (2026-04-27)
+
+**`backend/src/services/core/OrderService.ts`**:
+1. **Batch product fetch**: All `SELECT products` calls consolidated into a single `IN` query keyed by all `productId`s in the cart — eliminates N separate round trips.
+2. **Parallel per-item resolution**: `validatePrice` and `calculateLineTotal` now run **in parallel** per item via `Promise.all(items.map(...))` — halves item-level latency.
+3. **Batch POS pool check**: All `hasPosPoolRow` calls replaced with a **single `IN` query** against `pos_outlet_inventory` — eliminates N separate round trips.
+
+**`backend/src/services/core/KotService.ts`**:
+4. **Prefetched settings**: `generateTickets()` now accepts optional `prefetchedSettings` param; when provided, the internal `SELECT pos_kot_settings` is skipped entirely.
+5. **Parallel lookup queries**: The 4 independent queries (`product_food_counters`, `pos_food_counters`, `products`, `product_variants`, `modifiers`) run **in parallel** via `Promise.all` — reduces ~4 sequential RTTs to ~1.
+
+**`backend/src/controllers/pos.ts`**:
+6. **Settings prefetch + reuse**: `pos_kot_settings` fetched once at the top of the handler (replaces the `hasKotSettingsForOutlet` check), then passed to `KotService.generateTickets` as `prefetchedSettings`.
+7. **Removed `getOrderById` from response**: The expensive `getOrderById` join (orders + order_items + products + variants + outlet) is eliminated from the success response. Response now returns lightweight `{ id, receipt_number, kot_tickets }` — all data already computed in-flight.
+
+#### Impact
+| Metric | Before | After |
+|---|---|---|  
+| DB round trips (4-item cart) | ~20–25 sequential | ~8–10 (most parallel) |
+| Estimated p95 latency | 15–25s | **2–4s** |
+
+#### Anti-Hallucination Notes
+- `createPOSOrder` response shape **changed**: it no longer returns the full `order` object with nested `order_items`, `product`, `variant`, `outlet`. It returns `{ id, receipt_number, kot_tickets }`. Frontend `CreatePOSOrder.tsx` must not destructure the old shape for the success modal.
+- `KotService.generateTickets` now has an optional `prefetchedSettings` parameter — always pass it from `pos.ts` to avoid the redundant DB call.
+- The `hasPosPoolRow` method on `InventoryService` still exists and is correct; it is simply no longer called in the POS hot path (replaced by the batch `IN` query inline in `OrderService.createOrder`).
+
+---
 
 ### Recent Changes (2026-04-22) — Global Profiles + Membership Tenant Source
 

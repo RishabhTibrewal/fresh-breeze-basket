@@ -166,6 +166,8 @@ const CreateQuotation = lazy(() => import("./pages/sales/CreateQuotation"));
 const SalesCreditNotes = lazy(() => import("./pages/sales/CreditNotes"));
 const CreateCreditNote = lazy(() => import("./pages/sales/CreateCreditNote"));
 const CreatePOSOrder = lazy(() => import("./pages/pos/CreatePOSOrder"));
+const PosKotSettings = lazy(() => import("./pages/pos/KotSettings"));
+const KitchenKDS = lazy(() => import("./pages/pos/KitchenKDS"));
 
 // Shared order pages
 const CreateReturnOrderPage = lazy(() => import("./pages/orders/CreateReturnOrderPage"));
@@ -350,6 +352,8 @@ const App: React.FC = () => {
                     
                     {/* POS Routes */}
                     <Route path="/pos" element={<ProtectedRoute><CreatePOSOrder /></ProtectedRoute>} />
+                    <Route path="/pos/kot-settings" element={<ProtectedRoute><PosKotSettings /></ProtectedRoute>} />
+                    <Route path="/pos/kds" element={<ProtectedRoute><KitchenKDS /></ProtectedRoute>} />
                     
                     {/* Module Routes with Contextual Sidebar */}
                     {/* Inventory Module */}

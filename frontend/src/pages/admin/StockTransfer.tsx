@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Package, Warehouse, Plus, Trash2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Package, Warehouse, Plus, Trash2, AlertCircle, ShoppingCart } from 'lucide-react';
 import { inventoryService, TransferStockItem } from '@/api/inventory';
 import { warehousesService } from '@/api/warehouses';
 import { productsService, Product } from '@/api/products';
@@ -34,10 +34,13 @@ interface TransferItem {
   availableStock?: number;
 }
 
+type TransferMode = 'standard' | 'pos_pool';
+
 export default function StockTransfer() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
+  const [transferMode, setTransferMode] = useState<TransferMode>('standard');
   const [currentStep, setCurrentStep] = useState(1);
   const [sourceWarehouseId, setSourceWarehouseId] = useState<string | null>(null);
   const [destinationWarehouseId, setDestinationWarehouseId] = useState<string | null>(null);
@@ -120,6 +123,14 @@ export default function StockTransfer() {
     setItems(updatedItems);
   };
 
+  const resetForm = () => {
+    setSourceWarehouseId(null);
+    setDestinationWarehouseId(null);
+    setItems([]);
+    setNotes('');
+    setCurrentStep(1);
+  };
+
   const transferMutation = useMutation({
     mutationFn: (transferData: {
       source_warehouse_id: string;
@@ -131,12 +142,7 @@ export default function StockTransfer() {
       queryClient.invalidateQueries({ queryKey: ['warehouse-inventory'] });
       queryClient.invalidateQueries({ queryKey: ['product-stock'] });
       toast.success('Stock transferred successfully');
-      // Reset form
-      setSourceWarehouseId(null);
-      setDestinationWarehouseId(null);
-      setItems([]);
-      setNotes('');
-      setCurrentStep(1);
+      resetForm();
       navigate('/inventory/warehouses');
     },
     onError: (error: any) => {
@@ -144,14 +150,33 @@ export default function StockTransfer() {
     },
   });
 
+  const posPoolMutation = useMutation({
+    mutationFn: (data: { warehouse_id: string; items: TransferStockItem[]; notes?: string }) =>
+      inventoryService.transferToPosPool(data),
+    onSuccess: (_res, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['warehouse-inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['pos-outlet-inventory', vars.warehouse_id] });
+      queryClient.invalidateQueries({ queryKey: ['pos-menu-inventory'] });
+      toast.success('Stock moved to POS pool successfully');
+      resetForm();
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || error.message || 'Failed to move stock to POS pool');
+    },
+  });
 
   const handleRemoveItem = (index: number) => {
     setItems(items.filter((_, i) => i !== index));
   };
 
   const handleSubmit = () => {
-    if (!sourceWarehouseId || !destinationWarehouseId) {
-      toast.error('Please select source and destination warehouses');
+    if (!sourceWarehouseId) {
+      toast.error('Please select a source warehouse');
+      return;
+    }
+
+    if (transferMode === 'standard' && !destinationWarehouseId) {
+      toast.error('Please select a destination warehouse');
       return;
     }
 
@@ -160,16 +185,28 @@ export default function StockTransfer() {
       return;
     }
 
-    transferMutation.mutate({
-      source_warehouse_id: sourceWarehouseId,
-      destination_warehouse_id: destinationWarehouseId,
-      items: items.map(item => ({
-        product_id: item.product_id,
-        variant_id: item.variant_id,
-        quantity: item.quantity,
-      })),
-      notes: notes || undefined,
-    });
+    if (transferMode === 'pos_pool') {
+      posPoolMutation.mutate({
+        warehouse_id: sourceWarehouseId,
+        items: items.map(item => ({
+          product_id: item.product_id,
+          variant_id: item.variant_id,
+          quantity: item.quantity,
+        })),
+        notes: notes || undefined,
+      });
+    } else {
+      transferMutation.mutate({
+        source_warehouse_id: sourceWarehouseId,
+        destination_warehouse_id: destinationWarehouseId!,
+        items: items.map(item => ({
+          product_id: item.product_id,
+          variant_id: item.variant_id,
+          quantity: item.quantity,
+        })),
+        notes: notes || undefined,
+      });
+    }
   };
 
   const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
@@ -187,9 +224,47 @@ export default function StockTransfer() {
         </Button>
         <h1 className="text-3xl font-bold">Stock Transfer</h1>
         <p className="text-muted-foreground mt-1">
-          Transfer stock between warehouses
+          Transfer stock between warehouses or load the POS outlet pool
         </p>
       </div>
+
+      {/* Mode toggle */}
+      <div className="flex rounded-lg border border-border overflow-hidden mb-6 w-fit">
+        <button
+          onClick={() => { setTransferMode('standard'); resetForm(); }}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors',
+            transferMode === 'standard'
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-background text-muted-foreground hover:bg-muted'
+          )}
+        >
+          <Warehouse className="h-4 w-4" />
+          Standard Transfer
+        </button>
+        <button
+          onClick={() => { setTransferMode('pos_pool'); resetForm(); }}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors border-l border-border',
+            transferMode === 'pos_pool'
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-background text-muted-foreground hover:bg-muted'
+          )}
+        >
+          <ShoppingCart className="h-4 w-4" />
+          To POS Pool
+        </button>
+      </div>
+
+      {transferMode === 'pos_pool' && (
+        <Alert className="mb-6">
+          <ShoppingCart className="h-4 w-4" />
+          <AlertDescription>
+            <strong>POS Pool Mode:</strong> Stock will be deducted from the selected warehouse's global inventory and added to its dedicated POS pool. POS sales will draw from this pool first.
+          </AlertDescription>
+        </Alert>
+      )}
+
 
       {/* Step Indicator */}
       {isMobile && (
@@ -228,7 +303,9 @@ export default function StockTransfer() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Warehouse className="h-5 w-5" />
-                {isMobile ? 'Step 1: Select Source Warehouse' : 'Source Warehouse'}
+                {isMobile
+                  ? `Step 1: Select ${transferMode === 'pos_pool' ? 'Outlet / Warehouse' : 'Source Warehouse'}`
+                  : transferMode === 'pos_pool' ? 'Outlet / Warehouse (POS Pool)' : 'Source Warehouse'}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -237,7 +314,7 @@ export default function StockTransfer() {
                 onSelect={(id) => {
                   setSourceWarehouseId(id);
                   if (isMobile && id) {
-                    setTimeout(() => setCurrentStep(2), 100);
+                    setTimeout(() => setCurrentStep(transferMode === 'pos_pool' ? 2 : 2), 100);
                   }
                 }}
               />
@@ -245,8 +322,8 @@ export default function StockTransfer() {
           </Card>
         )}
 
-        {/* Destination Warehouse */}
-        {(!isMobile || (isMobile && sourceWarehouseId && currentStep >= 2)) && (
+        {/* Destination Warehouse — standard mode only */}
+        {transferMode === 'standard' && (!isMobile || (isMobile && sourceWarehouseId && currentStep >= 2)) && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -277,6 +354,23 @@ export default function StockTransfer() {
                 }}
                 filterActive
               />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* POS Pool destination label */}
+        {transferMode === 'pos_pool' && sourceWarehouseId && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShoppingCart className="h-5 w-5" />
+                Destination: POS Outlet Pool
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Stock will be moved into the POS pool for the selected outlet above. It will be tracked separately from the global warehouse stock and will be deducted on each POS sale.
+              </p>
             </CardContent>
           </Card>
         )}
@@ -467,13 +561,18 @@ export default function StockTransfer() {
               onClick={handleSubmit}
               disabled={
                 transferMutation.isPending ||
+                posPoolMutation.isPending ||
                 !sourceWarehouseId ||
-                !destinationWarehouseId ||
+                (transferMode === 'standard' && !destinationWarehouseId) ||
                 items.length === 0
               }
               className={isMobile ? 'h-12' : ''}
             >
-              {transferMutation.isPending ? 'Transferring...' : `Transfer ${totalItems} Units`}
+              {(transferMutation.isPending || posPoolMutation.isPending)
+                ? 'Processing...'
+                : transferMode === 'pos_pool'
+                  ? `Move ${totalItems} Units to POS Pool`
+                  : `Transfer ${totalItems} Units`}
             </Button>
           </div>
         </div>

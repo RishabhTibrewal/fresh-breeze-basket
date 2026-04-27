@@ -1940,3 +1940,606 @@ export async function getOutletLeaderboard(q: ReportQuery, companyId: string) {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// KOT REPORT BATCH — sources: pos_kot_tickets, pos_food_counters
+// ---------------------------------------------------------------------------
+
+// 20. KOT Volume by Counter
+// ---------------------------------------------------------------------------
+export interface KotVolumeByCounterRow {
+  counter_id: string;
+  counter_name: string;
+  outlet_id: string;
+  outlet_name: string;
+  total_tickets: number;
+  open_tickets: number;
+  completed_tickets: number;
+  voided_tickets: number;
+  avg_items_per_ticket: number;
+  total_items: number;
+}
+
+export async function getKotVolumeByCounter(q: ReportQuery, companyId: string) {
+  // Fetch tickets in range
+  let ticketQuery = db()
+    .from('pos_kot_tickets')
+    .select('id, counter_id, outlet_id, status, ticket_items_snapshot, created_at')
+    .eq('company_id', companyId)
+    .gte('created_at', q.from_date)
+    .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.branch_ids?.length) ticketQuery = ticketQuery.in('outlet_id', q.branch_ids);
+
+  const { data: tickets, error: te } = await ticketQuery;
+  if (te) throw toServiceError('KOT volume query', te);
+
+  // Fetch counters + outlets
+  const { data: counters, error: ce } = await db()
+    .from('pos_food_counters')
+    .select('id, name, outlet_id, warehouses:outlet_id(name)')
+    .eq('company_id', companyId);
+  if (ce) throw toServiceError('KOT counters query', ce);
+
+  const counterMap = new Map<string, any>(
+    (counters ?? []).map((c: any) => [c.id, c])
+  );
+
+  // Aggregate
+  const buckets = new Map<string, {
+    counter: any;
+    total: number;
+    open: number;
+    completed: number;
+    voided: number;
+    totalItems: number;
+  }>();
+
+  (tickets ?? []).forEach((t: any) => {
+    const key = t.counter_id ?? 'unknown';
+    if (!buckets.has(key)) {
+      buckets.set(key, { counter: counterMap.get(key) ?? null, total: 0, open: 0, completed: 0, voided: 0, totalItems: 0 });
+    }
+    const b = buckets.get(key)!;
+    b.total += 1;
+    if (t.status === 'open' || t.status === 'pending') b.open += 1;
+    else if (t.status === 'completed' || t.status === 'done') b.completed += 1;
+    else if (t.status === 'voided' || t.status === 'cancelled') b.voided += 1;
+    const items = Array.isArray(t.ticket_items_snapshot) ? t.ticket_items_snapshot.length : 0;
+    b.totalItems += items;
+  });
+
+  const rows: KotVolumeByCounterRow[] = Array.from(buckets.entries())
+    .map(([cid, b]) => ({
+      counter_id: cid,
+      counter_name: b.counter?.name ?? 'Unknown Counter',
+      outlet_id: b.counter?.outlet_id ?? '',
+      outlet_name: (b.counter?.warehouses as any)?.name ?? '—',
+      total_tickets: b.total,
+      open_tickets: b.open,
+      completed_tickets: b.completed,
+      voided_tickets: b.voided,
+      avg_items_per_ticket: b.total > 0 ? +(b.totalItems / b.total).toFixed(2) : 0,
+      total_items: b.totalItems,
+    }))
+    .sort((a, b) => b.total_tickets - a.total_tickets);
+
+  const total = rows.reduce((s, r) => s + r.total_tickets, 0);
+  const completed = rows.reduce((s, r) => s + r.completed_tickets, 0);
+  const paginated = rows.slice((q.page - 1) * q.page_size, q.page * q.page_size);
+
+  return {
+    rows: paginated,
+    total: rows.length,
+    summary: {
+      total_tickets: total,
+      total_completed: completed,
+      completion_rate_pct: total > 0 ? +((completed / total) * 100).toFixed(1) : 0,
+      counters_active: rows.length,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 21. KOT Ticket Status Breakdown
+// ---------------------------------------------------------------------------
+export interface KotStatusBreakdownRow {
+  outlet_id: string;
+  outlet_name: string;
+  status: string;
+  ticket_count: number;
+  share_pct: number;
+}
+
+export async function getKotStatusBreakdown(q: ReportQuery, companyId: string) {
+  let query = db()
+    .from('pos_kot_tickets')
+    .select('outlet_id, status, warehouses:outlet_id(name), created_at')
+    .eq('company_id', companyId)
+    .gte('created_at', q.from_date)
+    .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.branch_ids?.length) query = query.in('outlet_id', q.branch_ids);
+
+  const { data, error } = await query;
+  if (error) throw toServiceError('KOT status breakdown query', error);
+
+  // Bucket by outlet+status
+  const buckets = new Map<string, { outlet_id: string; outlet_name: string; status: string; count: number }>();
+  let grandTotal = 0;
+
+  (data ?? []).forEach((t: any) => {
+    const key = `${t.outlet_id}::${t.status}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        outlet_id: t.outlet_id,
+        outlet_name: (t.warehouses as any)?.name ?? '—',
+        status: t.status ?? 'unknown',
+        count: 0,
+      });
+    }
+    buckets.get(key)!.count += 1;
+    grandTotal += 1;
+  });
+
+  const rows: KotStatusBreakdownRow[] = Array.from(buckets.values())
+    .map(b => ({
+      outlet_id: b.outlet_id,
+      outlet_name: b.outlet_name,
+      status: b.status,
+      ticket_count: b.count,
+      share_pct: grandTotal > 0 ? +((b.count / grandTotal) * 100).toFixed(1) : 0,
+    }))
+    .sort((a, b) => b.ticket_count - a.ticket_count);
+
+  const openCount = rows.filter(r => r.status === 'open' || r.status === 'pending')
+    .reduce((s, r) => s + r.ticket_count, 0);
+
+  const paginated = rows.slice((q.page - 1) * q.page_size, q.page * q.page_size);
+  return {
+    rows: paginated,
+    total: rows.length,
+    summary: {
+      total_tickets: grandTotal,
+      open_tickets: openCount,
+      open_rate_pct: grandTotal > 0 ? +((openCount / grandTotal) * 100).toFixed(1) : 0,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 22. KOT Top Items (JSONB analysis)
+// ---------------------------------------------------------------------------
+export interface KotTopItemRow {
+  product_id: string;
+  product_name: string;
+  variant_name: string;
+  total_qty: number;
+  ticket_count: number;
+  avg_qty_per_ticket: number;
+}
+
+export async function getKotTopItems(q: ReportQuery, companyId: string) {
+  let query = db()
+    .from('pos_kot_tickets')
+    .select('ticket_items_snapshot, created_at')
+    .eq('company_id', companyId)
+    .gte('created_at', q.from_date)
+    .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.branch_ids?.length) query = query.in('outlet_id', q.branch_ids);
+
+  const { data, error } = await query;
+  if (error) throw toServiceError('KOT top items query', error);
+
+  // Unnest JSONB ticket_items_snapshot — each element expected:
+  // { product_id, product_name, variant_name, quantity }
+  const buckets = new Map<string, {
+    product_id: string; product_name: string; variant_name: string;
+    totalQty: number; tickets: number;
+  }>();
+
+  (data ?? []).forEach((t: any) => {
+    const items = Array.isArray(t.ticket_items_snapshot) ? t.ticket_items_snapshot : [];
+    items.forEach((item: any) => {
+      const pid = item.product_id ?? item.variant_id ?? 'unknown';
+      const key = `${pid}::${item.kitchen_display_name ?? ''}`;
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          product_id: pid,
+          product_name: item.kitchen_display_name ?? '—',
+          variant_name: '—',
+          totalQty: 0,
+          tickets: 0,
+        });
+      }
+      const b = buckets.get(key)!;
+      b.totalQty += Number(item.quantity ?? 1);
+      b.tickets += 1;
+    });
+  });
+
+  let rows: KotTopItemRow[] = Array.from(buckets.values())
+    .map(b => ({
+      product_id: b.product_id,
+      product_name: b.product_name,
+      variant_name: b.variant_name,
+      total_qty: b.totalQty,
+      ticket_count: b.tickets,
+      avg_qty_per_ticket: b.tickets > 0 ? +(b.totalQty / b.tickets).toFixed(2) : 0,
+    }))
+    .sort((a, b) => b.total_qty - a.total_qty);
+
+  if (q.search) {
+    const s = q.search.toLowerCase();
+    rows = rows.filter(r => r.product_name.toLowerCase().includes(s));
+  }
+
+  const paginated = rows.slice((q.page - 1) * q.page_size, q.page * q.page_size);
+  return {
+    rows: paginated,
+    total: rows.length,
+    summary: {
+      unique_items: rows.length,
+      total_qty_fired: rows.reduce((s, r) => s + r.total_qty, 0),
+      top_item: rows[0]?.product_name ?? '—',
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 23. KOT Throughput / Fulfilment Time (created_at → updated_at when completed)
+// ---------------------------------------------------------------------------
+export interface KotThroughputRow {
+  counter_id: string;
+  counter_name: string;
+  outlet_name: string;
+  completed_tickets: number;
+  avg_fulfilment_min: number;
+  min_fulfilment_min: number;
+  max_fulfilment_min: number;
+}
+
+export async function getKotThroughput(q: ReportQuery, companyId: string) {
+  let query = db()
+    .from('pos_kot_tickets')
+    .select('counter_id, outlet_id, status, created_at, updated_at, warehouses:outlet_id(name)')
+    .eq('company_id', companyId)
+    .in('status', ['completed', 'done', 'served'])
+    .gte('created_at', q.from_date)
+    .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.branch_ids?.length) query = query.in('outlet_id', q.branch_ids);
+
+  const { data: tickets, error: te } = await query;
+  if (te) throw toServiceError('KOT throughput query', te);
+
+  const { data: counters } = await db()
+    .from('pos_food_counters')
+    .select('id, name')
+    .eq('company_id', companyId);
+  const counterMap = new Map<string, string>(
+    (counters ?? []).map((c: any) => [c.id, c.name])
+  );
+
+  const buckets = new Map<string, {
+    outlet_name: string;
+    durations: number[];
+  }>();
+
+  (tickets ?? []).forEach((t: any) => {
+    if (!t.created_at || !t.updated_at) return;
+    const diffMin = (new Date(t.updated_at).getTime() - new Date(t.created_at).getTime()) / 60000;
+    if (diffMin < 0 || diffMin > 480) return; // ignore negative or >8h (data anomalies)
+    const key = t.counter_id ?? 'unknown';
+    if (!buckets.has(key)) {
+      buckets.set(key, { outlet_name: (t.warehouses as any)?.name ?? '—', durations: [] });
+    }
+    buckets.get(key)!.durations.push(diffMin);
+  });
+
+  const rows: KotThroughputRow[] = Array.from(buckets.entries())
+    .map(([cid, b]) => {
+      const avg = b.durations.length > 0
+        ? +(b.durations.reduce((s, d) => s + d, 0) / b.durations.length).toFixed(1)
+        : 0;
+      return {
+        counter_id: cid,
+        counter_name: counterMap.get(cid) ?? 'Unknown Counter',
+        outlet_name: b.outlet_name,
+        completed_tickets: b.durations.length,
+        avg_fulfilment_min: avg,
+        min_fulfilment_min: b.durations.length > 0 ? +Math.min(...b.durations).toFixed(1) : 0,
+        max_fulfilment_min: b.durations.length > 0 ? +Math.max(...b.durations).toFixed(1) : 0,
+      };
+    })
+    .sort((a, b) => a.avg_fulfilment_min - b.avg_fulfilment_min);
+
+  const allDurations = rows.flatMap(r => Array(r.completed_tickets).fill(r.avg_fulfilment_min));
+  const overallAvg = allDurations.length > 0
+    ? +(allDurations.reduce((s, d) => s + d, 0) / allDurations.length).toFixed(1)
+    : 0;
+
+  const paginated = rows.slice((q.page - 1) * q.page_size, q.page * q.page_size);
+  return {
+    rows: paginated,
+    total: rows.length,
+    summary: {
+      counters_measured: rows.length,
+      total_completed: rows.reduce((s, r) => s + r.completed_tickets, 0),
+      overall_avg_min: overallAvg,
+      fastest_counter: rows[0]?.counter_name ?? '—',
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// POS INVENTORY POOL REPORTS — pos_outlet_inventory, stock_movements
+// ---------------------------------------------------------------------------
+
+// 24. POS Pool Stock Levels
+// ---------------------------------------------------------------------------
+export interface PosPoolStockRow {
+  variant_id: string;
+  product_name: string;
+  variant_name: string;
+  sku: string;
+  outlet_id: string;
+  outlet_name: string;
+  qty: number;
+  stock_status: 'ok' | 'low' | 'zero' | 'negative';
+}
+
+export async function getPosPoolStockLevels(q: ReportQuery, companyId: string) {
+  let query = db()
+    .from('pos_outlet_inventory')
+    .select(`
+      variant_id, warehouse_id, qty,
+      warehouses:warehouse_id(name),
+      product_variants:variant_id(id, name, sku, product_id, products:product_id(name))
+    `)
+    .eq('company_id', companyId);
+
+  if (q.branch_ids?.length) query = query.in('warehouse_id', q.branch_ids);
+  if (q.search) query = query.ilike('product_variants.sku', `%${q.search}%`);
+
+  const { data, error } = await query;
+  if (error) throw toServiceError('POS pool stock query', error);
+
+  let rows: PosPoolStockRow[] = (data ?? []).map((r: any) => {
+    const qty = Number(r.qty ?? 0);
+    const status: PosPoolStockRow['stock_status'] =
+      qty < 0 ? 'negative' : qty === 0 ? 'zero' : qty < 5 ? 'low' : 'ok';
+    const variant = r.product_variants as any;
+    return {
+      variant_id: r.variant_id,
+      product_name: variant?.products?.name ?? '—',
+      variant_name: variant?.name ?? '—',
+      sku: variant?.sku ?? '—',
+      outlet_id: r.warehouse_id,
+      outlet_name: (r.warehouses as any)?.name ?? '—',
+      qty,
+      stock_status: status,
+    };
+  });
+
+  // Filter by search on product/variant name (JS-side since nested ilike is limited)
+  if (q.search) {
+    const s = q.search.toLowerCase();
+    rows = rows.filter(r =>
+      r.product_name.toLowerCase().includes(s) ||
+      r.variant_name.toLowerCase().includes(s) ||
+      r.sku.toLowerCase().includes(s)
+    );
+  }
+
+  rows.sort((a, b) => a.qty - b.qty); // show lowest stock first
+
+  const summary = {
+    total_variants: rows.length,
+    zero_stock_items: rows.filter(r => r.qty <= 0).length,
+    low_stock_items: rows.filter(r => r.stock_status === 'low').length,
+    negative_items: rows.filter(r => r.stock_status === 'negative').length,
+  };
+
+  const paginated = rows.slice((q.page - 1) * q.page_size, q.page * q.page_size);
+  return { rows: paginated, total: rows.length, summary };
+}
+
+// ---------------------------------------------------------------------------
+// 25. POS Pool Movement Log
+// ---------------------------------------------------------------------------
+export interface PosPoolMovementRow {
+  movement_id: string;
+  movement_date: string;
+  movement_type: string;
+  product_name: string;
+  variant_name: string;
+  sku: string;
+  outlet_name: string;
+  qty_change: number;
+  reference_id: string;
+  notes: string;
+}
+
+export async function getPosPoolMovements(q: ReportQuery, companyId: string) {
+  let query = db()
+    .from('stock_movements')
+    .select(`
+      id, created_at, movement_type, quantity, reference_id, notes,
+      outlet_id,
+      warehouses:outlet_id(name),
+      product_variants:variant_id(id, name, sku, product_id, products:product_id(name))
+    `, { count: 'exact' })
+    .eq('company_id', companyId)
+    .in('movement_type', ['POS_SALE', 'POS_TRANSFER_IN', 'POS_ADJUSTMENT'])
+    .gte('created_at', q.from_date)
+    .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.branch_ids?.length) query = query.in('outlet_id', q.branch_ids);
+
+  query = query
+    .order('created_at', { ascending: false })
+    .range((q.page - 1) * q.page_size, q.page * q.page_size - 1);
+
+  const { data, count, error } = await query;
+  if (error) throw toServiceError('POS pool movements query', error);
+
+  const rows: PosPoolMovementRow[] = (data ?? []).map((m: any) => {
+    const v = m.product_variants as any;
+    return {
+      movement_id: m.id,
+      movement_date: m.created_at ?? '',
+      movement_type: m.movement_type,
+      product_name: v?.products?.name ?? '—',
+      variant_name: v?.name ?? '—',
+      sku: v?.sku ?? '—',
+      outlet_name: (m.warehouses as any)?.name ?? '—',
+      qty_change: Number(m.quantity),
+      reference_id: m.reference_id ?? '—',
+      notes: m.notes ?? '',
+    };
+  });
+
+  // Summary agg (all, ignoring page)
+  const { data: aggData } = await db()
+    .from('stock_movements')
+    .select('movement_type, quantity')
+    .eq('company_id', companyId)
+    .in('movement_type', ['POS_SALE', 'POS_TRANSFER_IN', 'POS_ADJUSTMENT'])
+    .gte('created_at', q.from_date)
+    .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  const totalSold = (aggData ?? [])
+    .filter((m: any) => m.movement_type === 'POS_SALE')
+    .reduce((s: number, m: any) => s + Math.abs(Number(m.quantity)), 0);
+  const totalTransferred = (aggData ?? [])
+    .filter((m: any) => m.movement_type === 'POS_TRANSFER_IN')
+    .reduce((s: number, m: any) => s + Number(m.quantity), 0);
+
+  return {
+    rows,
+    total: count ?? 0,
+    summary: {
+      total_movements: count ?? 0,
+      total_qty_sold: totalSold,
+      total_qty_transferred_in: totalTransferred,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// MENU PERFORMANCE REPORT — pos_menu_items, order_items
+// ---------------------------------------------------------------------------
+
+// 26. Menu Item Performance
+// ---------------------------------------------------------------------------
+export interface MenuItemPerformanceRow {
+  menu_id: string;
+  menu_name: string;
+  product_id: string;
+  variant_id: string;
+  product_name: string;
+  variant_name: string;
+  sku: string;
+  is_visible: boolean;
+  pos_price: number;
+  times_ordered: number;
+  total_qty: number;
+  total_revenue: number;
+  performance_tag: 'star' | 'hidden_gem' | 'ghost' | 'invisible';
+}
+
+export async function getMenuItemPerformance(q: ReportQuery, companyId: string) {
+  // Fetch all menu items with product info
+  const { data: menuItems, error: me } = await db()
+    .from('pos_menu_items')
+    .select(`
+      id, menu_id, variant_id, product_id, is_visible, pos_price,
+      pos_menus:menu_id(id, name),
+      product_variants:variant_id(id, name, sku, products:product_id(name))
+    `)
+    .eq('company_id', companyId);
+
+  if (me) throw toServiceError('Menu items query', me);
+
+  // Fetch order items for these variants in date range
+  const variantIds = [...new Set((menuItems ?? []).map((mi: any) => mi.variant_id as string))];
+  const orderRows: any[] = [];
+
+  if (variantIds.length > 0) {
+    const { data: oi } = await db()
+      .from('order_items')
+      .select('variant_id, quantity, unit_price, order_id, order:order_id!inner(company_id, created_at, order_source, order_type, status)')
+      .eq('order.company_id', companyId)
+      .eq('order.order_source', 'pos')
+      .eq('order.order_type', 'sales')
+      .neq('order.status', 'cancelled')
+      .in('variant_id', variantIds)
+      .gte('order.created_at', q.from_date)
+      .lte('order.created_at', q.to_date + 'T23:59:59Z');
+    if (oi) orderRows.push(...oi);
+  }
+
+  // Aggregate by variant
+  const salesBuckets = new Map<string, { qty: number; revenue: number; orders: Set<string> }>();
+  orderRows.forEach((oi: any) => {
+    const vid = oi.variant_id;
+    if (!salesBuckets.has(vid)) salesBuckets.set(vid, { qty: 0, revenue: 0, orders: new Set() });
+    const b = salesBuckets.get(vid)!;
+    b.qty += Number(oi.quantity);
+    b.revenue += Number(oi.unit_price) * Number(oi.quantity);
+    b.orders.add(oi.order_id);
+  });
+
+  const rows: MenuItemPerformanceRow[] = (menuItems ?? []).map((mi: any) => {
+    const variant = mi.product_variants as any;
+    const menu = mi.pos_menus as any;
+    const sales = salesBuckets.get(mi.variant_id) ?? { qty: 0, revenue: 0, orders: new Set() };
+    const timesOrdered = sales.orders.size;
+    const isVisible = mi.is_visible;
+
+    // Tag: star=visible+ordered, hidden_gem=hidden+ordered, ghost=visible+never, invisible=hidden+never
+    const tag: MenuItemPerformanceRow['performance_tag'] =
+      isVisible && timesOrdered > 0 ? 'star'
+        : !isVisible && timesOrdered > 0 ? 'hidden_gem'
+          : isVisible && timesOrdered === 0 ? 'ghost'
+            : 'invisible';
+
+    return {
+      menu_id: mi.menu_id,
+      menu_name: menu?.name ?? '—',
+      product_id: mi.product_id,
+      variant_id: mi.variant_id,
+      product_name: variant?.products?.name ?? '—',
+      variant_name: variant?.name ?? '—',
+      sku: variant?.sku ?? '—',
+      is_visible: isVisible,
+      pos_price: Number(mi.pos_price ?? 0),
+      times_ordered: timesOrdered,
+      total_qty: sales.qty,
+      total_revenue: sales.revenue,
+      performance_tag: tag,
+    };
+  }).sort((a, b) => b.total_qty - a.total_qty);
+
+  const filtered = q.search
+    ? rows.filter(r =>
+        r.product_name.toLowerCase().includes(q.search!.toLowerCase()) ||
+        r.sku.toLowerCase().includes(q.search!.toLowerCase())
+      )
+    : rows;
+
+  const paginated = filtered.slice((q.page - 1) * q.page_size, q.page * q.page_size);
+  return {
+    rows: paginated,
+    total: filtered.length,
+    summary: {
+      total_menu_items: filtered.length,
+      star_items: filtered.filter(r => r.performance_tag === 'star').length,
+      ghost_items: filtered.filter(r => r.performance_tag === 'ghost').length,
+      hidden_gem_items: filtered.filter(r => r.performance_tag === 'hidden_gem').length,
+      total_menu_revenue: filtered.reduce((s, r) => s + r.total_revenue, 0),
+    },
+  };
+}

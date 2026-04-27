@@ -736,4 +736,120 @@ export const getStockMovements = async (req: Request, res: Response) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// POS Outlet Inventory Pool endpoints
+
+/**
+ * GET /api/inventory/pos-pool
+ * Returns pos_outlet_inventory rows for a company, optionally filtered by warehouse_id.
+ * Shape mirrors GET /inventory so the frontend can use the same patterns.
+ */
+export const getPosPool = async (req: Request, res: Response) => {
+    try {
+        const { warehouse_id } = req.query;
+
+        if (!req.companyId) {
+            return res.status(400).json({ success: false, error: 'Company context is required' });
+        }
+
+        let query = (supabaseAdmin || supabase)
+            .from('pos_outlet_inventory')
+            .select(`
+                *,
+                product_variants:variant_id (id, name, sku),
+                products:product_id (id, name)
+            `)
+            .eq('company_id', req.companyId)
+            .order('created_at', { ascending: false });
+
+        if (warehouse_id) {
+            query = query.eq('warehouse_id', warehouse_id as string);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            console.error('Error fetching POS pool:', error);
+            return res.status(500).json({ success: false, error: 'Failed to fetch POS pool inventory' });
+        }
+
+        return res.json({ success: true, data: data || [] });
+    } catch (error: any) {
+        console.error('Error in getPosPool:', error);
+        return res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+};
+
+/**
+ * POST /api/inventory/pos-transfer
+ * Transfer stock from global warehouse_inventory → pos_outlet_inventory.
+ *
+ * Body: {
+ *   warehouse_id: string;
+ *   items: Array<{ product_id: string; variant_id: string; quantity: number }>;
+ *   notes?: string;
+ * }
+ */
+export const transferToPosPool = async (req: Request, res: Response) => {
+    try {
+        const { warehouse_id, items, notes } = req.body;
+
+        if (!req.companyId) {
+            return res.status(400).json({ success: false, error: 'Company context is required' });
+        }
+
+        if (!warehouse_id) {
+            return res.status(400).json({ success: false, error: 'warehouse_id is required' });
+        }
+
+        if (!items || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ success: false, error: 'items array is required and cannot be empty' });
+        }
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (!item.product_id || !item.variant_id) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Item ${i + 1}: product_id and variant_id are required`,
+                });
+            }
+            if (!item.quantity || item.quantity <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Item ${i + 1}: quantity must be greater than 0`,
+                });
+            }
+        }
+
+        const inventoryService = new InventoryService(req.companyId);
+
+        const result = await inventoryService.transferToPosPool({
+            warehouseId: warehouse_id,
+            items: items.map((item: any) => ({
+                productId: item.product_id,
+                variantId: item.variant_id,
+                quantity: item.quantity,
+            })),
+            notes: notes || undefined,
+            createdBy: req.user?.id,
+        });
+
+        return res.json({
+            success: true,
+            data: {
+                transfer_id: result.transferId,
+                movements: result.movements,
+                message: `Successfully transferred ${result.movements.length} item(s) to POS pool`,
+            },
+        });
+    } catch (error: any) {
+        console.error('Error in transferToPosPool:', error);
+        if (error instanceof ApiError) {
+            return res.status(error.statusCode).json({ success: false, error: error.message });
+        }
+        return res.status(500).json({ success: false, error: error.message || 'Internal server error' });
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Packaging Recipes CRUD

@@ -2,6 +2,16 @@ import { Request, Response, NextFunction } from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
+function formatThermalItemName(productName?: string | null, variantName?: string | null): string {
+  const p = (productName || '').trim();
+  const v = (variantName || '').trim();
+  if (!p && !v) return 'Item';
+  if (!v) return p || 'Item';
+  if (!p) return v;
+  if (p.toLowerCase() === v.toLowerCase()) return p;
+  return `${p} (${v})`;
+}
+
 /**
  * Generate 80mm thermal-optimized HTML for KOT/Customer Bills
  */
@@ -98,7 +108,7 @@ const generateThermalKOTHTML = async (orderId: string, companyId: string, type: 
   // Items List
   let itemsHTML = '';
   order.order_items.forEach((item: any) => {
-    const itemName = item.variant?.name || item.product?.name || 'Item';
+    const itemName = formatThermalItemName(item.product?.name, item.variant?.name);
     const mods = item.order_item_modifiers || [];
     const modsHTML = mods.map((m: any) => `<div class="modifier">- ${m.modifier?.name}</div>`).join('');
     
@@ -236,6 +246,184 @@ const generateThermalKOTHTML = async (orderId: string, companyId: string, type: 
   `;
 };
 
+type KotSnapshotLine = {
+  quantity: number;
+  kitchen_display_name: string;
+  modifiers_snapshot?: Array<{ name: string }>;
+};
+
+const kitchenThermalStyles = `
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Courier New', Courier, monospace; 
+      width: 300px; 
+      padding: 10px; 
+      font-size: 13px; 
+      line-height: 1.2;
+      color: #000;
+    }
+    .text-center { text-align: center; }
+    .bold { font-weight: bold; }
+    .divider { border-bottom: 1px dashed #000; margin: 8px 0; }
+    .header { margin-bottom: 10px; }
+    .header h2 { font-size: 18px; margin-bottom: 4px; }
+    .fulfillment-badge { 
+      display: block; 
+      border: 2px solid #000; 
+      padding: 5px; 
+      margin: 10px 0; 
+      font-size: 20px; 
+      font-weight: bold; 
+      text-align: center;
+    }
+    .items-table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+    .items-table td { vertical-align: top; padding: 6px 0; font-size: 12px; }
+    .item-name { font-weight: bold; font-size: 13px; display: block; }
+    .modifier { font-size: 10px; padding-left: 5px; font-style: italic; color: #333; }
+    .ticket-block { margin-bottom: 16px; page-break-inside: avoid; }
+    @media print {
+      @page { margin: 0; }
+      body { width: 100%; padding: 5mm; }
+    }
+  `;
+
+async function loadKotOrderMeta(orderId: string, companyId: string) {
+  const { data: order } = await (supabaseAdmin || supabase)
+    .from('orders')
+    .select('created_at, notes, fulfillment_type, customer_id')
+    .eq('id', orderId)
+    .eq('company_id', companyId)
+    .single();
+
+  if (!order) throw new ApiError(404, 'Order not found');
+
+  const dateStr = new Date(order.created_at).toLocaleString('en-IN', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  });
+
+  let tableNo = '';
+  if (order.notes) {
+    const tableMatch = String(order.notes).match(/Table:\s*([^\s|]+)/i);
+    if (tableMatch) tableNo = tableMatch[1];
+  }
+
+  let customerName = 'Walk-in';
+  if (order.customer_id) {
+    const { data: cust } = await (supabaseAdmin || supabase)
+      .from('customers')
+      .select('name')
+      .eq('id', order.customer_id)
+      .single();
+    if (cust?.name) customerName = cust.name;
+  }
+
+  const fulfillmentLabel = (order.fulfillment_type || 'Take Away').replace('_', ' ').toUpperCase();
+  return { dateStr, tableNo, customerName, fulfillmentLabel };
+}
+
+function parseTicketSnapshot(raw: unknown): KotSnapshotLine[] {
+  if (Array.isArray(raw)) return raw as KotSnapshotLine[];
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed) ? (parsed as KotSnapshotLine[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function renderSnapshotLinesHtml(lines: KotSnapshotLine[]): string {
+  return lines
+    .map((item) => {
+      const mods = item.modifiers_snapshot || [];
+      const modsHTML = mods.map((m) => `<div class="modifier">- ${m.name}</div>`).join('');
+      return `
+        <tr>
+          <td width="30" class="bold">${item.quantity}x</td>
+          <td>
+            <span class="item-name">${String(item.kitchen_display_name || 'Item').toUpperCase()}</span>
+            ${modsHTML}
+          </td>
+        </tr>`;
+    })
+    .join('');
+}
+
+async function generateKitchenHtmlFromTicketSnapshots(
+  orderId: string,
+  companyId: string,
+  tickets: Array<{ kot_number_text: string; ticket_items_snapshot: unknown }>
+): Promise<string> {
+  const meta = await loadKotOrderMeta(orderId, companyId);
+  const blocks = tickets
+    .map((t) => {
+      const lines = parseTicketSnapshot(t.ticket_items_snapshot);
+      const rows = renderSnapshotLinesHtml(lines);
+      return `
+      <div class="ticket-block">
+        <div class="header text-center">
+          <div class="bold">KITCHEN ORDER TICKET</div>
+          <div class="bold">${t.kot_number_text}</div>
+          <div>${meta.dateStr}</div>
+        </div>
+        <div class="divider"></div>
+        <div class="meta-info">
+          ${meta.tableNo ? `<div><span class="bold">TABLE:</span> ${meta.tableNo}</div>` : ''}
+          <div><span class="bold">CUST:</span> ${meta.customerName}</div>
+        </div>
+        <div class="fulfillment-badge">${meta.fulfillmentLabel}</div>
+        <div class="divider"></div>
+        <table class="items-table"><tbody>${rows}</tbody></table>
+      </div>`;
+    })
+    .join('<div class="divider"></div>');
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>Kitchen KOT</title>
+      <style>${kitchenThermalStyles}</style>
+    </head>
+    <body>
+      ${blocks}
+    </body>
+    </html>
+  `;
+}
+
+/**
+ * GET /api/invoices/kot/ticket/:ticketId/kitchen — thermal HTML from JSONB snapshot only
+ */
+export const getKitchenKOTByTicket = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ticketId } = req.params;
+    const companyId = req.companyId!;
+    const { data: ticket, error } = await (supabaseAdmin || supabase)
+      .from('pos_kot_tickets')
+      .select('order_id, kot_number_text, ticket_items_snapshot')
+      .eq('id', ticketId)
+      .eq('company_id', companyId)
+      .single();
+
+    if (error || !ticket) throw new ApiError(404, 'KOT ticket not found');
+
+    const html = await generateKitchenHtmlFromTicketSnapshots(
+      ticket.order_id,
+      companyId,
+      [{ kot_number_text: ticket.kot_number_text, ticket_items_snapshot: ticket.ticket_items_snapshot }]
+    );
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
  * Controller: Get Kitchen KOT (Thermal)
  */
@@ -243,6 +431,25 @@ export const getKitchenKOT = async (req: Request, res: Response, next: NextFunct
   try {
     const { orderId } = req.params;
     const companyId = req.companyId!;
+
+    const { data: tickets } = await (supabaseAdmin || supabase)
+      .from('pos_kot_tickets')
+      .select('kot_number_text, ticket_items_snapshot')
+      .eq('order_id', orderId)
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: true });
+
+    if (tickets && tickets.length > 0) {
+      const html = await generateKitchenHtmlFromTicketSnapshots(
+        orderId,
+        companyId,
+        tickets as Array<{ kot_number_text: string; ticket_items_snapshot: unknown }>
+      );
+      res.setHeader('Content-Type', 'text/html');
+      res.send(html);
+      return;
+    }
+
     const html = await generateThermalKOTHTML(orderId, companyId, 'kitchen');
     res.setHeader('Content-Type', 'text/html');
     res.send(html);

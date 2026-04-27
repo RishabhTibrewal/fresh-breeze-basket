@@ -37,13 +37,15 @@ export class InventoryService {
       | 'TRANSFER'
       | 'RECEIPT'
       | 'REPACK_OUT'
-      | 'REPACK_IN';
+      | 'REPACK_IN'
+      | 'POS_TRANSFER_IN'
+      | 'POS_SALE';
     quantity: number; // positive for increase, negative for decrease
     referenceType?: string;
     referenceId?: string;
     notes?: string;
     createdBy?: string;
-    sourceType?: 'sales' | 'purchase' | 'return' | 'transfer' | 'adjustment' | 'receipt' | 'repack';
+    sourceType?: 'sales' | 'purchase' | 'return' | 'transfer' | 'adjustment' | 'receipt' | 'repack' | 'pos_transfer';
   }): Promise<string> {
     const {
       productId,
@@ -490,6 +492,176 @@ export class InventoryService {
    * @param params - Transfer parameters
    * @returns Transfer ID and movement details
    */
+  // ─── POS Outlet Inventory Pool ───────────────────────────────────────────
+
+  /**
+   * Get POS pool qty for a variant at a warehouse.
+   * Returns 0 when no pool row exists (pool not yet set up for this outlet).
+   */
+  async getPosPoolQty(warehouseId: string, variantId: string): Promise<number> {
+    const { data } = await supabaseAdmin
+      .from('pos_outlet_inventory')
+      .select('qty')
+      .eq('company_id', this.companyId)
+      .eq('warehouse_id', warehouseId)
+      .eq('variant_id', variantId)
+      .maybeSingle();
+    return data?.qty ?? 0;
+  }
+
+  /**
+   * Check whether a POS pool row exists for (warehouse, variant).
+   */
+  async hasPosPoolRow(warehouseId: string, variantId: string): Promise<boolean> {
+    const { data } = await supabaseAdmin
+      .from('pos_outlet_inventory')
+      .select('id')
+      .eq('company_id', this.companyId)
+      .eq('warehouse_id', warehouseId)
+      .eq('variant_id', variantId)
+      .maybeSingle();
+    return !!data;
+  }
+
+  /**
+   * Transfer stock from global warehouse_inventory to the POS outlet pool.
+   *
+   * Creates two stock_movements entries that share the same reference_id:
+   *   - TRANSFER_OUT  (source_type: pos_transfer) against warehouse_inventory
+   *   - POS_TRANSFER_IN (source_type: pos_transfer) logged against same outlet
+   *
+   * Then decrements warehouse_inventory and increments pos_outlet_inventory atomically
+   * via individual upserts (no cross-table RPC needed here).
+   */
+  async transferToPosPool(params: {
+    warehouseId: string;
+    items: Array<{ productId: string; variantId: string; quantity: number }>;
+    notes?: string;
+    createdBy?: string;
+  }): Promise<{ transferId: string; movements: Array<{ productId: string; variantId: string; quantity: number }> }> {
+    const { warehouseId, items, notes, createdBy } = params;
+
+    if (!items || items.length === 0) {
+      throw new ApiError(400, 'Items array cannot be empty');
+    }
+
+    for (const item of items) {
+      if (!item.productId || !item.variantId) {
+        throw new ApiError(400, 'Each item must have productId and variantId');
+      }
+      if (item.quantity <= 0) {
+        throw new ApiError(400, 'Transfer quantity must be greater than 0');
+      }
+    }
+
+    // Prepare items JSONB for RPC
+    const itemsJsonb = items.map(item => ({
+      product_id: item.productId,
+      variant_id: item.variantId,
+      quantity: item.quantity,
+    }));
+
+    // Call RPC function for atomic operation
+    const { data, error } = await supabaseAdmin.rpc('transfer_to_pos_pool', {
+      p_warehouse_id: warehouseId,
+      p_items: itemsJsonb,
+      p_notes: notes || null,
+      p_company_id: this.companyId,
+      p_created_by: createdBy || null,
+    });
+
+    if (error) {
+      console.error('Error transferring to POS pool:', error);
+      const errorMessage = error.message || 'Failed to transfer to POS pool';
+      if (errorMessage.includes('Insufficient global stock')) {
+        throw new ApiError(400, errorMessage);
+      }
+      if (errorMessage.includes('not found') || errorMessage.includes('does not belong')) {
+        throw new ApiError(404, errorMessage);
+      }
+      throw new ApiError(500, errorMessage);
+    }
+
+    if (!data) {
+      throw new ApiError(500, 'No data returned from POS pool transfer');
+    }
+
+    // Transform response to match expected format
+    const movements = (data.movements || []).map((m: any) => ({
+      productId: m.product_id,
+      variantId: m.variant_id,
+      quantity: m.quantity,
+    }));
+
+    return {
+      transferId: data.transfer_id,
+      movements,
+    };
+  }
+
+  /**
+   * Deduct stock from POS outlet pool after a POS sale.
+   * Records a POS_SALE movement (does NOT touch warehouse_inventory).
+   * Allows pool qty to go negative to avoid blocking sales during data lag.
+   */
+  async deductFromPosPool(params: {
+    orderId: string;
+    warehouseId: string;
+    items: Array<{ productId: string; variantId: string; quantity: number }>;
+  }): Promise<void> {
+    const { orderId, warehouseId, items } = params;
+
+    for (const item of items) {
+      // Decrement pos_outlet_inventory.qty
+      const { data: pool } = await supabaseAdmin
+        .from('pos_outlet_inventory')
+        .select('qty')
+        .eq('company_id', this.companyId)
+        .eq('warehouse_id', warehouseId)
+        .eq('variant_id', item.variantId)
+        .maybeSingle();
+
+      const newQty = (pool?.qty ?? 0) - item.quantity;
+
+      const { error: poolError } = await supabaseAdmin
+        .from('pos_outlet_inventory')
+        .upsert(
+          {
+            company_id: this.companyId,
+            warehouse_id: warehouseId,
+            product_id: item.productId,
+            variant_id: item.variantId,
+            qty: newQty,
+          },
+          { onConflict: 'company_id,warehouse_id,variant_id' }
+        );
+
+      if (poolError) {
+        throw new ApiError(500, `Failed to deduct from POS pool: ${poolError.message}`);
+      }
+
+      // Record POS_SALE movement (audit trail only; does not call updateWarehouseInventory)
+      const { error: movErr } = await supabaseAdmin
+        .from('stock_movements')
+        .insert({
+          product_id: item.productId,
+          variant_id: item.variantId,
+          outlet_id: warehouseId,
+          movement_type: 'POS_SALE',
+          quantity: -item.quantity,
+          reference_type: 'order',
+          reference_id: orderId,
+          notes: `POS sale order ${orderId}`,
+          company_id: this.companyId,
+          source_type: 'pos_transfer',
+        });
+
+      if (movErr) {
+        throw new ApiError(500, `Failed to record POS_SALE movement: ${movErr.message}`);
+      }
+    }
+  }
+
   async transferStock(params: {
     sourceWarehouseId: string;
     destinationWarehouseId: string;
