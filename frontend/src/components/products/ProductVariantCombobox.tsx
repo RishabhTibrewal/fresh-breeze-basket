@@ -32,6 +32,8 @@ interface ProductVariantOption {
 interface ProductVariantComboboxProps {
   selectedProductId?: string | null;
   selectedVariantId?: string | null;
+  selectedVariantIds?: string[]; // Array of selected variant IDs for multi-select mode
+  multiple?: boolean; // Enable multi-select mode
   onSelect: (productId: string, variantId: string) => void;
   filterActive?: boolean;
   /** Use a simple list instead of Command/Popover when inside a Dialog to avoid focus-trap blocking selection */
@@ -42,6 +44,8 @@ interface ProductVariantComboboxProps {
 export const ProductVariantCombobox: React.FC<ProductVariantComboboxProps> = ({
   selectedProductId,
   selectedVariantId,
+  selectedVariantIds = [],
+  multiple = false,
   onSelect,
   filterActive = true,
   useListInModal = false,
@@ -119,7 +123,9 @@ export const ProductVariantCombobox: React.FC<ProductVariantComboboxProps> = ({
             <div className="py-4 text-center text-sm text-muted-foreground">No product/variant found.</div>
           ) : (
             listOptions.map((option) => {
-              const isSelected = selectedProductId === option.product_id && selectedVariantId === option.variant_id;
+              const isSelected = multiple 
+                ? selectedVariantIds.includes(option.variant_id)
+                : selectedProductId === option.product_id && selectedVariantId === option.variant_id;
               return (
                 <button
                   key={`${option.product_id}-${option.variant_id}`}

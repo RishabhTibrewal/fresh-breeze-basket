@@ -254,8 +254,8 @@ export const productsService = {
    * Get all products with variants, prices, and brands
    * Returns catalog-only product data with nested variant information
    */
-  async getAll(): Promise<Product[]> {
-    const { data: response } = await apiClient.get<ApiResponse<any[]>>('/products');
+  async getAll(params?: { collection_slug?: string }): Promise<Product[]> {
+    const { data: response } = await apiClient.get<ApiResponse<any[]>>('/products', { params });
     return response.data.map((apiProduct: any) => ({
       id: apiProduct.id,
       name: apiProduct.name,

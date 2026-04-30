@@ -62,6 +62,16 @@ const generateThermalKOTHTML = async (orderId: string, companyId: string, type: 
     if (cust) customerName = cust.name;
   }
 
+  let outletName = companyName;
+  if (order.outlet_id) {
+    const { data: w } = await (supabaseAdmin || supabase)
+      .from('warehouses')
+      .select('name')
+      .eq('id', order.outlet_id)
+      .single();
+    if (w?.name) outletName = w.name;
+  }
+
   // Styles for 80mm printing
   const styles = `
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -197,7 +207,7 @@ const generateThermalKOTHTML = async (orderId: string, companyId: string, type: 
     </head>
     <body>
       <div class="header text-center">
-        ${!isKitchen ? `<h2 class="bold">${companyName}</h2>` : ''}
+        <h2 class="bold">${outletName}</h2>
         <div class="bold">${title}</div>
         <div>${order.receipt_number || `ORD-${order.id.substring(0, 8)}`}</div>
         <div>${dateStr}</div>
@@ -290,7 +300,7 @@ const kitchenThermalStyles = `
 async function loadKotOrderMeta(orderId: string, companyId: string) {
   const { data: order } = await (supabaseAdmin || supabase)
     .from('orders')
-    .select('created_at, notes, fulfillment_type, customer_id')
+    .select('created_at, notes, fulfillment_type, customer_id, outlet_id')
     .eq('id', orderId)
     .eq('company_id', companyId)
     .single();
@@ -318,8 +328,18 @@ async function loadKotOrderMeta(orderId: string, companyId: string) {
     if (cust?.name) customerName = cust.name;
   }
 
+  let outletName = 'Store';
+  if (order.outlet_id) {
+    const { data: w } = await (supabaseAdmin || supabase)
+      .from('warehouses')
+      .select('name')
+      .eq('id', order.outlet_id)
+      .single();
+    if (w?.name) outletName = w.name;
+  }
+
   const fulfillmentLabel = (order.fulfillment_type || 'Take Away').replace('_', ' ').toUpperCase();
-  return { dateStr, tableNo, customerName, fulfillmentLabel };
+  return { dateStr, tableNo, customerName, fulfillmentLabel, outletName };
 }
 
 function parseTicketSnapshot(raw: unknown): KotSnapshotLine[] {
@@ -365,6 +385,7 @@ async function generateKitchenHtmlFromTicketSnapshots(
       return `
       <div class="ticket-block">
         <div class="header text-center">
+          <h2 class="bold">${meta.outletName}</h2>
           <div class="bold">KITCHEN ORDER TICKET</div>
           <div class="bold">${t.kot_number_text}</div>
           <div>${meta.dateStr}</div>

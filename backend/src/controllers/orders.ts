@@ -86,6 +86,7 @@ export const getOrders = async (req: Request, res: Response) => {
       .select(`
         *,
         customer:customers(*),
+        pos_kot_tickets(kot_number_text),
         order_items (
           *,
           products (*),
@@ -292,6 +293,7 @@ export const getOrderById = async (req: Request, res: Response) => {
       .select(`
         *,
         customer:customers(*),
+        pos_kot_tickets(kot_number_text),
         order_items (
           *,
           product:products (

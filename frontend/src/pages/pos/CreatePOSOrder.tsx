@@ -525,8 +525,10 @@ export default function CreatePOSOrder() {
       const items = Array.isArray(order.order_items) ? order.order_items : [];
       items.forEach((item: any) => {
         const key = `${item.product_id}::${item.variant_id || ''}`;
-        const variantName = item.variant_name && item.variant_name !== '—' ? ` (${item.variant_name})` : '';
-        const name = item.product_name ? `${item.product_name}${variantName}` : (item.name || 'Unknown item');
+        const pName = item.product_name || item.product?.name || item.products?.name;
+        const vName = item.variant_name || item.variant?.name || item.variants?.name;
+        const variantName = vName && vName !== '—' ? ` (${vName})` : '';
+        const name = pName ? `${pName}${variantName}` : (item.name || 'Unknown item');
         if (!map.has(key)) {
           map.set(key, {
             product_id: item.product_id,
@@ -2085,6 +2087,8 @@ export default function CreatePOSOrder() {
                  <thead className="bg-white/5 border-b border-white/10">
                    <tr>
                      <th className="px-6 py-4 text-xs font-semibold text-gray-400 uppercase">Receipt</th>
+                     <th className="px-6 py-4 text-xs font-semibold text-gray-400 uppercase">KOT Number</th>
+                     <th className="px-6 py-4 text-xs font-semibold text-gray-400 uppercase">Outlet Name</th>
                      <th className="px-6 py-4 text-xs font-semibold text-gray-400 uppercase">Customer</th>
                      <th className="px-6 py-4 text-xs font-semibold text-gray-400 uppercase">Total</th>
                      <th className="px-6 py-4 text-xs font-semibold text-gray-400 uppercase">Status</th>
@@ -2093,15 +2097,21 @@ export default function CreatePOSOrder() {
                  </thead>
                  <tbody className="divide-y divide-white/5">
                    {posOrdersLoading ? (
-                     <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Loading orders...</td></tr>
+                     <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500">Loading orders...</td></tr>
                    ) : historyFilteredOrders.length === 0 ? (
-                     <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No recent POS orders</td></tr>
+                     <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500">No recent POS orders</td></tr>
                    ) : (
                     historyFilteredOrders.map((order: any) => {
                       const paymentStatusUi = normalizePaymentStatus(order.payment_status);
                       return (
                       <tr key={order.id} className="hover:bg-white/5 transition-colors">
                          <td className="px-6 py-4 font-medium">{order.receipt_number || `POS-${order.id.slice(0, 5)}`}</td>
+                         <td className="px-6 py-4 text-gray-400">
+                           {order.pos_kot_tickets?.length ? order.pos_kot_tickets.map((t: any) => t.kot_number_text).join(', ') : '—'}
+                         </td>
+                         <td className="px-6 py-4 text-gray-400">
+                           {order.outlet_name || (warehouses as any[]).find((w: any) => w.id === order.outlet_id)?.name || 'Unknown Outlet'}
+                         </td>
                          <td className="px-6 py-4 text-gray-400">
                            {order.profiles?.first_name ? `${order.profiles.first_name} ${order.profiles.last_name || ''}` : (order.customer?.name || 'Walk-in Customer')}
                          </td>
@@ -3513,7 +3523,7 @@ export default function CreatePOSOrder() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="bg-white/5 border border-white/10 rounded-xl p-4">
                       <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">From</p>
-                      <p className="font-semibold text-white">{profile?.company_name || 'Fresh Breeze Basket'}</p>
+                      <p className="font-semibold text-white">{historyOrderDetails.outlet_name || (warehouses as any[]).find((w: any) => w.id === historyOrderDetails.outlet_id)?.name || profile?.company_name || 'Unknown Outlet'}</p>
                       <p className="text-gray-400 text-xs mt-1">{profile?.company_address || 'Address not available'}</p>
                     </div>
                     <div className="bg-white/5 border border-white/10 rounded-xl p-4">
@@ -3535,6 +3545,8 @@ export default function CreatePOSOrder() {
                       <p className="text-gray-300">Order Status: <span className="text-white font-medium">{historyOrderDetails.status || '-'}</span></p>
                       <p className="text-gray-300">Payment Status: <span className="text-white font-medium">{normalizePaymentStatus(historyOrderDetails.payment_status).label}</span></p>
                       <p className="text-gray-300">Order Source: <span className="text-white font-medium">{historyOrderDetails.order_source || 'pos'}</span></p>
+                      <p className="text-gray-300">KOT Number: <span className="text-white font-medium">{historyOrderDetails.pos_kot_tickets?.length ? historyOrderDetails.pos_kot_tickets.map((t: any) => t.kot_number_text).join(', ') : '—'}</span></p>
+                      <p className="text-gray-300">Outlet Name: <span className="text-white font-medium">{historyOrderDetails.outlet_name || (warehouses as any[]).find((w: any) => w.id === historyOrderDetails.outlet_id)?.name || 'Unknown Outlet'}</span></p>
                     </div>
                   </div>
 

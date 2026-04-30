@@ -77,6 +77,7 @@ const BrandForm = lazy(() => import("./pages/admin/BrandForm"));
 const BrandDetail = lazy(() => import("./pages/admin/BrandDetail"));
 const CollectionList = lazy(() => import("./pages/admin/CollectionList"));
 const CollectionForm = lazy(() => import("./pages/admin/CollectionForm"));
+const CollectionDetail = lazy(() => import("./pages/admin/CollectionDetail"));
 const ModifierList = lazy(() => import("./pages/admin/ModifierList"));
 const ModifierForm = lazy(() => import("./pages/admin/ModifierForm"));
 const TaxList = lazy(() => import("./pages/admin/TaxList"));
@@ -374,6 +375,7 @@ const App: React.FC = () => {
                       <Route path="collections" element={<CollectionList />} />
                       <Route path="collections/new" element={<CollectionForm />} />
                       <Route path="collections/:id/edit" element={<CollectionForm />} />
+                      <Route path="collections/:id" element={<CollectionDetail />} />
                       <Route path="modifiers" element={<ModifierList />} />
                       <Route path="modifiers/new" element={<ModifierForm />} />
                       <Route path="modifiers/:id/edit" element={<ModifierForm />} />

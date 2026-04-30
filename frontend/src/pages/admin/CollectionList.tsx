@@ -91,21 +91,30 @@ export default function CollectionList() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate(`/inventory/collections/${collection.id}`)}
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/inventory/collections/${collection.id}`);
+            }}
           >
             <Eye className="h-4 w-4" />
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate(`/inventory/collections/${collection.id}/edit`)}
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/inventory/collections/${collection.id}/edit`);
+            }}
           >
             <Edit className="h-4 w-4" />
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setDeleteCollectionId(collection.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDeleteCollectionId(collection.id);
+            }}
           >
             <Trash2 className="h-4 w-4 text-destructive" />
           </Button>
@@ -208,7 +217,7 @@ export default function CollectionList() {
           data={filteredCollections}
           renderCard={renderCard}
           emptyMessage="No collections found"
-          onRowClick={(collection) => navigate(`/inventory/collections/${collection.id}/edit`)}
+          onRowClick={(collection) => navigate(`/inventory/collections/${collection.id}`)}
         />
       )}
 
