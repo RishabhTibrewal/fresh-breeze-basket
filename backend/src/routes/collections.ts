@@ -6,7 +6,8 @@ import {
   createCollection,
   updateCollection,
   deleteCollection,
-  assignVariantsToCollection
+  assignVariantsToCollection,
+  getVariantsByCollectionIds,
 } from '../controllers/collectionController';
 
 const router = express.Router();
@@ -15,6 +16,7 @@ const router = express.Router();
 router.use(protect);
 
 // Public/Customer Routes
+router.get('/variants', getVariantsByCollectionIds); // GET /collections/variants?collection_ids=...
 router.get('/', getCollections);
 router.get('/:idOrSlug', getCollection);
 

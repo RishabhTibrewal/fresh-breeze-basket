@@ -72,6 +72,24 @@ const generateThermalKOTHTML = async (orderId: string, companyId: string, type: 
     if (w?.name) outletName = w.name;
   }
 
+  // Fetch KOT numbers for customer bill
+  let kotNumbers = '';
+  if (!isKitchen) {
+    const { data: kotTickets } = await (supabaseAdmin || supabase)
+      .from('pos_kot_tickets')
+      .select('kot_number_seq')
+      .eq('order_id', orderId)
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: true });
+    if (kotTickets && kotTickets.length > 0) {
+      kotNumbers = kotTickets.map((k: any) => k.kot_number_seq).join(', ');
+    }
+  }
+
+  // Short receipt/order number: last segment of receipt_number e.g. '8765'
+  const rawReceipt = order.receipt_number || '';
+  const shortReceiptNo = rawReceipt.split('-').pop() || order.id.substring(0, 6).toUpperCase();
+
   // Styles for 80mm printing
   const styles = `
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -209,7 +227,8 @@ const generateThermalKOTHTML = async (orderId: string, companyId: string, type: 
       <div class="header text-center">
         <h2 class="bold">${outletName}</h2>
         <div class="bold">${title}</div>
-        <div>${order.receipt_number || `ORD-${order.id.substring(0, 8)}`}</div>
+        <div>Bill No : ${shortReceiptNo}</div>
+        ${kotNumbers ? `<div>KOT No : ${kotNumbers}</div>` : ''}
         <div>${dateStr}</div>
       </div>
 
@@ -300,7 +319,7 @@ const kitchenThermalStyles = `
 async function loadKotOrderMeta(orderId: string, companyId: string) {
   const { data: order } = await (supabaseAdmin || supabase)
     .from('orders')
-    .select('created_at, notes, fulfillment_type, customer_id, outlet_id')
+    .select('created_at, notes, fulfillment_type, customer_id, outlet_id, user_id, receipt_number')
     .eq('id', orderId)
     .eq('company_id', companyId)
     .single();
@@ -328,6 +347,19 @@ async function loadKotOrderMeta(orderId: string, companyId: string) {
     if (cust?.name) customerName = cust.name;
   }
 
+  let billedBy = '';
+  if (order.user_id) {
+    const { data: prof } = await (supabaseAdmin || supabase)
+      .from('profiles')
+      .select('first_name, last_name, email')
+      .eq('id', order.user_id)
+      .single();
+    if (prof) {
+      const name = [prof.first_name, prof.last_name].filter(Boolean).join(' ').trim();
+      billedBy = name || (prof.email ? prof.email.split('@')[0] : '');
+    }
+  }
+
   let outletName = 'Store';
   if (order.outlet_id) {
     const { data: w } = await (supabaseAdmin || supabase)
@@ -339,7 +371,7 @@ async function loadKotOrderMeta(orderId: string, companyId: string) {
   }
 
   const fulfillmentLabel = (order.fulfillment_type || 'Take Away').replace('_', ' ').toUpperCase();
-  return { dateStr, tableNo, customerName, fulfillmentLabel, outletName };
+  return { dateStr, tableNo, customerName, fulfillmentLabel, outletName, billedBy, receiptNumber: order.receipt_number as string | null };
 }
 
 function parseTicketSnapshot(raw: unknown): KotSnapshotLine[] {
@@ -426,17 +458,17 @@ export const getKitchenKOTByTicket = async (req: Request, res: Response, next: N
     const companyId = req.companyId!;
     const { data: ticket, error } = await (supabaseAdmin || supabase)
       .from('pos_kot_tickets')
-      .select('order_id, kot_number_text, ticket_items_snapshot')
+      .select('order_id, kot_number_seq, kot_number_text, ticket_items_snapshot, outlet_id')
       .eq('id', ticketId)
       .eq('company_id', companyId)
       .single();
 
     if (error || !ticket) throw new ApiError(404, 'KOT ticket not found');
 
-    const html = await generateKitchenHtmlFromTicketSnapshots(
+    const html = await generateQuickBillKOTHTML(
       ticket.order_id,
       companyId,
-      [{ kot_number_text: ticket.kot_number_text, ticket_items_snapshot: ticket.ticket_items_snapshot }]
+      { kot_number_seq: ticket.kot_number_seq, kot_number_text: ticket.kot_number_text, ticket_items_snapshot: ticket.ticket_items_snapshot, outlet_id: ticket.outlet_id }
     );
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
@@ -446,7 +478,7 @@ export const getKitchenKOTByTicket = async (req: Request, res: Response, next: N
 };
 
 /**
- * Controller: Get Kitchen KOT (Thermal)
+ * Controller: Get Kitchen KOT (Thermal) — ALL items from ALL counters merged into one KOT
  */
 export const getKitchenKOT = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -455,22 +487,33 @@ export const getKitchenKOT = async (req: Request, res: Response, next: NextFunct
 
     const { data: tickets } = await (supabaseAdmin || supabase)
       .from('pos_kot_tickets')
-      .select('kot_number_text, ticket_items_snapshot')
+      .select('id, kot_number_seq, kot_number_text, ticket_items_snapshot, outlet_id')
       .eq('order_id', orderId)
       .eq('company_id', companyId)
       .order('created_at', { ascending: true });
 
     if (tickets && tickets.length > 0) {
-      const html = await generateKitchenHtmlFromTicketSnapshots(
-        orderId,
-        companyId,
-        tickets as Array<{ kot_number_text: string; ticket_items_snapshot: unknown }>
-      );
+      // Merge ALL items from ALL ticket snapshots into one combined list
+      const allLines: KotSnapshotLine[] = [];
+      for (const t of tickets) {
+        allLines.push(...parseTicketSnapshot(t.ticket_items_snapshot));
+      }
+      const allKotSeqs = tickets.map((t) => t.kot_number_seq).join(', ');
+      // Build a synthetic merged ticket using the first ticket's outlet/seq info
+      const firstTicket = tickets[0];
+      const mergedTicket = {
+        kot_number_seq: firstTicket.kot_number_seq,
+        kot_number_text: allKotSeqs, // displayed as "7, 8" etc.
+        ticket_items_snapshot: allLines,
+        outlet_id: firstTicket.outlet_id,
+      };
+      const html = await generateQuickBillKOTHTML(orderId, companyId, mergedTicket, allKotSeqs);
       res.setHeader('Content-Type', 'text/html');
       res.send(html);
       return;
     }
 
+    // Fallback: no tickets in DB — use legacy generator
     const html = await generateThermalKOTHTML(orderId, companyId, 'kitchen');
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
@@ -480,13 +523,197 @@ export const getKitchenKOT = async (req: Request, res: Response, next: NextFunct
 };
 
 /**
- * Controller: Get Customer KOT/Bill (Thermal)
+ * Generate a sharp, professional thermal Quick Bill KOT for the customer.
+ * Shows: outlet name, KOT No (seq only), Quick Bill, Order No, timestamp,
+ * Billed By, ITEM/QTY table, Total Qty.
+ * Full kot_number_text is stored in the data layer; only the seq # is printed.
+ */
+async function generateQuickBillKOTHTML(
+  orderId: string,
+  companyId: string,
+  ticket: { kot_number_seq: number; kot_number_text: string; ticket_items_snapshot: unknown; outlet_id?: string | null } | null,
+  kotSeqOverride?: string
+): Promise<string> {
+  const meta = await loadKotOrderMeta(orderId, companyId);
+
+  const resolvedOutletId = ticket?.outlet_id || null;
+  let outletName = meta.outletName;
+  if (resolvedOutletId) {
+    const { data: w } = await (supabaseAdmin || supabase)
+      .from('warehouses')
+      .select('name')
+      .eq('id', resolvedOutletId)
+      .single();
+    if (w?.name) outletName = w.name;
+  }
+
+  let items: Array<{ name: string; qty: number }> = [];
+
+  if (ticket?.ticket_items_snapshot) {
+    const lines = parseTicketSnapshot(ticket.ticket_items_snapshot) as KotSnapshotLine[];
+    items = lines.map((l) => ({
+      name: String(l.kitchen_display_name || 'Item'),
+      qty: Number(l.quantity) || 1,
+    }));
+  }
+
+  if (items.length === 0) {
+    const { data: orderItems } = await (supabaseAdmin || supabase)
+      .from('order_items')
+      .select('quantity, product:products(name), variant:product_variants(name)')
+      .eq('order_id', orderId);
+    if (orderItems) {
+      items = (orderItems as any[]).map((oi) => ({
+        name: formatThermalItemName(oi.product?.name, oi.variant?.name),
+        qty: Number(oi.quantity) || 1,
+      }));
+    }
+  }
+
+  const totalQty = items.reduce((s, i) => s + i.qty, 0);
+  const kotDisplay = kotSeqOverride ?? String(ticket?.kot_number_seq ?? 0);
+  const rawReceipt = meta.receiptNumber || '';
+  const orderNoShort = rawReceipt.split('-').pop() || orderId.substring(0, 6).toUpperCase();
+
+  const itemRows = items
+    .map(
+      (item) => `
+    <tr>
+      <td class="item-name">${item.name}</td>
+      <td class="item-qty">${item.qty}</td>
+    </tr>`
+    )
+    .join('');
+
+  const thermalStyles = `
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      width: 300px;
+      padding: 10px 8px;
+      font-size: 12px;
+      line-height: 1.35;
+      color: #000;
+      background: #fff;
+    }
+    .center { text-align: center; }
+    .bold { font-weight: bold; }
+    .outlet-name {
+      font-size: 15px;
+      font-weight: bold;
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 3px;
+    }
+    .kot-no {
+      font-size: 13px;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 1px;
+    }
+    .bill-type {
+      font-size: 12px;
+      text-align: center;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .meta-line {
+      font-size: 11px;
+      margin: 1px 0;
+    }
+    .divider-solid { border: none; border-top: 1px solid #000; margin: 6px 0; }
+    .divider-dashed { border: none; border-top: 1px dashed #000; margin: 6px 0; }
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 4px 0;
+    }
+    .items-table th {
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+      padding: 3px 0;
+      border-bottom: 1px solid #000;
+    }
+    .items-table th.left { text-align: left; }
+    .items-table th.right { text-align: right; }
+    .item-name { text-align: left; font-size: 12px; padding: 3px 0; }
+    .item-qty  { text-align: right; font-size: 12px; padding: 3px 0; width: 36px; }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: bold;
+      padding: 3px 0;
+    }
+    @media print {
+      @page { margin: 0; size: 80mm auto; }
+      body { width: 100%; padding: 4mm 4mm; }
+    }
+  `;
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Quick Bill</title>
+  <style>${thermalStyles}</style>
+</head>
+<body>
+  <div class="outlet-name">${outletName}</div>
+  <div class="kot-no">KOT No : ${kotDisplay}</div>
+  <div class="bill-type">Quick Bill</div>
+
+  <hr class="divider-dashed" />
+
+  <div class="meta-line">Order No : ${orderNoShort}</div>
+  ${meta.billedBy ? `<div class="meta-line">Billed By: ${meta.billedBy}</div>` : ''}
+
+  <hr class="divider-solid" />
+
+  <table class="items-table">
+    <thead>
+      <tr>
+        <th class="left">ITEM</th>
+        <th class="right">QTY</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemRows}
+    </tbody>
+  </table>
+
+  <hr class="divider-solid" />
+
+  <div class="total-row">
+    <span>Total Qty:</span>
+    <span>${totalQty.toFixed(2)}</span>
+  </div>
+
+</body>
+</html>`;
+}
+
+/**
+ * Controller: Get Customer KOT/Bill (Thermal) — Quick Bill format
  */
 export const getCustomerKOT = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { orderId } = req.params;
     const companyId = req.companyId!;
-    const html = await generateThermalKOTHTML(orderId, companyId, 'customer');
+
+    // Prefer the latest KOT ticket for this order; include outlet_id for accurate outlet name
+    const { data: ticket } = await (supabaseAdmin || supabase)
+      .from('pos_kot_tickets')
+      .select('kot_number_seq, kot_number_text, ticket_items_snapshot, outlet_id')
+      .eq('order_id', orderId)
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const html = await generateQuickBillKOTHTML(orderId, companyId, ticket ?? null);
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
   } catch (error) {
@@ -1128,11 +1355,10 @@ export const getCustomerBill = async (req: Request, res: Response, next: NextFun
       throw new ApiError(400, 'Company context is required');
     }
 
-    const html = await generateInvoiceHTML(orderId, companyId);
+    // Thermal customer bill: outlet name header, items with prices, subtotal, tax, grand total
+    const html = await generateThermalKOTHTML(orderId, companyId, 'customer');
 
-    // Send as attachment to force download in browser
     res.setHeader('Content-Type', 'text/html');
-    res.setHeader('Content-Disposition', `attachment; filename="Invoice_${orderId.substring(0,8).toUpperCase()}.html"`);
     res.send(html);
   } catch (error) {
     next(error);

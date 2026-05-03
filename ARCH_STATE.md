@@ -1,6 +1,6 @@
 # Architecture State Document
 
-**Last Updated:** 2026-04-27 (Batch C POS Reports — KOT, POS Pool, Menu performance widgets added)
+**Last Updated:** 2026-05-04 (Thermal KOT & Customer Bill Print System Redesign)
 **Purpose:** Technical reference for current system architecture, routing patterns, and critical implementation details to prevent architectural mistakes. This document serves as the long-term memory and architectural blueprint for all future AI interactions.
 
 ---
@@ -447,16 +447,118 @@ fresh-breeze-basket/
 - ⚠️ Basic structure in place
 - ⚠️ Full implementation pending
 
-### Recent Changes (2026-04-27) — POS Menu Management, Variant Picker, Inventory Display & Credit Payment
+### Recent Changes (2026-05-04) — Thermal KOT & Customer Bill Print System Redesign
+
+#### Objective
+Fully re-route and redesign the three POS print outputs (individual KOT, all-kitchen KOT, customer bill) into distinct, correctly-formatted thermal layouts. Fix a double-print bug where every print button was triggering the dialog twice.
+
+#### Print Endpoint Routing (Corrected)
+
+| Button in POS UI | Frontend service call | Backend route | Controller | Output format |
+|---|---|---|---|---|
+| `Print KOT-xxx-N` (individual ticket) | `getKitchenKOTByTicketHTML(ticketId)` | `GET /api/invoices/kot/ticket/:id/kitchen` | `getKitchenKOTByTicket` | New Quick Bill KOT format |
+| `All Kitchen KOT` | `getKitchenKOTHTML(orderId)` | `GET /api/invoices/kot/kitchen/:orderId` | `getKitchenKOT` | Merged Quick Bill KOT (all counters in one slip) |
+| `Customer Bill` | `getCustomerBillHTML(orderId)` | `GET /api/invoices/customer/:orderId` | `getCustomerBill` | Thermal customer bill with prices, tax, totals |
+
+**Anti-hallucination**: `getCustomerKOT` (`GET /api/invoices/kot/customer/:orderId`) still exists and is the Quick Bill KOT for customer-facing quick slips — distinct from the Customer Bill.
+
+#### Quick Bill KOT Format (`generateQuickBillKOTHTML`)
+
+File: `backend/src/controllers/invoices.ts`
+
+New layout (thermal 80mm):
+```
+  OUTLET NAME (from warehouses.name via ticket.outlet_id)
+  KOT No : 7
+  Quick Bill
+  ─ ─ ─ ─ ─ ─ ─ ─
+  Order No : 8765          ← last segment of receipt_number
+  Billed By: sunil
+  ─────────────────
+  ITEM            QTY
+  ─────────────────
+  A Dosa Paneer    1
+  ─────────────────
+  Total Qty:    1.00
+```
+
+Key decisions:
+- **No date/time in header** — removed for cleaner KOT
+- **No company name** — always uses outlet name from `warehouses.name`, resolved via `ticket.outlet_id` (most authoritative) → `order.outlet_id` → `'Store'` fallback
+- **Short order number** — `rawReceipt.split('-').pop()` gives e.g. `'8765'` from `'RCP-20260503-8765'`
+- **No `window.onload → window.print()` script** — removed from generated HTML; frontend `printHTML()` is the sole trigger
+- Accepts optional `kotSeqOverride: string` parameter for merged multi-ticket display (e.g. `'7, 8'`)
+
+#### All Kitchen KOT — Merged Single Slip (`getKitchenKOT`)
+
+Previously generated one Quick Bill KOT per ticket (per counter) and concatenated HTML. Now:
+1. Fetches all `pos_kot_tickets` for the order (ordered by `created_at ASC`)
+2. Merges ALL `ticket_items_snapshot` arrays into one flat `KotSnapshotLine[]`
+3. Passes a single synthetic merged ticket to `generateQuickBillKOTHTML` with:
+   - `kotSeqOverride = '7, 8'` (all seq numbers joined)
+   - `outlet_id` from the first ticket
+   - `ticket_items_snapshot` = flattened union of all snapshots
+4. Produces **one single slip** showing all items from all counters
+
+Fallback: if no `pos_kot_tickets` rows exist, falls through to legacy `generateThermalKOTHTML(orderId, companyId, 'kitchen')`.
+
+#### Customer Bill Format (`getCustomerBill` → `generateThermalKOTHTML` with `'customer'` type)
+
+The existing `generateThermalKOTHTML` already supported a `'customer'` mode with Item | Qty | Amount columns and financial totals. Updated to:
+- **Fetch KOT numbers** from `pos_kot_tickets.kot_number_seq` for the order and include them in the header
+- **Show short receipt number** (`Bill No : 8765` not the full `RCP-20260503-8765`)
+- **Remove `Content-Disposition: attachment`** header so HTML renders inline for iframe printing instead of forcing a download
+
+Customer bill header now shows:
+```
+  OUTLET NAME
+  CUSTOMER BILL
+  Bill No : 8765
+  KOT No : 7, 8
+  03/05/26, 11:39 PM
+```
+
+#### Double-Print Bug Fix (`frontend/src/api/invoices.ts` → `printHTML`)
+
+**Root causes (two simultaneous):**
+1. Generated HTML contained `<script>window.onload = () => window.print();</script>` AND the frontend `printHTML` also called `iframe.contentWindow.print()` → two prints
+2. `printHTML` could call `printAndCleanup()` immediately (if `doc.readyState === 'complete'`) AND THEN `iframe.onload` also fired, calling it a second time
+
+**Fix:**
+```typescript
+let printed = false;
+const printAndCleanup = () => {
+  if (printed) return;  // guard
+  printed = true;
+  // ... print logic
+};
+iframe.onload = printAndCleanup;       // always register
+if (doc.readyState === 'complete') {    // also call immediately if ready
+  printAndCleanup();
+}
+```
+- The `printed` flag makes the second call a no-op regardless of trigger order
+- `window.onload → window.print()` removed from all generated HTML templates
+
+#### Anti-Hallucination Notes
+- `getCustomerBill` (`GET /api/invoices/customer/:orderId`) now calls `generateThermalKOTHTML(orderId, companyId, 'customer')` — **NOT** `generateInvoiceHTML`. The A4 PDF invoice path is no longer used for POS customer bill printing.
+- `getKitchenKOT` (all kitchen) produces **one merged slip**, not multiple slips concatenated. Do not revert to the previous per-ticket HTML concatenation approach.
+- `generateQuickBillKOTHTML` signature: `(orderId, companyId, ticket, kotSeqOverride?)` — 4th param is only for the merged all-kitchen case.
+- The `generateKitchenHtmlFromTicketSnapshots` function still exists in the codebase for potential legacy use but is no longer called by any active controller.
+- Graphify updated: 1452 nodes, 1502 edges, 384 communities (post-session rebuild).
+
+---
+
+### Recent Changes (2026-04-27) — POS Order History KOT Display Enhancement
 
 #### POS Menu Management System
 
 ##### Objective
 Allow operators to create named menus, assign them per outlet/warehouse, control which product variants appear in the POS sale view, set POS-specific price overrides, and update inventory stock counts — all from within the POS SPA.
 
-##### Database Migration (`20260427_create_pos_menu_tables.sql`)
+##### Database Migration (`20260427_create_pos_menu_tables.sql` & recent updates)
 Three new tables with RLS scoped to `company_memberships (is_active = TRUE)`:
-- **`pos_menus`**: `id`, `company_id`, `name`, `description`, `created_at`, `updated_at` (auto-updated via trigger `trg_pos_menus_updated_at`).
+- **`pos_menus`**: `id`, `company_id`, `name`, `description`, `created_at`, `updated_at` (auto-updated via trigger `trg_pos_menus_updated_at`), `pos_display_category_ids` (`uuid[]`), `pos_display_collection_ids` (`uuid[]`).
 - **`pos_menu_outlets`**: `id`, `company_id`, `menu_id → pos_menus`, `warehouse_id → warehouses`. `UNIQUE (company_id, warehouse_id)` enforces one active menu per outlet. Assigning a new menu to an outlet automatically displaces the previous one (upsert on conflict).
 - **`pos_menu_items`**: `id`, `company_id`, `menu_id`, `product_id`, `variant_id` (NOT NULL — always at variant level), `is_visible BOOLEAN DEFAULT TRUE`, `pos_price NUMERIC(12,2)` (NULL = use default sale price), `sort_order INT`. `UNIQUE (menu_id, variant_id)`.
 
@@ -474,23 +576,27 @@ New shared DB function: `public.set_updated_at()` — generic `BEFORE UPDATE` tr
 | GET | `/api/pos/menus/active?warehouse_id=` | Active menu + items for outlet (POS sale view) |
 | GET | `/api/pos/menus/:id` | Menu detail + items |
 | PUT | `/api/pos/menus/:id` | Rename / re-describe |
+| PATCH | `/api/pos/menus/:id/display-filters` | Update category/collection display filters |
 | DELETE | `/api/pos/menus/:id` | Delete (cascades items + outlet links) |
 | PUT | `/api/pos/menus/:id/items` | Bulk upsert items via `onConflict: 'menu_id,variant_id'` |
 | POST | `/api/pos/menus/:id/outlets/:warehouseId` | Assign outlet (upserts `pos_menu_outlets`) |
 | DELETE | `/api/pos/menus/:id/outlets/:warehouseId` | Unassign outlet |
 
-Inventory stock updates from Menu Management UI use the **existing** `POST /api/inventory/adjust` endpoint (calls `adjust_stock` RPC — creates `stock_movements` + updates `warehouse_inventory.stock_count`). No new inventory endpoint was added.
+Inventory stock updates from Menu Management UI use the **existing** `POST /api/inventory/adjust` endpoint.
+**New bulk lookup**: `GET /api/collections/variants?collection_ids=...` (in `collectionController.ts`) to efficiently resolve variants belonging to multiple collections for the POS display filters.
 
 ##### Frontend
 - **New API client**: `frontend/src/api/posMenus.ts` — typed wrapper using `apiClient`.
 - **New component**: `frontend/src/pages/pos/MenuManagement.tsx` — two-panel dark SPA view:
   - Left panel: menu list with inline create form.
-  - Right panel: editable name/description header, per-outlet toggle row (assign/unassign), warehouse selector for stock view, full product/variant table with visibility checkbox, POS price input (placeholder = default price), inline stock count field (calls `POST /api/inventory/adjust`), sticky "Save Menu Items" bar when draft is dirty.
+  - Right panel: editable name/description header, **POS Display Filters** (multi-select categories and collections to restrict POS catalog scope), per-outlet toggle row (assign/unassign), warehouse selector for stock view, full product/variant table with visibility checkbox, POS price input (placeholder = default price), inline stock count field.
 - **`frontend/src/pages/pos/CreatePOSOrder.tsx`** changes:
   - `activeView` type extended to include `'menus'`.
-  - `UtensilsCrossed` icon added to imports; "Menus" entry added to `sidebarItems` array.
   - `activeMenu` query: `GET /api/pos/menus/active?warehouse_id=<selectedOutlet>` — `staleTime: 30000`, keyed by warehouse ID, invalidated on menu save.
-  - `groupedProducts` useMemo: when `activeMenu` has items, filters variants to those with `is_visible = true` and applies `pos_price` override before the product grid renders.
+  - **Multi-tier Filtering Architecture** (`groupedProducts` useMemo):
+    1. **Display Filters (Outer Scope)**: If `pos_display_category_ids` or `pos_display_collection_ids` are set, products are filtered using **OR logic** (must belong to at least one selected category OR collection).
+    2. **Menu Items (Inner Scope)**: If *no* display filters are active, the `is_visible` flag from `pos_menu_items` gates visibility. If display filters *are* active, the menu-items list is only used for `pos_price` overrides, ensuring display filters fully control the browseable catalog scope.
+  - **Collection Tabs**: Selected collections render as emerald-styled tabs alongside category tabs in the POS header. Clicking a collection tab (`col:{id}`) filters the grid using a per-collection `collectionVariantMap`.
   - Menus view rendered **inside** the main content `<div className="flex-1 flex min-w-0 min-h-0 overflow-hidden relative">` — not as a sibling.
 
 **Critical layout rule**: All POS view blocks (`sale`, `history`, `customers`, `menus`, `reports`, `settings`) must be direct children of the main content flex container (line ~1502). Placing a view block outside this div causes it to render as an extra sibling in the root flex row, breaking layout.

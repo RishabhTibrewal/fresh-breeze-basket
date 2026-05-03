@@ -4,6 +4,38 @@ import { ApiError } from '../middleware/error';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
+ * GET /api/collections/variants?collection_ids=uuid1,uuid2,...
+ * Returns all variant_id memberships for the given collection IDs.
+ * Used by the POS sale page to apply collection display filters.
+ */
+export const getVariantsByCollectionIds = async (req: Request, res: Response) => {
+  try {
+    const { collection_ids } = req.query as { collection_ids?: string };
+    if (!collection_ids?.trim()) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+    const ids = collection_ids.split(',').map(s => s.trim()).filter(Boolean);
+    if (ids.length === 0) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+    const client = supabaseAdmin || supabase;
+    const { data, error } = await client
+      .from('variant_collections')
+      .select('variant_id, collection_id')
+      .in('collection_id', ids);
+
+    if (error) throw new ApiError(500, `Failed to fetch collection variants: ${error.message}`);
+    res.status(200).json({ success: true, data: data || [] });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      res.status(error.statusCode).json({ success: false, error: { message: error.message, code: error.statusCode } });
+    } else {
+      res.status(500).json({ success: false, error: { message: 'Unexpected error', code: 500 } });
+    }
+  }
+};
+
+/**
  * Get all collections for a company
  */
 export const getCollections = async (req: Request, res: Response) => {

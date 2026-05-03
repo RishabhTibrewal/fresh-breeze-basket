@@ -23,6 +23,8 @@ export interface PosMenu {
   description: string | null;
   created_at: string;
   updated_at: string;
+  pos_display_category_ids: string[];
+  pos_display_collection_ids: string[];
   outlets: PosMenuOutlet[];
   items?: PosMenuItem[];
 }
@@ -31,6 +33,8 @@ export interface ActiveMenu {
   id: string;
   name: string;
   description: string | null;
+  pos_display_category_ids: string[];
+  pos_display_collection_ids: string[];
   items: PosMenuItem[];
 }
 
@@ -85,5 +89,13 @@ export const posMenusApi = {
 
   unassignOutlet: async (menuId: string, warehouseId: string): Promise<void> => {
     await apiClient.delete(`/pos/menus/${menuId}/outlets/${warehouseId}`);
+  },
+
+  updateDisplayFilters: async (
+    menuId: string,
+    payload: { pos_display_category_ids: string[]; pos_display_collection_ids: string[] }
+  ): Promise<PosMenu> => {
+    const res = await apiClient.patch(`/pos/menus/${menuId}/display-filters`, payload);
+    return res.data.data;
   },
 };

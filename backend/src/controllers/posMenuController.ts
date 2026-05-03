@@ -12,6 +12,7 @@ export const listMenus = async (req: Request, res: Response, next: NextFunction)
       .from('pos_menus')
       .select(`
         id, name, description, created_at, updated_at,
+        pos_display_category_ids, pos_display_collection_ids,
         outlets:pos_menu_outlets(id, warehouse_id, warehouses(id, name, code))
       `)
       .eq('company_id', req.companyId)
@@ -69,6 +70,7 @@ export const getActiveMenu = async (req: Request, res: Response, next: NextFunct
       .from('pos_menus')
       .select(`
         id, name, description,
+        pos_display_category_ids, pos_display_collection_ids,
         items:pos_menu_items(
           id, product_id, variant_id, is_visible, pos_price, sort_order
         )
@@ -95,6 +97,7 @@ export const getMenu = async (req: Request, res: Response, next: NextFunction) =
       .from('pos_menus')
       .select(`
         id, name, description, created_at, updated_at,
+        pos_display_category_ids, pos_display_collection_ids,
         outlets:pos_menu_outlets(id, warehouse_id, warehouses(id, name, code)),
         items:pos_menu_items(
           id, product_id, variant_id, is_visible, pos_price, sort_order
@@ -117,18 +120,64 @@ export const updateMenu = async (req: Request, res: Response, next: NextFunction
   try {
     if (!req.companyId) throw new ValidationError('Company context is required');
     const { id } = req.params;
-    const { name, description } = req.body;
+    const { name, description, pos_display_category_ids, pos_display_collection_ids } = req.body;
     if (!name?.trim()) throw new ValidationError('Menu name is required');
+
+    const updatePayload: Record<string, any> = {
+      name: name.trim(),
+      description: description?.trim() || null,
+    };
+    if (Array.isArray(pos_display_category_ids)) {
+      updatePayload.pos_display_category_ids = pos_display_category_ids;
+    }
+    if (Array.isArray(pos_display_collection_ids)) {
+      updatePayload.pos_display_collection_ids = pos_display_collection_ids;
+    }
 
     const { data, error } = await supabaseAdmin
       .from('pos_menus')
-      .update({ name: name.trim(), description: description?.trim() || null })
+      .update(updatePayload)
       .eq('id', id)
       .eq('company_id', req.companyId)
       .select()
       .single();
 
     if (error) throw new ApiError(500, 'Failed to update menu');
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── Update display filters only (categories & collections) ──────────────────
+// PATCH /api/pos/menus/:id/display-filters
+export const updateMenuDisplayFilters = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.companyId) throw new ValidationError('Company context is required');
+    const { id } = req.params;
+    const { pos_display_category_ids, pos_display_collection_ids } = req.body;
+
+    const updatePayload: Record<string, any> = {};
+    if (Array.isArray(pos_display_category_ids)) {
+      updatePayload.pos_display_category_ids = pos_display_category_ids;
+    }
+    if (Array.isArray(pos_display_collection_ids)) {
+      updatePayload.pos_display_collection_ids = pos_display_collection_ids;
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      throw new ValidationError('No valid fields to update');
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('pos_menus')
+      .update(updatePayload)
+      .eq('id', id)
+      .eq('company_id', req.companyId)
+      .select()
+      .single();
+
+    if (error) throw new ApiError(500, 'Failed to update display filters');
     res.json({ success: true, data });
   } catch (err) {
     next(err);

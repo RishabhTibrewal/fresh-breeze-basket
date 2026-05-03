@@ -348,6 +348,15 @@ export default function CreatePOSOrder() {
     },
   });
 
+  const { data: collections = [] } = useQuery({
+    queryKey: ['pos-collections'],
+    queryFn: async () => {
+      const res = await apiClient.get('/collections');
+      return (res.data?.data || res.data || []).filter((c: any) => c.is_active !== false);
+    },
+    staleTime: 60000,
+  });
+
   const { data: warehouses = [] } = useQuery({
     queryKey: ['warehouses'],
     queryFn: () => warehousesService.getAll(true),
@@ -372,6 +381,37 @@ export default function CreatePOSOrder() {
     },
     staleTime: 30000,
   });
+
+  // Fetch collection→variant mappings when the active menu has collection filters
+  const activeCollectionIds: string[] = activeMenu?.pos_display_collection_ids ?? [];
+  const { data: collectionVariantMap = new Map<string, Set<string>>() } = useQuery({
+    queryKey: ['pos-collection-variants', activeCollectionIds],
+    queryFn: async () => {
+      if (activeCollectionIds.length === 0) return new Map<string, Set<string>>();
+      const res = await apiClient.get('/collections/variants', {
+        params: { collection_ids: activeCollectionIds.join(',') },
+      });
+      const rows: Array<{ variant_id: string; collection_id: string }> = res.data?.data || res.data || [];
+      const map = new Map<string, Set<string>>();
+      for (const row of rows) {
+        if (!map.has(row.collection_id)) map.set(row.collection_id, new Set());
+        map.get(row.collection_id)!.add(row.variant_id);
+      }
+      return map;
+    },
+    enabled: activeCollectionIds.length > 0,
+    staleTime: 60000,
+  });
+
+  // Merged set of all variant IDs across all selected collections (used for groupedProducts OR filter)
+  const allCollectionVariantIds = useMemo(() => {
+    const merged = new Set<string>();
+    for (const set of collectionVariantMap.values()) {
+      for (const id of set) merged.add(id);
+    }
+    return merged;
+  }, [collectionVariantMap]);
+
 
   const reportDisplayFilters = useMemo(() => {
     let fromDate = todayDate;
@@ -1133,7 +1173,7 @@ export default function CreatePOSOrder() {
 
   // ─── Computed ───────────────────────────────────────────────────────────────
 
-  // Group flat variants into per-product catalog entries, applying active menu filter + price override
+  // Group flat variants into per-product catalog entries, applying active menu filter + price override + display filters
   const groupedProducts = useMemo(() => {
     // Build a quick lookup from active menu items: variant_id -> { is_visible, pos_price }
     const menuItemMap = new Map<string, { is_visible: boolean; pos_price: number | null }>();
@@ -1144,6 +1184,15 @@ export default function CreatePOSOrder() {
       }
     }
 
+    // Display filter sets from the active menu
+    const allowedCatIds: Set<string> | null =
+      (activeMenu?.pos_display_category_ids ?? []).length > 0
+        ? new Set(activeMenu!.pos_display_category_ids)
+        : null;
+
+    const hasCollectionFilter = (activeMenu?.pos_display_collection_ids ?? []).length > 0;
+    const hasDisplayFilters = allowedCatIds !== null || hasCollectionFilter;
+
     const productMap = new Map<string, {
       product_id: string;
       product_name: string;
@@ -1153,13 +1202,37 @@ export default function CreatePOSOrder() {
     }>();
 
     for (const rawV of variants as any[]) {
-      // If there's an active menu, skip variants not in it or explicitly hidden
       let v = rawV;
+
+      // ── Step 1: Display filters (OR logic — show product if it matches ANY active display filter)
+      // If both category and collection filters are set, a product shows if it's in either.
+      // If only one filter type is set, that type exclusively controls visibility.
+      if (hasDisplayFilters) {
+        const passesCategory = allowedCatIds
+          ? (v.category_id && allowedCatIds.has(v.category_id))
+          : false;
+        const passesCollection = hasCollectionFilter
+          ? allCollectionVariantIds.has(v.variant_id)
+          : false;
+        // Must pass at least one active filter
+        if (allowedCatIds && hasCollectionFilter) {
+          // Both filters active → OR logic
+          if (!passesCategory && !passesCollection) continue;
+        } else if (allowedCatIds) {
+          if (!passesCategory) continue;
+        } else if (hasCollectionFilter) {
+          if (!passesCollection) continue;
+        }
+      }
+
+      // ── Step 2: Menu items filter (only applies when no display filters are active)
+      // When display filters scope the catalog, the menu-items list is used for price overrides only.
+      // When no display filters are set, the menu-items list gates visibility as before.
       if (hasMenu) {
         const menuItem = menuItemMap.get(v.variant_id);
-        if (!menuItem || !menuItem.is_visible) continue;
-        // Apply POS price override if set
-        if (menuItem.pos_price !== null && menuItem.pos_price !== undefined) {
+        if (!hasDisplayFilters && (!menuItem || !menuItem.is_visible)) continue;
+        // Apply POS price override if set (always, regardless of display filter mode)
+        if (menuItem && menuItem.pos_price !== null && menuItem.pos_price !== undefined) {
           v = { ...v, sale_price: menuItem.pos_price };
         }
       }
@@ -1176,7 +1249,11 @@ export default function CreatePOSOrder() {
       productMap.get(v.product_id)!.variants.push(v);
     }
     return Array.from(productMap.values());
-  }, [variants, activeMenu]);
+  }, [variants, activeMenu, allCollectionVariantIds]);
+
+  // Derived: which collection does the active tab belong to (for collection tabs)
+  const activeCollectionTab: string | null =
+    activeCategory.startsWith('col:') ? activeCategory.slice(4) : null;
 
   const filteredProducts = useMemo(() => {
     const q = searchQuery.toLowerCase();
@@ -1187,10 +1264,19 @@ export default function CreatePOSOrder() {
           v.name?.toLowerCase().includes(q) ||
           v.sku?.toLowerCase().includes(q)
         );
-      const matchCat = activeCategory === 'all' || p.category_id === activeCategory;
+      let matchCat = false;
+      if (activeCategory === 'all') {
+        matchCat = true;
+      } else if (activeCollectionTab) {
+        // Collection tab: show products whose variant belongs to that specific collection
+        const colSet = collectionVariantMap.get(activeCollectionTab);
+        matchCat = colSet ? p.variants.some((v: any) => colSet.has(v.variant_id)) : false;
+      } else {
+        matchCat = p.category_id === activeCategory;
+      }
       return matchSearch && matchCat;
     });
-  }, [groupedProducts, searchQuery, activeCategory]);
+  }, [groupedProducts, searchQuery, activeCategory, activeCollectionTab, collectionVariantMap]);
 
   const handleProductCardClick = (product: { product_id: string; product_name: string; image_url: string | null; category_id: string; variants: any[] }) => {
     if (product.variants.length === 1) {
@@ -1484,7 +1570,7 @@ export default function CreatePOSOrder() {
   const handlePrintCustomerBill = async () => {
     if (!paymentSuccess?.orderId) return;
     try {
-      const html = await invoicesService.getCustomerKOTHTML(paymentSuccess.orderId);
+      const html = await invoicesService.getCustomerBillHTML(paymentSuccess.orderId);
       await invoicesService.printHTML(html);
     } catch {
       toast.error('Could not open Customer Bill');
@@ -1494,7 +1580,7 @@ export default function CreatePOSOrder() {
   const handlePrintHistoryBill = async () => {
     if (!historyDetailsOrderId) return;
     try {
-      const html = await invoicesService.getCustomerKOTHTML(historyDetailsOrderId);
+      const html = await invoicesService.getCustomerBillHTML(historyDetailsOrderId);
       await invoicesService.printHTML(html);
     } catch {
       toast.error('Could not open Customer Bill');
@@ -1661,7 +1747,7 @@ export default function CreatePOSOrder() {
           </div>
         </div>
 
-        {/* Category Tabs */}
+        {/* Category + Collection Tabs */}
         <div className="flex-shrink-0 px-4 py-3 bg-[#0f1117] border-b border-white/5 overflow-x-auto overflow-y-hidden scrollbar-none">
           <div className="flex items-center gap-2 min-w-max whitespace-nowrap pr-2">
             <button
@@ -1669,18 +1755,50 @@ export default function CreatePOSOrder() {
               className={`flex-shrink-0 px-4 py-1.5 rounded-md text-xs font-medium transition-all
                 ${activeCategory === 'all' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'}`}
             >
-              All Products
+              All
             </button>
-            {categories.map((cat: any) => (
-              <button
-                key={cat.id}
-                onClick={() => setActiveCategory(cat.id)}
-                className={`flex-shrink-0 px-4 py-1.5 rounded-md text-xs font-medium transition-all
-                  ${activeCategory === cat.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'}`}
-              >
-                {cat.name}
-              </button>
-            ))}
+
+            {/* Category tabs — only show allowed categories when display filter is active */}
+            {(() => {
+              const allowedCatIds = (activeMenu?.pos_display_category_ids ?? []).length > 0
+                ? new Set(activeMenu!.pos_display_category_ids)
+                : null;
+              const visibleCats = allowedCatIds
+                ? (categories as any[]).filter((c: any) => allowedCatIds.has(c.id))
+                : (categories as any[]);
+              return visibleCats.map((cat: any) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setActiveCategory(cat.id)}
+                  className={`flex-shrink-0 px-4 py-1.5 rounded-md text-xs font-medium transition-all
+                    ${activeCategory === cat.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'}`}
+                >
+                  {cat.name}
+                </button>
+              ));
+            })()}
+
+            {/* Collection tabs — appear when collection display filter is active */}
+            {(activeMenu?.pos_display_collection_ids ?? []).length > 0 &&
+              (activeMenu!.pos_display_collection_ids).map((colId: string) => {
+                const col = (collections as any[]).find((c: any) => c.id === colId);
+                if (!col) return null;
+                const tabKey = `col:${colId}`;
+                return (
+                  <button
+                    key={tabKey}
+                    onClick={() => setActiveCategory(tabKey)}
+                    className={`flex-shrink-0 px-4 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5
+                      ${activeCategory === tabKey
+                        ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                        : 'bg-emerald-600/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/20'}`}
+                  >
+                    <span className="opacity-70 text-[10px]">⬡</span>
+                    {col.name}
+                  </button>
+                );
+              })
+            }
           </div>
         </div>
 

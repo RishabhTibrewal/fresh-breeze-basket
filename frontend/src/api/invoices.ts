@@ -92,7 +92,6 @@ export const invoicesService = {
   async printHTML(html: string): Promise<void> {
     const iframe = document.createElement('iframe');
     
-    // Position it off-screen instead of display:none for better browser support
     Object.assign(iframe.style, {
       position: 'fixed',
       right: '0',
@@ -112,12 +111,14 @@ export const invoicesService = {
       doc.write(html);
       doc.close();
       
+      let printed = false;
       const printAndCleanup = () => {
+        if (printed) return;
+        printed = true;
         if (!iframe.contentWindow) return;
         iframe.contentWindow.focus();
         iframe.contentWindow.print();
         
-        // Increase cleanup timeout to prevent "disconnected port" errors from browser extensions
         setTimeout(() => {
           if (document.body.contains(iframe)) {
             document.body.removeChild(iframe);
@@ -125,11 +126,10 @@ export const invoicesService = {
         }, 5000); 
       };
 
-      // Ensure doc is loaded before printing
+      // Always prefer onload; fall back to immediate call if already complete
+      iframe.onload = printAndCleanup;
       if (doc.readyState === 'complete') {
         printAndCleanup();
-      } else {
-        iframe.onload = printAndCleanup;
       }
     }
   }

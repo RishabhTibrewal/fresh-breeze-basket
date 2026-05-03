@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Trash2, Search, Package, Save, ChevronRight,
   ToggleLeft, ToggleRight, Warehouse, Edit2, X, Check,
-  Loader2, RefreshCw, AlertCircle, Store,
+  Loader2, RefreshCw, AlertCircle, Store, FolderOpen, Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '@/lib/apiClient';
@@ -57,6 +57,11 @@ export default function MenuManagement({ warehouses }: Props) {
   const [draft, setDraft] = useState<DraftMap>({});
   const [draftDirty, setDraftDirty] = useState(false);
 
+  // display filters: which categories/collections are shown on POS sale page
+  const [displayCategoryIds, setDisplayCategoryIds] = useState<string[]>([]);
+  const [displayCollectionIds, setDisplayCollectionIds] = useState<string[]>([]);
+  const [displayFiltersDirty, setDisplayFiltersDirty] = useState(false);
+
   // ── Data queries ──────────────────────────────────────────────────────────
   const { data: menus = [], isLoading: menusLoading } = useQuery({
     queryKey: ['pos-menus'],
@@ -106,6 +111,14 @@ export default function MenuManagement({ warehouses }: Props) {
     queryFn: async () => {
       const res = await apiClient.get('/categories');
       return res.data?.data || res.data || [];
+    },
+  });
+
+  const { data: collections = [] } = useQuery({
+    queryKey: ['pos-collections'],
+    queryFn: async () => {
+      const res = await apiClient.get('/collections');
+      return (res.data?.data || res.data || []).filter((c: any) => c.is_active !== false);
     },
   });
 
@@ -161,6 +174,10 @@ export default function MenuManagement({ warehouses }: Props) {
     setDraftDirty(false);
     setEditName(menuDetail.name);
     setEditDesc(menuDetail.description ?? '');
+    // Sync display filters
+    setDisplayCategoryIds(menuDetail.pos_display_category_ids ?? []);
+    setDisplayCollectionIds(menuDetail.pos_display_collection_ids ?? []);
+    setDisplayFiltersDirty(false);
   }, [menuDetail]);
 
   // ── Set default inventory warehouse when menu changes ─────────────────────
@@ -272,6 +289,34 @@ export default function MenuManagement({ warehouses }: Props) {
     },
     onError: (_e, vars) => toast.error(vars.assign ? 'Failed to assign outlet' : 'Failed to remove outlet'),
   });
+
+  const saveDisplayFiltersMut = useMutation({
+    mutationFn: () => posMenusApi.updateDisplayFilters(selectedMenuId!, {
+      pos_display_category_ids: displayCategoryIds,
+      pos_display_collection_ids: displayCollectionIds,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pos-menu', selectedMenuId] });
+      queryClient.invalidateQueries({ queryKey: ['pos-active-menu'] });
+      setDisplayFiltersDirty(false);
+      toast.success('Display filters saved');
+    },
+    onError: () => toast.error('Failed to save display filters'),
+  });
+
+  const toggleDisplayCategory = (id: string) => {
+    setDisplayCategoryIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+    setDisplayFiltersDirty(true);
+  };
+
+  const toggleDisplayCollection = (id: string) => {
+    setDisplayCollectionIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+    setDisplayFiltersDirty(true);
+  };
 
   // Transfer queued qty values from global warehouse_inventory → pos_outlet_inventory
   const transferToPosMut = useMutation({
@@ -518,6 +563,100 @@ export default function MenuManagement({ warehouses }: Props) {
                       );
                     })
                   )}
+                </div>
+              </div>
+
+              {/* ── POS Display Filters ── */}
+              <div className="px-5 py-4 border-b border-white/5">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <FolderOpen className="h-3.5 w-3.5" /> POS Display Filters
+                  </h3>
+                  {displayFiltersDirty && (
+                    <button
+                      onClick={() => saveDisplayFiltersMut.mutate()}
+                      disabled={saveDisplayFiltersMut.isPending}
+                      className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                    >
+                      {saveDisplayFiltersMut.isPending
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <Save className="h-3 w-3" />}
+                      Save Filters
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-500 mb-3">
+                  Leave both sections empty to show everything. Selecting items restricts the POS sale page to only those categories / collections.
+                </p>
+
+                {/* Categories */}
+                <div className="mb-4">
+                  <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                    <FolderOpen className="h-3 w-3" /> Categories
+                    {displayCategoryIds.length > 0 && (
+                      <span className="ml-1 bg-indigo-600/30 text-indigo-300 px-1.5 py-0.5 rounded text-[9px]">
+                        {displayCategoryIds.length} selected
+                      </span>
+                    )}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(categories as any[]).length === 0 ? (
+                      <p className="text-gray-600 text-xs">No categories found</p>
+                    ) : (
+                      (categories as any[]).map((c: any) => {
+                        const active = displayCategoryIds.includes(c.id);
+                        return (
+                          <button
+                            key={c.id}
+                            onClick={() => toggleDisplayCategory(c.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                              active
+                                ? 'bg-indigo-600/25 border-indigo-500/50 text-indigo-300'
+                                : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            {active && <Check className="h-3 w-3 flex-shrink-0" />}
+                            {c.name}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Collections */}
+                <div>
+                  <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                    <Layers className="h-3 w-3" /> Collections
+                    {displayCollectionIds.length > 0 && (
+                      <span className="ml-1 bg-emerald-600/30 text-emerald-300 px-1.5 py-0.5 rounded text-[9px]">
+                        {displayCollectionIds.length} selected
+                      </span>
+                    )}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(collections as any[]).length === 0 ? (
+                      <p className="text-gray-600 text-xs">No collections found</p>
+                    ) : (
+                      (collections as any[]).map((c: any) => {
+                        const active = displayCollectionIds.includes(c.id);
+                        return (
+                          <button
+                            key={c.id}
+                            onClick={() => toggleDisplayCollection(c.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                              active
+                                ? 'bg-emerald-600/25 border-emerald-500/50 text-emerald-300'
+                                : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            {active && <Check className="h-3 w-3 flex-shrink-0" />}
+                            {c.name}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               </div>
 

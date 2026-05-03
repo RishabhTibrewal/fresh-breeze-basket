@@ -10,6 +10,7 @@ import {
   upsertMenuItems,
   assignOutlet,
   unassignOutlet,
+  updateMenuDisplayFilters,
 } from '../controllers/posMenuController';
 
 const router = express.Router();
@@ -26,6 +27,7 @@ router.get('/:id', getMenu);                   // GET  /api/pos/menus/:id
 router.put('/:id', updateMenu);                // PUT  /api/pos/menus/:id
 router.delete('/:id', deleteMenu);             // DELETE /api/pos/menus/:id
 router.put('/:id/items', upsertMenuItems);     // PUT  /api/pos/menus/:id/items
+router.patch('/:id/display-filters', updateMenuDisplayFilters); // PATCH /api/pos/menus/:id/display-filters
 
 // Outlet assignment
 router.post('/:id/outlets/:warehouseId', assignOutlet);    // POST   /api/pos/menus/:id/outlets/:warehouseId
