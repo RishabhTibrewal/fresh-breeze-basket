@@ -7,7 +7,8 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 console.log('Environment variables loaded:', {
   SUPABASE_URL: process.env.SUPABASE_URL,
-  SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY ? 'present' : 'missing'
+  SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY ? 'present' : 'missing',
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'present' : 'missing'
 });
 
 const supabaseUrl = process.env.SUPABASE_URL!;
