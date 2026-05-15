@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/contexts/AuthContext';
 import { Plus, Pencil, Trash2, Search, Package, Building2, Table } from 'lucide-react';
 import { productsService, Product } from '@/api/products';
 import { categoriesService } from '@/api/categories';
@@ -31,6 +32,8 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 export default function ProductList() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { isAdmin } = useAuth();
+  const canModify = isAdmin; // Only admin/accounts can edit or delete
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteProductId, setDeleteProductId] = useState<string | null>(null);
   const [brandFilter, setBrandFilter] = useState<string>('all');
@@ -40,7 +43,7 @@ export default function ProductList() {
 
   const { data: products, isLoading: isLoadingProducts, refetch: refetchProducts } = useQuery<Product[]>({
     queryKey: ['products'],
-    queryFn: productsService.getAll,
+    queryFn: () => productsService.getAll(),
   });
 
   const { data: categories } = useQuery({
@@ -177,26 +180,30 @@ export default function ProductList() {
             <Package className="h-4 w-4 mr-1" />
             Variants
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`${basePath}/products/edit/${product.id}`);
-            }}
-          >
-            <Pencil className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              setDeleteProductId(product.id);
-            }}
-          >
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
+          {canModify && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`${basePath}/products/edit/${product.id}`);
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          )}
+          {canModify && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setDeleteProductId(product.id);
+              }}
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          )}
         </div>
       ),
     },
@@ -275,27 +282,31 @@ export default function ProductList() {
                 <Package className="h-4 w-4 mr-1" />
                 Manage Variants
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigate(`${basePath}/products/edit/${product.id}`);
-                }}
-              >
-                <Pencil className="h-4 w-4 mr-1" />
-                Edit
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeleteProductId(product.id);
-                }}
-              >
-                <Trash2 className="h-4 w-4 text-destructive" />
-              </Button>
+              {canModify && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`${basePath}/products/edit/${product.id}`);
+                  }}
+                >
+                  <Pencil className="h-4 w-4 mr-1" />
+                  Edit
+                </Button>
+              )}
+              {canModify && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteProductId(product.id);
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              )}
             </div>
           </div>
         </div>

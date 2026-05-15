@@ -158,7 +158,7 @@ export default function CreatePOSOrder() {
   const queryClient = useQueryClient();
   const { profile } = useAuth();
   const searchRef = useRef<HTMLInputElement>(null);
-  const canViewAllPosSessions = (profile?.roles || []).includes('admin') || profile?.role === 'admin';
+  const canViewAllPosSessions = (profile?.roles || []).includes('admin') || profile?.role === 'admin' || (profile?.roles || []).includes('pos_manager');
 
   // ── sidebar ──
   const [sidebarOpen, setSidebarOpen] = useState(true);

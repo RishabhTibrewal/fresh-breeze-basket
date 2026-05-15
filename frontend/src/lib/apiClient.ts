@@ -73,8 +73,6 @@ apiClient.interceptors.request.use(
         delete config.headers['Content-Type'];
         delete config.headers['content-type'];
       }
-      // Prevent axios from automatically setting Content-Type
-      config.headers = config.headers || {};
       // Don't set Content-Type - let the browser handle it
     }
     
@@ -449,7 +447,27 @@ apiClient.interceptors.response.use(
       }, 300);
     }
     
-    // For other errors, just reject the promise
+    // For other errors, extract backend message and set it on the error object
+    // so callers can use error.message and always get the human-readable backend message
+    if (error.response?.data) {
+      const data = error.response.data;
+      let backendMessage = null;
+      
+      if (typeof data.message === 'string') {
+        backendMessage = data.message;
+      } else if (typeof data.error === 'string') {
+        backendMessage = data.error;
+      } else if (data.error && typeof data.error.message === 'string') {
+        backendMessage = data.error.message;
+      } else if (typeof data.detail === 'string') {
+        backendMessage = data.detail;
+      }
+      
+      if (backendMessage) {
+        error.message = backendMessage;
+      }
+    }
+
     return Promise.reject(error);
   }
 );

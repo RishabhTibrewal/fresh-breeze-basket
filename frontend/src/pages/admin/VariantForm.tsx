@@ -690,24 +690,27 @@ export default function VariantForm() {
       return;
     }
 
-    if (isEditMode) {
-      updateMutation.mutate(data, {
-        onSuccess: async (updatedVariant) => {
-          // Upload new images after variant is updated
-          if (imageFiles.length > 0 && updatedVariant.id) {
-            await uploadVariantImages(updatedVariant.id, updatedVariant.product_id);
-          }
-        },
-      });
-    } else {
-      createMutation.mutate(data, {
-        onSuccess: async (newVariant) => {
-          // Upload new images after variant is created
-          if (imageFiles.length > 0 && newVariant.id) {
-            await uploadVariantImages(newVariant.id, newVariant.product_id);
-          }
-        },
-      });
+    try {
+      if (isEditMode) {
+        const updatedVariant = await updateMutation.mutateAsync(data);
+        // Upload new images after variant is updated
+        if (imageFiles.length > 0 && updatedVariant.id) {
+          await uploadVariantImages(updatedVariant.id, updatedVariant.product_id);
+        }
+      } else {
+        const newVariant = await createMutation.mutateAsync(data);
+        // Upload new images after variant is created
+        if (imageFiles.length > 0 && newVariant.id) {
+          await uploadVariantImages(newVariant.id, newVariant.product_id);
+        }
+      }
+    } catch (error: any) {
+      // Errors from mutateAsync are also handled by the mutation's onError callback,
+      // but we catch here to prevent unhandled promise rejections / white screen.
+      // Only show a toast if the mutation's onError didn't already handle it.
+      if (!updateMutation.error && !createMutation.error) {
+        toast.error(error.message || 'Failed to save variant');
+      }
     }
   };
 

@@ -26,6 +26,7 @@ type AuthContextType = {
   isSales: boolean;
   isAccounts: boolean;
   isWarehouseManager: boolean;
+  isPosManager: boolean;
   warehouses: string[]; // Array of warehouse IDs assigned to user
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
@@ -50,6 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isSales, setIsSales] = useState<boolean>(false);
   const [isAccounts, setIsAccounts] = useState<boolean>(false);
   const [isWarehouseManager, setIsWarehouseManager] = useState<boolean>(false);
+  const [isPosManager, setIsPosManager] = useState<boolean>(false);
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const navigate = useNavigate();
@@ -80,6 +82,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsSales(false);
     setIsAccounts(false);
     setIsWarehouseManager(false);
+    setIsPosManager(false);
     setWarehouses([]);
     setRole(null);
     setRoles([]);
@@ -282,6 +285,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setIsSales(false);
             setIsAccounts(false);
             setIsWarehouseManager(false);
+            setIsPosManager(false);
             setWarehouses([]);
             setRole(null);
             setRoles([]);
@@ -397,6 +401,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setIsAdmin(effectiveRole === 'admin' || effectiveRole === 'accounts');
             setIsSales(effectiveRole === 'sales');
             setIsAccounts(effectiveRole === 'accounts');
+            setIsWarehouseManager(effectiveRole === 'warehouse_manager');
+            setIsPosManager(effectiveRole === 'pos_manager');
             setRole(effectiveRole);
             setRoles(userRoles);
           }
@@ -413,6 +419,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setIsSales(userRoles.includes('sales'));
           setIsAccounts(userRoles.includes('accounts'));
           setIsWarehouseManager(userRoles.includes('warehouse_manager'));
+          setIsPosManager(userRoles.includes('pos_manager'));
           setRole(primaryRole);
           setRoles(userRoles);
           
@@ -458,6 +465,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setIsSales(effectiveRole === 'sales');
           setIsAccounts(effectiveRole === 'accounts');
           setIsWarehouseManager(effectiveRole === 'warehouse_manager');
+          setIsPosManager(effectiveRole === 'pos_manager');
           setWarehouses([]);
           setRole(effectiveRole);
           setRoles(userRoles);
@@ -552,6 +560,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsSales(roles.includes('sales'));
         setIsAccounts(roles.includes('accounts'));
         setIsWarehouseManager(roles.includes('warehouse_manager'));
+        setIsPosManager(roles.includes('pos_manager'));
           setRole(primaryRole);
         setRoles(roles);
           
@@ -692,6 +701,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setIsSales(roles.includes('sales'));
             setIsAccounts(roles.includes('accounts'));
             setIsWarehouseManager(roles.includes('warehouse_manager'));
+            setIsPosManager(roles.includes('pos_manager'));
                 setRole(primaryRole);
             setRoles(roles);
               }
@@ -780,6 +790,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsSales(false);
       setIsAccounts(false);
       setIsWarehouseManager(false);
+      setIsPosManager(false);
       setWarehouses([]);
       setRole(null);
       setRoles([]);
@@ -806,6 +817,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsSales(false);
         setIsAccounts(false);
         setIsWarehouseManager(false);
+        setIsPosManager(false);
         setWarehouses([]);
         setRole(null);
         setRoles([]);
@@ -870,6 +882,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isSales,
     isAccounts,
     isWarehouseManager,
+    isPosManager,
     warehouses,
     isLoading,
     signIn,

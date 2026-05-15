@@ -77,7 +77,7 @@ export const register = async (req: Request, res: Response) => {
     const userRoles = roles && Array.isArray(roles) ? roles : ['user'];
     
     // Validate role names
-    const validRoles = ['admin', 'sales', 'accounts', 'user', 'warehouse_manager', 'procurement'];
+    const validRoles = ['admin', 'sales', 'accounts', 'user', 'warehouse_manager', 'procurement', 'pos_manager'];
     const invalidRoles = userRoles.filter((role: string) => !validRoles.includes(role));
     if (invalidRoles.length > 0) {
       return res.status(400).json({
@@ -1273,7 +1273,7 @@ export const updateRole = async (req: Request, res: Response) => {
     }
 
     // Validate role
-    const validRoles = ['user', 'admin', 'sales', 'accounts', 'warehouse_manager', 'procurement'];
+    const validRoles = ['user', 'admin', 'sales', 'accounts', 'warehouse_manager', 'procurement', 'pos_manager'];
     if (!role || !validRoles.includes(role)) {
       return res.status(400).json({
         success: false,

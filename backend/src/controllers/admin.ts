@@ -489,7 +489,7 @@ export const updateUserRoles = async (req: Request, res: Response) => {
     }
 
     // Validate role names
-    const validRoles = ['admin', 'sales', 'accounts', 'user', 'warehouse_manager', 'procurement'];
+    const validRoles = ['admin', 'sales', 'accounts', 'user', 'warehouse_manager', 'procurement', 'pos_manager'];
     const invalidRoles = roles.filter((role: string) => !validRoles.includes(role));
     if (invalidRoles.length > 0) {
       return res.status(400).json({

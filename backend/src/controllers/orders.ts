@@ -44,13 +44,14 @@ export const getOrders = async (req: Request, res: Response) => {
     // Log to help with debugging
     console.log('getOrders for user ID:', userId, 'roles:', userRoles);
     
-    // Check if user has admin or sales role
+    // Check if user has admin, sales, or pos_manager role
     const isAdmin = userRoles.includes('admin');
     const isSales = userRoles.includes('sales');
+    const isPosManager = userRoles.includes('pos_manager');
     
-    if (!isAdmin && !isSales) {
-      console.error('User does not have admin or sales role');
-      throw new ApiError(403, 'Admin or Sales access required');
+    if (!isAdmin && !isSales && !isPosManager) {
+      console.error('User does not have admin, sales, or pos_manager role');
+      throw new ApiError(403, 'Admin, Sales, or Pos Manager access required');
     }
     
     if (!req.companyId) {
@@ -284,8 +285,9 @@ export const getOrderById = async (req: Request, res: Response) => {
     // Check roles using new role system
     const isAdmin = await hasAnyRole(req.user.id, req.companyId, ['admin']);
     const isSales = await hasAnyRole(req.user.id, req.companyId, ['sales']);
+    const isPosManager = await hasAnyRole(req.user.id, req.companyId, ['pos_manager']);
     
-    console.log('User admin status:', isAdmin, 'User sales status:', isSales);
+    console.log('User admin status:', isAdmin, 'User sales status:', isSales, 'User pos_manager status:', isPosManager);
     
     // First, get the order details
     const { data: order, error: orderError } = await (supabaseAdmin || supabase)
@@ -330,8 +332,8 @@ export const getOrderById = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Order not found' });
     }
     
-    // Check access permission - admins and sales can see all company orders; owner can see own
-    let hasAccess = isAdmin || isSales;
+    // Check access permission - admins, sales, and pos managers can see all company orders; owner can see own
+    let hasAccess = isAdmin || isSales || isPosManager;
     
     // Allow the order owner to view their own order
     if (!hasAccess && order.user_id === userId) {
@@ -1253,8 +1255,8 @@ export const cancelOrder = async (req: Request, res: Response) => {
 
     // Determine effective role for permission and business logic
     let effectiveRoleForCancellation = userRole;
-    if (userRole === 'sales' && order.user_id === userId) {
-      console.log(`Sales executive ${userId} is acting on their OWN order ${order.id}. Applying user-level cancellation rules.`);
+    if ((userRole === 'sales' || userRole === 'pos_manager') && order.user_id === userId) {
+      console.log(`Sales/POS executive ${userId} is acting on their OWN order ${order.id}. Applying user-level cancellation rules.`);
       effectiveRoleForCancellation = 'user'; // Treat as a regular user for their own order's cancellation rules
     }
 
@@ -1263,10 +1265,10 @@ export const cancelOrder = async (req: Request, res: Response) => {
     if (effectiveRoleForCancellation === 'admin') {
       hasPermission = true;
       console.log(`Admin ${userId} has permission to cancel order ${id}`);
-    } else if (effectiveRoleForCancellation === 'sales') {
-      // Sales can cancel any company order (others' orders)
+    } else if (effectiveRoleForCancellation === 'sales' || effectiveRoleForCancellation === 'pos_manager') {
+      // Sales/POS Manager can cancel any company order (others' orders)
       hasPermission = true;
-      console.log(`Sales executive ${userId} has permission to cancel order ${id}`);
+      console.log(`Sales/POS executive ${userId} has permission to cancel order ${id}`);
     } else if ((effectiveRoleForCancellation === 'user' || effectiveRoleForCancellation === 'authenticated')) {
       // This now also covers sales exec acting on their own order if order.user_id === userId
       console.log(`User/Authenticated/Sales (own order) role attempting self-cancel: Comparing OrderOwnerID (${order.user_id}) with LoggedInUserID (${userId})`);
@@ -1284,16 +1286,16 @@ export const cancelOrder = async (req: Request, res: Response) => {
     }
 
     // Business logic for cancellation based on effectiveRoleForCancellation
-    if (effectiveRoleForCancellation === 'admin' || effectiveRoleForCancellation === 'sales') {
-      // Admin/Sales (for OTHERS' orders): Can only cancel if status is 'pending'
+    if (effectiveRoleForCancellation === 'admin' || effectiveRoleForCancellation === 'sales' || effectiveRoleForCancellation === 'pos_manager') {
+      // Admin/Sales/POS Manager (for OTHERS' orders): Can only cancel if status is 'pending'
       if (order.status !== 'pending') {
         return res.status(400).json({
           success: false,
-          error: 'Orders can only be cancelled by admin/sales if the status is pending'
+          error: 'Orders can only be cancelled by admin/sales/pos manager if the status is pending'
         });
       }
-      console.log(`Admin/Sales (for others) cancelling a '${order.status}' order. Proceeding.`);
-    } else { // Regular user OR Sales exec cancelling their OWN order (effectiveRoleForCancellation is 'user' or 'authenticated')
+      console.log(`Admin/Sales/POS Manager (for others) cancelling a '${order.status}' order. Proceeding.`);
+    } else { // Regular user OR Sales/POS exec cancelling their OWN order (effectiveRoleForCancellation is 'user' or 'authenticated')
       // User rules: Can cancel if status is 'pending' or 'processing' AND within 5 minutes
       if (order.status !== 'pending' && order.status !== 'processing') {
         return res.status(400).json({
@@ -1310,7 +1312,7 @@ export const cancelOrder = async (req: Request, res: Response) => {
           error: 'Orders can only be cancelled by user within 5 minutes of creation'
         });
       }
-      console.log(`User (or Sales on own order) cancelling a '${order.status}' order within time limit. Proceeding.`);
+      console.log(`User (or Sales/POS on own order) cancelling a '${order.status}' order within time limit. Proceeding.`);
     }
     
     console.log(`Cancelling order ${id} by user ${userId} (effective role ${effectiveRoleForCancellation})`);

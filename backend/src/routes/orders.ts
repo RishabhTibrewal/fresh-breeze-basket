@@ -29,8 +29,8 @@ router.get('/sales-executives', protect, requireRole(['admin', 'sales']), getSal
 // Return orders route - must be before /:id route to avoid route conflicts
 router.post('/returns', protect, createReturnOrder);
 
-// Admin or Sales routes - controller will filter data based on role
-router.get('/', protect, requireRole(['admin', 'sales']), getOrders);
+// Admin, Sales, or Pos Manager routes - controller will filter data based on role
+router.get('/', protect, requireRole(['admin', 'sales', 'pos_manager']), getOrders);
 
 // Allow any authenticated user to get order by ID - controller will handle permissions
 router.get('/:id', protect, getOrderById);

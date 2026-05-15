@@ -408,7 +408,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     route: '/pos',
     icon: Store,
     iconColor: 'text-pink-600',
-    permissions: ['pos.access'],
+    permissions: ['pos.access', 'pos.manage'],
     showOnDashboard: true,
     highlighted: true,
     kpis: [
@@ -421,7 +421,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     ],
     sidebarItems: [
       { label: 'POS terminal', route: '/pos', icon: Store, permission: 'pos.access' },
-      { label: 'KOT setup', route: '/pos/kot-settings', icon: ListOrdered, permission: 'pos.access' },
+      { label: 'KOT setup', route: '/pos/kot-settings', icon: ListOrdered, permission: 'pos.manage' },
       { label: 'Kitchen (KDS)', route: '/pos/kds', icon: Monitor, permission: 'pos.access' },
     ]
   },

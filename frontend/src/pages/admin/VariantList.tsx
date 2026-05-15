@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Edit, Trash2, Package, DollarSign } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { variantsService } from '@/api/variants';
 import { productsService, ProductVariant } from '@/api/products';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,8 @@ export default function VariantList() {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const { isAdmin } = useAuth();
+  const canModify = isAdmin; // Only admin/accounts can edit or delete
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteVariantId, setDeleteVariantId] = useState<string | null>(null);
 
@@ -137,26 +140,30 @@ export default function VariantList() {
           >
             View
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`${basePath}/variants/${variant.id}/edit`);
-            }}
-          >
-            <Edit className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              setDeleteVariantId(variant.id);
-            }}
-          >
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
+          {canModify && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`${basePath}/variants/${variant.id}/edit`);
+              }}
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+          )}
+          {canModify && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setDeleteVariantId(variant.id);
+              }}
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          )}
         </div>
       ),
     },
@@ -212,28 +219,32 @@ export default function VariantList() {
               >
                 View
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigate(`${basePath}/variants/${variant.id}/edit`);
-                }}
-              >
-                <Edit className="h-4 w-4 mr-1" />
-                Edit
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeleteVariantId(variant.id);
-                }}
-              >
-                <Trash2 className="h-4 w-4 mr-1 text-destructive" />
-                Delete
-              </Button>
+              {canModify && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`${basePath}/variants/${variant.id}/edit`);
+                  }}
+                >
+                  <Edit className="h-4 w-4 mr-1" />
+                  Edit
+                </Button>
+              )}
+              {canModify && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteVariantId(variant.id);
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 mr-1 text-destructive" />
+                  Delete
+                </Button>
+              )}
             </div>
           </div>
         </div>

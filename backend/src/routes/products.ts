@@ -11,7 +11,7 @@ import {
   updateVariant,
   deleteVariant
 } from '../controllers';
-import { protect, adminOnly } from '../middleware/auth';
+import { protect, adminOnly, requireRole } from '../middleware/auth';
 import { deprecationWarning } from '../middleware/deprecation';
 
 const router = express.Router();
@@ -26,12 +26,13 @@ router.get('/:id/variants', getProductVariants);
 
 // Variant routes
 router.get('/variants/:variantId', getVariantById);
-router.post('/:id/variants', protect, adminOnly, createVariant);
+// Sales can add variants; only admin can edit/delete
+router.post('/:id/variants', protect, requireRole(['admin', 'accounts', 'sales']), createVariant);
 router.put('/variants/:variantId', protect, adminOnly, updateVariant);
 router.delete('/variants/:variantId', protect, adminOnly, deleteVariant);
 
-// Admin only routes
-router.post('/', protect, adminOnly, createProduct);
+// Products: sales can add; only admin can edit/delete
+router.post('/', protect, requireRole(['admin', 'accounts', 'sales']), createProduct);
 router.put('/:id', protect, adminOnly, updateProduct);
 router.delete('/:id', protect, adminOnly, deleteProduct);
 
