@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase, supabaseAdmin } from '../config/supabase';
+import { supabase, supabaseAdmin, createTransientClient } from '../config/supabase';
 import { AppError } from '../utils/appError';
 
 interface Customer {
@@ -1135,7 +1135,8 @@ export const createCustomerWithUser = async (req: Request, res: Response) => {
       // If user already exists, verify password and link to company
       if (createUserError.code === 'email_exists' || createUserError.message?.includes('already exists')) {
         console.log('User already exists, verifying password...');
-        const { data: signInData, error: signInError } = await (supabaseAdmin || supabase).auth.signInWithPassword({
+        const transientClient = createTransientClient(true);
+        const { data: signInData, error: signInError } = await transientClient.auth.signInWithPassword({
           email,
           password
         });

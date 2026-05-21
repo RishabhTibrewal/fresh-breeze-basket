@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { supabase, createAuthClient, supabaseAdmin } from '../config/supabase';
+import { supabase, createAuthClient, supabaseAdmin, createTransientClient } from '../config/supabase';
 import { SupabaseJwtVerificationError, verifySupabaseJwt } from '../utils/supabaseJwt';
 import { ApiError } from '../middleware/error';
 import { assignUserRoles, hasAnyRole, getUserRoles, invalidateRoleCache } from '../utils/roles';
@@ -176,7 +176,8 @@ export const register = async (req: Request, res: Response) => {
         if (!existingUserId) {
           // If we still can't find the user, verify credentials to get the user ID
           console.log('User not found, verifying credentials to get user ID...');
-          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          const transientClient = createTransientClient(false);
+          const { data: signInData, error: signInError } = await transientClient.auth.signInWithPassword({
             email,
             password
           });
@@ -461,8 +462,8 @@ export const login = async (req: Request, res: Response) => {
       });
     }
     
-    // Use service-role client so the auth call routes through the proxy (supabaseAdmin)
-    const client = supabaseAdmin || supabase;
+    // Use a transient client to prevent mutating the global singletons during authentication flows
+    const client = createTransientClient(true);
     const { data: authData, error: authError } = await client.auth.signInWithPassword({
       email,
       password,

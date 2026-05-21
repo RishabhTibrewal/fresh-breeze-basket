@@ -2,6 +2,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 import 'express-async-errors';
 
+// Trigger restart to reload env variables and service role key
+
 // Load environment variables first
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 

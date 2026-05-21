@@ -115,3 +115,16 @@ export const supabaseAdmin = supabaseServiceRoleKey
       }
     })
   : null; 
+
+// Create a transient client to prevent mutating the global singletons during authentication flows
+export function createTransientClient(useAdminKey: boolean = false) {
+  const key = useAdminKey && supabaseServiceRoleKey ? supabaseServiceRoleKey : supabaseAnonKey;
+  return createClient(supabaseUrl, key, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false
+    }
+  });
+}
+ 
