@@ -5,7 +5,6 @@ export interface BankAccount {
   account_holder_name: string;
   account_number: string;
   ifsc_code: string;
-  upi_id?: string;
 }
 
 export interface Company {
@@ -21,6 +20,11 @@ export interface Company {
   gstin?: string;
   logo_url?: string;
   bank_details?: BankAccount[];
+  payment_upi_id?: string;
+  payment_qr_code_url?: string;
+  website_url?: string;
+  website_qr_code_url?: string;
+  invoice_custom_message?: string;
 }
 
 export const companyService = {

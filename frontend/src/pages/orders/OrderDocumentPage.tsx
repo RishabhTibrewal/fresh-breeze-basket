@@ -494,7 +494,7 @@ export default function OrderDocumentPage() {
               size="sm"
               onClick={async () => {
                 try {
-                  await invoicesService.downloadCustomerBill(id!);
+                  await invoicesService.downloadDetailedInvoice(id!);
                 } catch (error) {
                   toast.error("Failed to download invoice");
                 }

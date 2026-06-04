@@ -609,7 +609,7 @@ export default function OrderDetail() {
                     className="gap-2 text-xs sm:text-sm h-9 sm:h-10"
                     onClick={async () => {
                       try {
-                        await invoicesService.downloadCustomerBill(orderId!);
+                        await invoicesService.downloadDetailedInvoice(orderId!);
                       } catch (error) {
                         toast.error('Failed to download invoice');
                       }

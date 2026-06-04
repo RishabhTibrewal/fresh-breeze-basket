@@ -880,7 +880,7 @@ export default function AdminOrderDetails() {
                   variant="outline"
                   onClick={async () => {
                     try {
-                      await invoicesService.downloadCustomerBill(order.id);
+                      await invoicesService.downloadDetailedInvoice(order.id);
                     } catch (error) {
                       toast.error('Failed to download bill');
                     }

@@ -28,12 +28,74 @@ export const invoicesService = {
   async downloadCustomerBill(orderId: string): Promise<void> {
     const htmlString = await this.getCustomerBillHTML(orderId);
     
-    // Create an invisible container for html2pdf to parse
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = htmlString;
-    tempDiv.style.position = 'absolute';
-    tempDiv.style.top = '-9999px';
-    document.body.appendChild(tempDiv);
+    // Create a hidden iframe to isolate styling and prevent global CSS leakage
+    const iframe = document.createElement('iframe');
+    
+    Object.assign(iframe.style, {
+      position: 'fixed',
+      left: '-9999px',
+      top: '0',
+      width: '350px', // width of the thermal receipt
+      height: '1500px', // initial height, will adjust to content scrollHeight
+      border: '0',
+      background: '#ffffff'
+    });
+    
+    document.body.appendChild(iframe);
+    
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (!doc) {
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
+      throw new Error('Could not access iframe document');
+    }
+    
+    doc.open();
+    doc.write(htmlString);
+    doc.close();
+
+    // Wait for document & styles to load completely
+    await new Promise<void>((resolve) => {
+      iframe.onload = () => resolve();
+      if (doc.readyState === 'complete') {
+        resolve();
+      }
+    });
+
+    // Explicitly wait for any images in the iframe to load (e.g. logos)
+    const images = doc.getElementsByTagName('img');
+    const imagePromises = Array.from(images).map((img) => {
+      if (img.complete) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+      });
+    });
+    await Promise.all(imagePromises);
+
+    // Style cleanup and scoping to prevent leaks during cloning
+    doc.body.classList.add('invoice-body');
+    doc.body.style.backgroundColor = '#ffffff';
+    doc.body.style.color = '#000000';
+
+    const styles = doc.querySelectorAll('style');
+    styles.forEach(style => {
+      let css = style.textContent || '';
+      // Replace global 'body' selector with '.invoice-body'
+      css = css.replace(/\bbody\b/g, '.invoice-body');
+      // Replace global '*' selector with '.invoice-body, .invoice-body *'
+      css = css.replace(/\*\s*\{/g, '.invoice-body, .invoice-body * {');
+      style.textContent = css;
+      
+      // Move style tags to body so html2pdf clones them
+      doc.body.appendChild(style);
+    });
+
+    // Adjust height of iframe to fit content precisely
+    if (doc.body) {
+      iframe.style.height = `${doc.body.scrollHeight}px`;
+    }
 
     const opt = {
       margin:       10,
@@ -43,11 +105,123 @@ export const invoicesService = {
       jsPDF:        { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
     };
 
-    // Render and download as PDF
-    await html2pdf().from(tempDiv).set(opt).save();
+    try {
+      // Render and download as PDF using the iframe's body to respect its scoped styles
+      await html2pdf().from(doc.body).set(opt).save();
+    } finally {
+      // Clean up the iframe
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
+    }
+  },
 
-    // Clean up
-    document.body.removeChild(tempDiv);
+  /**
+   * Download detailed A4 invoice as PDF
+   */
+  async downloadDetailedInvoice(orderId: string): Promise<void> {
+    const htmlString = await this.getPOSInvoice(orderId);
+    
+    // Create a hidden iframe to isolate styling and prevent global CSS leakage
+    const iframe = document.createElement('iframe');
+    
+    Object.assign(iframe.style, {
+      position: 'fixed',
+      left: '-9999px',
+      top: '0',
+      width: '794px', // A4 page width (~210mm at 96 DPI)
+      height: '1123px', // A4 page height (~297mm at 96 DPI)
+      border: '0',
+      background: '#ffffff'
+    });
+    
+    document.body.appendChild(iframe);
+    
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (!doc) {
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
+      throw new Error('Could not access iframe document');
+    }
+    
+    doc.open();
+    doc.write(htmlString);
+    doc.close();
+
+    // Wait for document & styles to load completely
+    await new Promise<void>((resolve) => {
+      iframe.onload = () => resolve();
+      if (doc.readyState === 'complete') {
+        resolve();
+      }
+    });
+
+    // Explicitly wait for any images in the iframe to load
+    const images = doc.getElementsByTagName('img');
+    const imagePromises = Array.from(images).map((img) => {
+      if (img.complete) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+      });
+    });
+    await Promise.all(imagePromises);
+
+    // Style cleanup and scoping to prevent leaks during cloning
+    doc.body.classList.add('invoice-body');
+    doc.body.style.backgroundColor = '#ffffff';
+    doc.body.style.color = '#000000';
+
+    const styles = doc.querySelectorAll('style');
+    styles.forEach(style => {
+      let css = style.textContent || '';
+      // Replace global 'body' selector with '.invoice-body'
+      css = css.replace(/\bbody\b/g, '.invoice-body');
+      // Replace global '*' selector with '.invoice-body, .invoice-body *'
+      css = css.replace(/\*\s*\{/g, '.invoice-body, .invoice-body * {');
+      style.textContent = css;
+      
+      // Move style tags to body so html2pdf clones them
+      doc.body.appendChild(style);
+    });
+
+    // Add explicit overrides for A4 page layout (remove margins & shadows)
+    const overrideStyle = doc.createElement('style');
+    overrideStyle.textContent = `
+      .invoice-body {
+        background-color: #ffffff !important;
+        background: #ffffff !important;
+      }
+      .invoice-body .page {
+        margin: 0 auto !important;
+        box-shadow: none !important;
+      }
+    `;
+    doc.body.appendChild(overrideStyle);
+
+    // Adjust height of iframe to fit content precisely
+    if (doc.body) {
+      iframe.style.height = `${doc.body.scrollHeight}px`;
+    }
+
+    const opt = {
+      margin:       0, // borderless PDF since A4 margins are controlled inside CSS
+      filename:     `invoice-${orderId.substring(0, 8)}.pdf`,
+      image:        { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
+    };
+
+    try {
+      // Render and download as PDF using the iframe's body to respect its scoped styles
+      await html2pdf().from(doc.body).set(opt).save();
+    } finally {
+      // Clean up the iframe
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
+    }
   },
 
   /**

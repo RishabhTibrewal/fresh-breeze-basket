@@ -20,10 +20,13 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from 'sonner';
 import { companyService, Company } from '@/api/company';
 import { Building2, Plus, Trash2, Landmark, Globe, MapPin, Phone, Mail, FileText } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
+import { uploadsService } from '@/api/uploads';
+import { ImageUpload } from '@/components/ui/image-upload';
 
 const companySchema = z.object({
   name: z.string().min(2, 'Company name must be at least 2 characters'),
@@ -40,14 +43,20 @@ const companySchema = z.object({
     account_holder_name: z.string().min(1, 'Account holder name is required'),
     account_number: z.string().min(1, 'Account number is required'),
     ifsc_code: z.string().min(1, 'IFSC code is required'),
-    upi_id: z.string().optional().or(z.literal('')),
   })).default([]),
+  logo_url: z.string().optional().or(z.literal('')),
+  payment_upi_id: z.string().optional().or(z.literal('')),
+  payment_qr_code_url: z.string().optional().or(z.literal('')),
+  website_url: z.string().optional().or(z.literal('')),
+  website_qr_code_url: z.string().optional().or(z.literal('')),
+  invoice_custom_message: z.string().optional().or(z.literal('')),
 });
 
 type CompanyFormValues = z.infer<typeof companySchema>;
 
 export default function CompanySettings() {
   const queryClient = useQueryClient();
+  const [isUploading, setIsUploading] = useState(false);
   
     const { data: company, isLoading } = useQuery({
     queryKey: ['company', 'me'],
@@ -67,6 +76,12 @@ export default function CompanySettings() {
       postal_code: '',
       country: 'India',
       bank_details: [],
+      logo_url: '',
+      payment_upi_id: '',
+      payment_qr_code_url: '',
+      website_url: '',
+      website_qr_code_url: '',
+      invoice_custom_message: '',
     },
   });
 
@@ -88,6 +103,12 @@ export default function CompanySettings() {
         postal_code: company.postal_code || '',
         country: company.country || 'India',
         bank_details: (company.bank_details as any) || [],
+        logo_url: company.logo_url || '',
+        payment_upi_id: company.payment_upi_id || '',
+        payment_qr_code_url: company.payment_qr_code_url || '',
+        website_url: company.website_url || '',
+        website_qr_code_url: company.website_qr_code_url || '',
+        invoice_custom_message: company.invoice_custom_message || '',
       });
     }
   }, [company, form]);
@@ -308,7 +329,7 @@ export default function CompanySettings() {
                 variant="outline"
                 size="sm"
                 className="gap-1.5"
-                onClick={() => append({ bank_name: '', account_holder_name: '', account_number: '', ifsc_code: '', upi_id: '' })}
+                onClick={() => append({ bank_name: '', account_holder_name: '', account_number: '', ifsc_code: '' })}
               >
                 <Plus className="h-4 w-4" />
                 Add Account
@@ -386,22 +407,193 @@ export default function CompanySettings() {
                         </FormItem>
                       )}
                     />
-                    <FormField
-                      control={form.control}
-                      name={`bank_details.${index}.upi_id`}
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>UPI ID (Optional)</FormLabel>
-                          <FormControl>
-                            <Input placeholder="yourbusiness@upi" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+
                   </div>
                 </div>
               ))}
+            </CardContent>
+          </Card>
+
+          {/* Invoice Customizations & Payments */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary" />
+                Invoice Customizations & Payments
+              </CardTitle>
+              <CardDescription>Configure company logo, payment options, website links, QR codes, and custom invoice text.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-6 md:grid-cols-3">
+                {/* Company Logo Upload */}
+                <div className="space-y-2 flex flex-col items-center border p-4 rounded-lg bg-muted/20">
+                  <FormLabel className="text-sm font-semibold self-start mb-2">Company Logo</FormLabel>
+                  <FormField
+                    control={form.control}
+                    name="logo_url"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-col items-center w-full">
+                        <FormControl>
+                          <ImageUpload
+                            value={field.value || ''}
+                            onChange={(url) => field.onChange(url)}
+                            onFileSelect={async (file) => {
+                              try {
+                                setIsUploading(true);
+                                const url = await uploadsService.uploadImage(file, 'company');
+                                field.onChange(url);
+                                toast.success('Logo uploaded successfully');
+                              } catch (error: any) {
+                                toast.error(error.message || 'Failed to upload logo');
+                              } finally {
+                                setIsUploading(false);
+                              }
+                            }}
+                            disabled={isUploading}
+                            size="small"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                        <span className="text-xs text-muted-foreground text-center mt-2">
+                          Logo will be left-aligned in the invoice/quotation header.
+                        </span>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                {/* Payment Details & QR Code */}
+                <div className="space-y-4 border p-4 rounded-lg bg-muted/20">
+                  <FormField
+                    control={form.control}
+                    name="payment_upi_id"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-sm font-semibold">Payment UPI ID (Optional)</FormLabel>
+                        <FormControl>
+                          <Input placeholder="yourname@okaxis" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                        <span className="text-xs text-muted-foreground block">
+                          If provided, a QR code pre-filled with the invoice amount will be auto-generated.
+                        </span>
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="payment_qr_code_url"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-col items-center w-full mt-4">
+                        <FormLabel className="text-sm font-semibold self-start mb-2">Custom Payment QR Code</FormLabel>
+                        <FormControl>
+                          <ImageUpload
+                            value={field.value || ''}
+                            onChange={(url) => field.onChange(url)}
+                            onFileSelect={async (file) => {
+                              try {
+                                setIsUploading(true);
+                                const url = await uploadsService.uploadImage(file, 'company');
+                                field.onChange(url);
+                                toast.success('Payment QR Code uploaded successfully');
+                              } catch (error: any) {
+                                toast.error(error.message || 'Failed to upload QR code');
+                              } finally {
+                                setIsUploading(false);
+                              }
+                            }}
+                            disabled={isUploading}
+                            size="small"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                        <span className="text-xs text-muted-foreground text-center mt-2">
+                          Upload a custom QR image instead of auto-generating from UPI ID.
+                        </span>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                {/* Website Details & QR Code */}
+                <div className="space-y-4 border p-4 rounded-lg bg-muted/20">
+                  <FormField
+                    control={form.control}
+                    name="website_url"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-sm font-semibold">Website URL (Optional)</FormLabel>
+                        <FormControl>
+                          <Input placeholder="https://example.com" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                        <span className="text-xs text-muted-foreground block">
+                          If provided, a QR code directing to this website will be auto-generated.
+                        </span>
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="website_qr_code_url"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-col items-center w-full mt-4">
+                        <FormLabel className="text-sm font-semibold self-start mb-2">Custom Website QR Code</FormLabel>
+                        <FormControl>
+                          <ImageUpload
+                            value={field.value || ''}
+                            onChange={(url) => field.onChange(url)}
+                            onFileSelect={async (file) => {
+                              try {
+                                setIsUploading(true);
+                                const url = await uploadsService.uploadImage(file, 'company');
+                                field.onChange(url);
+                                toast.success('Website QR Code uploaded successfully');
+                              } catch (error: any) {
+                                toast.error(error.message || 'Failed to upload QR code');
+                              } finally {
+                                setIsUploading(false);
+                              }
+                            }}
+                            disabled={isUploading}
+                            size="small"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                        <span className="text-xs text-muted-foreground text-center mt-2">
+                          Upload a custom website QR image instead of auto-generating.
+                        </span>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Custom Message Field */}
+              <FormField
+                control={form.control}
+                name="invoice_custom_message"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-sm font-semibold">Custom Invoice Message (Footer)</FormLabel>
+                    <FormControl>
+                      <Textarea 
+                        placeholder="Thank you for shopping with us! Visit again." 
+                        className="min-h-[80px]"
+                        {...field} 
+                      />
+                    </FormControl>
+                    <FormMessage />
+                    <span className="text-xs text-muted-foreground block">
+                      This text will be displayed at the very end of your invoices and quotations.
+                    </span>
+                  </FormItem>
+                )}
+              />
             </CardContent>
           </Card>
 
@@ -410,9 +602,9 @@ export default function CompanySettings() {
               type="submit" 
               size="lg" 
               className="bg-orange-600 hover:bg-orange-700 min-w-[150px]"
-              disabled={updateMutation.isPending}
+              disabled={updateMutation.isPending || isUploading}
             >
-              {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+              {updateMutation.isPending ? 'Saving...' : isUploading ? 'Uploading...' : 'Save Changes'}
             </Button>
           </div>
         </form>

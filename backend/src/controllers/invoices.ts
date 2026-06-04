@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import QRCode from 'qrcode';
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { ApiError } from '../middleware/error';
 
@@ -127,8 +128,8 @@ const generateThermalKOTHTML = async (orderId: string, companyId: string, type: 
     .totals-row { display: flex; justify-content: space-between; padding: 2px 0; }
     .grand-total { border-top: 1px solid #000; margin-top: 5px; padding-top: 5px; font-size: 16px; font-weight: bold; }
     .footer { margin-top: 20px; font-size: 10px; }
+    @page { margin: 0; }
     @media print {
-      @page { margin: 0; }
       body { width: 100%; padding: 5mm; }
     }
   `;
@@ -310,8 +311,8 @@ const kitchenThermalStyles = `
     .item-name { font-weight: bold; font-size: 13px; display: block; }
     .modifier { font-size: 10px; padding-left: 5px; font-style: italic; color: #333; }
     .ticket-block { margin-bottom: 16px; page-break-inside: avoid; }
+    @page { margin: 0; }
     @media print {
-      @page { margin: 0; }
       body { width: 100%; padding: 5mm; }
     }
   `;
@@ -647,8 +648,8 @@ async function generateQuickBillKOTHTML(
       font-weight: bold;
       padding: 3px 0;
     }
+    @page { margin: 0; size: 80mm auto; }
     @media print {
-      @page { margin: 0; size: 80mm auto; }
       body { width: 100%; padding: 4mm 4mm; }
     }
   `;
@@ -742,6 +743,52 @@ function numberToWords(num: number): string {
     return res.trim() + ' Only';
 }
 
+function paginateItems<T>(items: T[], p1SingleCap: number, p1MultiCap: number, middleCap: number, lastCap: number): T[][] {
+    if (items.length <= p1SingleCap) {
+        return [items];
+    }
+    
+    const pages: T[][] = [];
+    let currentIndex = 0;
+    
+    // Page 1
+    let p1Count = p1MultiCap;
+    if (items.length - p1Count < 1) {
+        p1Count = items.length - 1;
+    }
+    pages.push(items.slice(currentIndex, currentIndex + p1Count));
+    currentIndex += p1Count;
+    
+    // Middle and Last pages
+    while (currentIndex < items.length) {
+        const remaining = items.length - currentIndex;
+        if (remaining <= lastCap) {
+            pages.push(items.slice(currentIndex));
+            break;
+        } else {
+            let middleCount = middleCap;
+            if (remaining - middleCount < 1) {
+                middleCount = remaining - 1;
+            }
+            pages.push(items.slice(currentIndex, currentIndex + middleCount));
+            currentIndex += middleCount;
+        }
+    }
+    return pages;
+}
+
+function generateEmptyRowsHTML(count: number, columnsCount: number): string {
+    let html = '';
+    for (let i = 0; i < count; i++) {
+        html += '<tr class="item-row">';
+        for (let j = 0; j < columnsCount; j++) {
+            html += '<td>&nbsp;</td>';
+        }
+        html += '</tr>';
+    }
+    return html;
+}
+
 const generateInvoiceHTML = async (orderId: string, companyId: string, documentTitle: string = 'TAX INVOICE') => {
     // 1. Data Fetching
     const [companyRes, orderRes, creditPeriodRes] = await Promise.all([
@@ -801,16 +848,36 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
     const roundOff = Number(order.round_off_amount || 0);
     const grandTotal = Number(order.total_amount || 0);
 
-    // Calculate line items
-    let itemsHTML = '';
+    // Generate QR codes
+    let paymentQrDataUrl = '';
+    if (company?.payment_qr_code_url) {
+        paymentQrDataUrl = company.payment_qr_code_url;
+    } else if (company?.payment_upi_id) {
+        const upiLink = `upi://pay?pa=${company.payment_upi_id}&pn=${encodeURIComponent(companyName)}&am=${grandTotal.toFixed(2)}&cu=INR`;
+        try {
+            paymentQrDataUrl = await QRCode.toDataURL(upiLink, { margin: 1, width: 200 });
+        } catch (err) {
+            console.error('Failed to generate UPI QR code:', err);
+        }
+    }
+
+    let websiteQrDataUrl = '';
+    if (company?.website_qr_code_url) {
+        websiteQrDataUrl = company.website_qr_code_url;
+    } else if (company?.website_url) {
+        try {
+            websiteQrDataUrl = await QRCode.toDataURL(company.website_url, { margin: 1, width: 200 });
+        } catch (err) {
+            console.error('Failed to generate Website QR code:', err);
+        }
+    }
+
+    // 2. Global Calculations & Preparations
     let totalQty = 0;
-    
-    // Aggregated tax summary
     const taxSummary: Record<string, { taxable: number, taxRate: number, cgst: number, sgst: number }> = {};
-    
     let totalLineAmounts = 0;
     
-    order.order_items.forEach((item: any, idx: number) => {
+    const computedItems = order.order_items.map((item: any, idx: number) => {
         const qty = Number(item.quantity) || 0;
         totalQty += qty;
         
@@ -825,7 +892,6 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
         const netTaxableB = taxableAmtA - extraDiscShare;
         
         const taxRate = Number(item.tax_percentage || 0);
-        const cgstSgstRate = taxRate / 2;
         const taxVal = Number(item.tax_amount || 0);
         const totalLineAmount = netTaxableB + taxVal;
         
@@ -836,39 +902,6 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
         const unit = item.variant?.unit_type || 'PCS';
         const discPct = Number(item.discount_percentage || 0);
 
-        if (showExtraDisc) {
-            itemsHTML += `
-                <tr class="item-row">
-                    <td class="text-center">${idx + 1}</td>
-                    <td>${desc}</td>
-                    <td class="text-center">${hsn}</td>
-                    <td class="text-center">${qty.toFixed(3)} ${unit}</td>
-                    <td class="text-right">${price.toFixed(2)}</td>
-                    <td class="text-right">${discPct ? discPct + '%' : '-'}</td>
-                    <td class="text-right">${taxableAmtA.toFixed(2)}</td>
-                    <td class="text-right">${extraDiscShare.toFixed(2)}</td>
-                    <td class="text-right">${netTaxableB.toFixed(2)}</td>
-                    <td class="text-center">${taxRate}%</td>
-                    <td class="text-right">${totalLineAmount.toFixed(2)}</td>
-                </tr>
-            `;
-        } else {
-            itemsHTML += `
-                <tr class="item-row">
-                    <td class="text-center">${idx + 1}</td>
-                    <td>${desc}</td>
-                    <td class="text-center">${hsn}</td>
-                    <td class="text-center">${qty.toFixed(3)} ${unit}</td>
-                    <td class="text-right">${price.toFixed(2)}</td>
-                    <td class="text-right">${discPct ? discPct + '%' : '-'}</td>
-                    <td class="text-right">${taxableAmtA.toFixed(2)}</td>
-                    <td class="text-center">${taxRate}%</td>
-                    <td class="text-right">${totalLineAmount.toFixed(2)}</td>
-                </tr>
-            `;
-        }
-        
-        // Add to tax summary
         if (taxRate > 0) {
             const key = taxRate.toString();
             if (!taxSummary[key]) {
@@ -878,6 +911,21 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
             taxSummary[key].cgst += taxVal / 2;
             taxSummary[key].sgst += taxVal / 2;
         }
+
+        return {
+            sn: idx + 1,
+            desc,
+            hsn,
+            qty,
+            unit,
+            price,
+            discPct,
+            taxableAmtA,
+            extraDiscShare,
+            netTaxableB,
+            taxRate,
+            totalLineAmount
+        };
     });
 
     // Add extra charges to tax summary
@@ -899,27 +947,6 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
         });
     }
 
-    // Fill remaining rows to ensure full page height if few items
-    const minRows = 12;
-    const emptyRowsCount = Math.max(0, minRows - order.order_items.length);
-    for (let i = 0; i < emptyRowsCount; i++) {
-        if (showExtraDisc) {
-            itemsHTML += `
-                <tr class="item-row empty-row">
-                    <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
-                    <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
-                </tr>
-            `;
-        } else {
-            itemsHTML += `
-                <tr class="item-row empty-row">
-                    <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
-                    <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
-                </tr>
-            `;
-        }
-    }
-    
     let taxSummaryHTML = '';
     Object.values(taxSummary).forEach(ts => {
         taxSummaryHTML += `
@@ -991,7 +1018,6 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
     }
 
     if (extraCharges > 0) {
-        // Find if we have specific extra charges formatted to list their tax
         let chargeDetails = 'Extra Charges';
         if (order.extra_charges && Array.isArray(order.extra_charges) && order.extra_charges.length > 0) {
             const names = order.extra_charges.map((ec: any) => {
@@ -1020,7 +1046,6 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
 
     const amountInWords = 'Rupees ' + numberToWords(Math.round(grandTotal));
     
-    // Bank Details HTML
     const bankDetailsObj = company?.bank_details && company.bank_details.length > 0 ? company.bank_details[0] : null;
     let bankHTML = '';
     if (bankDetailsObj) {
@@ -1028,7 +1053,6 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
             <strong>BANK NAME :</strong> ${bankDetailsObj.bank_name || ''} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
             <strong>A/C No. :</strong> ${bankDetailsObj.account_number || ''} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
             <strong>IFSC CODE :</strong> ${bankDetailsObj.ifsc_code || ''}
-            ${bankDetailsObj.upi_id ? `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<strong>UPI :</strong> ${bankDetailsObj.upi_id}` : ''}
         `;
     } else {
         bankHTML = `<em>Bank details not configured. Add bank details in Company Settings.</em>`;
@@ -1036,6 +1060,280 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
 
     const tncText = order.notes || "1. Due date has been calculated as per agreed payment terms\n2. Interest @ 18% will be charged if payment is delayed beyond due date.\n3. No complaints in respect of material supplied vide this invoice will be entertained unless the same is lodged in writing within 10 days of dispatch.\n4. All disputes are subject to local Jurisdiction\n5. All ex-factory dispatch of goods are at owner's risk.";
     const formattedTnc = tncText.split('\n').map((line: string) => `<div>${line}</div>`).join('');
+
+    // Pagination & Pages HTML generation
+    const pages = paginateItems(computedItems, 10, 18, 25, 12);
+    const totalPages = pages.length;
+    let pagesHTML = '';
+
+    for (let p = 1; p <= totalPages; p++) {
+        const pageItems = pages[p - 1];
+        const pageItemsCount = pageItems.length;
+        
+        let targetRows = 10;
+        if (totalPages > 1) {
+            if (p === 1) targetRows = 18;
+            else if (p === totalPages) targetRows = 12;
+            else targetRows = 25;
+        }
+        const paddingCount = Math.max(0, targetRows - pageItemsCount);
+        const colsCount = showExtraDisc ? 11 : 9;
+        
+        let tableRowsHTML = '';
+        pageItems.forEach((item: any) => {
+            if (showExtraDisc) {
+                tableRowsHTML += `
+                    <tr class="item-row">
+                        <td class="text-center">${item.sn}</td>
+                        <td>${item.desc}</td>
+                        <td class="text-center">${item.hsn}</td>
+                        <td class="text-center">${item.qty.toFixed(3)} ${item.unit}</td>
+                        <td class="text-right">${item.price.toFixed(2)}</td>
+                        <td class="text-right">${item.discPct ? item.discPct + '%' : '-'}</td>
+                        <td class="text-right">${item.taxableAmtA.toFixed(2)}</td>
+                        <td class="text-right">${item.extraDiscShare.toFixed(2)}</td>
+                        <td class="text-right">${item.netTaxableB.toFixed(2)}</td>
+                        <td class="text-center">${item.taxRate}%</td>
+                        <td class="text-right">${item.totalLineAmount.toFixed(2)}</td>
+                    </tr>
+                `;
+            } else {
+                tableRowsHTML += `
+                    <tr class="item-row">
+                        <td class="text-center">${item.sn}</td>
+                        <td>${item.desc}</td>
+                        <td class="text-center">${item.hsn}</td>
+                        <td class="text-center">${item.qty.toFixed(3)} ${item.unit}</td>
+                        <td class="text-right">${item.price.toFixed(2)}</td>
+                        <td class="text-right">${item.discPct ? item.discPct + '%' : '-'}</td>
+                        <td class="text-right">${item.taxableAmtA.toFixed(2)}</td>
+                        <td class="text-center">${item.taxRate}%</td>
+                        <td class="text-right">${item.totalLineAmount.toFixed(2)}</td>
+                    </tr>
+                `;
+            }
+        });
+        
+        tableRowsHTML += generateEmptyRowsHTML(paddingCount, colsCount);
+        
+        tableRowsHTML += `
+            <tr class="item-row spacer-row">
+                ${Array(colsCount).fill('<td>&nbsp;</td>').join('')}
+            </tr>
+        `;
+
+        let pageHeaderHTML = '';
+        if (p === 1) {
+            pageHeaderHTML = `
+                <div class="header-top">
+                    <div>GSTIN : ${companyGST}</div>
+                    <div style="text-decoration: underline; font-size: 14px;">${documentTitle}</div>
+                    <div>Original Copy</div>
+                </div>
+                
+                <div class="header-main ${company?.logo_url ? 'has-logo' : ''}">
+                    ${company?.logo_url ? `<img src="${company.logo_url}" class="logo-img" alt="Logo">` : ''}
+                    <div class="header-text">
+                        <h1>${companyName.toUpperCase()}</h1>
+                        <p><strong>WORK :</strong> ${companyAddress}</p>
+                        <p><strong>Tel.:</strong> ${companyPhone} ${companyEmail ? `&nbsp;|&nbsp; <strong>Email :</strong> ${companyEmail}` : ''}</p>
+                    </div>
+                </div>
+                
+                <div class="meta-section">
+                    <div class="meta-col">
+                        <table class="meta-table">
+                            <tr><td>Invoice No.</td><td>: <strong>${invoiceNo}</strong></td></tr>
+                            <tr><td>Dated</td><td>: ${invoiceDate}</td></tr>
+                            <tr><td>Place of Supply</td><td>: ${address?.state || company?.state || ''}</td></tr>
+                            <tr><td>Reference No.</td><td>: ${order.order_number || order.id.substring(0,8).toUpperCase()}</td></tr>
+                        </table>
+                    </div>
+                    <div class="meta-col">
+                        <table class="meta-table">
+                            <tr><td>Reverse Charge</td><td>: N</td></tr>
+                            <tr><td>Terms of Payment</td><td>: ${paymentTerms}</td></tr>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="address-section">
+                    <div class="address-col">
+                        <p><strong>Billed to : ${custName.toUpperCase()}</strong></p>
+                        <p>${custAddress}</p>
+                        ${address?.phone || customer?.phone ? `<p>MOB. NO.-${address?.phone || customer?.phone}</p>` : ''}
+                        <p style="margin-top: 5px;"><strong>GSTIN / UIN &nbsp;&nbsp;&nbsp;: ${custGST}</strong></p>
+                    </div>
+                    <div class="address-col">
+                        <p><strong>Shipped to : ${custName.toUpperCase()}</strong></p>
+                        <p>${custAddress}</p>
+                        ${address?.phone || customer?.phone ? `<p>MOB. NO.-${address?.phone || customer?.phone}</p>` : ''}
+                        <p style="margin-top: 5px;"><strong>GSTIN / UIN &nbsp;&nbsp;&nbsp;: ${custGST}</strong></p>
+                    </div>
+                </div>
+            `;
+        } else {
+            pageHeaderHTML = `
+                <div class="header-top" style="border-bottom: 1px solid #000; padding: 5px 10px;">
+                    <div>GSTIN : ${companyGST}</div>
+                    <div style="text-decoration: underline; font-size: 12px; font-weight: bold;">${documentTitle} (Page ${p} of ${totalPages})</div>
+                    <div>Invoice No: <strong>${invoiceNo}</strong></div>
+                </div>
+                <div class="header-mini-meta" style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px solid #000; font-size: 10px;">
+                    <div><strong>Dated:</strong> ${invoiceDate}</div>
+                    <div><strong>Billed to:</strong> ${custName.toUpperCase()}</div>
+                </div>
+            `;
+        }
+
+        let pageFooterHTML = '';
+        if (p === totalPages) {
+            pageFooterHTML = `
+                <div class="totals-section">
+                    ${totalsSummaryHTML}
+                    <div class="totals-row">
+                        <div class="totals-label font-bold">Grand Total</div>
+                        <div class="totals-qty">${totalQty.toFixed(3)} ${order.order_items[0]?.variant?.unit_type || ''}</div>
+                        <div class="totals-value font-bold">${grandTotal.toFixed(2)}</div>
+                    </div>
+                </div>
+                
+                <div class="tax-summary">
+                    <table class="tax-table">
+                        <thead>
+                            <tr>
+                                <th>Tax Rate</th>
+                                <th>Taxable Amt.</th>
+                                <th>CGST Amt.</th>
+                                <th>SGST Amt.</th>
+                                <th>Total Tax</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${taxSummaryHTML}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="words-section">
+                    ${amountInWords}
+                </div>
+                
+                <div class="payment-info-section">
+                    <div class="payment-info-col bank-details">
+                        <div style="font-weight: bold; margin-bottom: 5px;">Bank Details :</div>
+                        ${bankHTML}
+                    </div>
+                    ${(company?.payment_upi_id || paymentQrDataUrl) ? `
+                    <div class="payment-info-col payment-upi" style="display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="font-weight: bold; margin-bottom: 5px;">UPI Payment :</div>
+                            ${company.payment_upi_id ? `<div><strong>UPI ID:</strong> ${company.payment_upi_id}</div>` : ''}
+                        </div>
+                        ${paymentQrDataUrl ? `
+                        <div style="margin-top: 5px; display: flex; align-items: center; gap: 10px;">
+                            <img src="${paymentQrDataUrl}" style="width: 60px; height: 60px; object-fit: contain;" alt="Payment QR" />
+                            <span style="font-size: 8px; font-weight: bold; line-height: 1.2;">Scan QR Code<br/>to Pay ₹${grandTotal.toFixed(2)}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                    ` : ''}
+                    ${(company?.website_url || websiteQrDataUrl) ? `
+                    <div class="payment-info-col website-info" style="display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="font-weight: bold; margin-bottom: 5px;">Website :</div>
+                            ${company.website_url ? `<div><a href="${company.website_url}" target="_blank" style="color: #000; text-decoration: none;">${company.website_url}</a></div>` : ''}
+                        </div>
+                        ${websiteQrDataUrl ? `
+                        <div style="margin-top: 5px; display: flex; align-items: center; gap: 10px;">
+                            <img src="${websiteQrDataUrl}" style="width: 60px; height: 60px; object-fit: contain;" alt="Website QR" />
+                            <span style="font-size: 8px; font-weight: bold; line-height: 1.2;">Scan QR Code<br/>to Visit Website</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                    ` : ''}
+                </div>
+                
+                <div class="footer-section">
+                    <div class="tnc-box">
+                        <h4>Terms & Conditions</h4>
+                        ${formattedTnc}
+                    </div>
+                    <div class="sign-box">
+                        <h4>For ${companyName.toUpperCase()}</h4>
+                        <p>Authorised Signatory</p>
+                    </div>
+                </div>
+                
+                ${company?.invoice_custom_message ? `
+                <div class="custom-message-section" style="text-align: center; padding: 8px; font-style: italic; border-top: 1px solid #000; font-size: 10px; font-weight: bold; background-color: #fcfcfc;">
+                    ${company.invoice_custom_message}
+                </div>
+                ` : ''}
+                ${companyAddress ? `<div class="regd-office">Regd. Office : ${companyAddress}</div>` : ''}
+            `;
+        } else {
+            pageFooterHTML = `
+                <div class="continued-line">Continued on Page ${p + 1}...</div>
+                <div style="flex-grow: 1;"></div>
+                ${company?.invoice_custom_message ? `
+                <div class="custom-message-section" style="text-align: center; padding: 8px; font-style: italic; border-top: 1px solid #000; font-size: 10px; font-weight: bold; background-color: #fcfcfc;">
+                    ${company.invoice_custom_message}
+                </div>
+                ` : ''}
+                ${companyAddress ? `<div class="regd-office">Regd. Office : ${companyAddress}</div>` : ''}
+            `;
+        }
+
+        pagesHTML += `
+            <div class="page">
+                <div class="page-content">
+                    <div>
+                        ${pageHeaderHTML}
+                        <div class="items-section">
+                            <table class="items-table">
+                                <thead>
+                                    ${showExtraDisc ? `
+                                    <tr>
+                                        <th style="width: 3%;">S.N.</th>
+                                        <th style="width: 25%;">Description of Goods</th>
+                                        <th style="width: 8%;">HSN/SAC</th>
+                                        <th style="width: 7%;">Qty</th>
+                                        <th style="width: 6%;">Price</th>
+                                        <th style="width: 6%;">Disc%</th>
+                                        <th style="width: 10%;">Taxable Value (A)</th>
+                                        <th style="width: 8%;">Extra Disc</th>
+                                        <th style="width: 9%;">Net Taxable (B)</th>
+                                        <th style="width: 6%;">GST%</th>
+                                        <th style="width: 12%;">Total(₹)</th>
+                                    </tr>
+                                    ` : `
+                                    <tr>
+                                        <th style="width: 4%;">S.N.</th>
+                                        <th style="width: 35%;">Description of Goods</th>
+                                        <th style="width: 10%;">HSN/SAC</th>
+                                        <th style="width: 10%;">Qty</th>
+                                        <th style="width: 8%;">Price</th>
+                                        <th style="width: 7%;">Disc%</th>
+                                        <th style="width: 10%;">Taxable Value (A)</th>
+                                        <th style="width: 6%;">GST%</th>
+                                        <th style="width: 10%;">Total(₹)</th>
+                                    </tr>
+                                    `}
+                                </thead>
+                                <tbody>
+                                    ${tableRowsHTML}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div>
+                        ${pageFooterHTML}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
 
     return `
 <!DOCTYPE html>
@@ -1049,16 +1347,29 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
             font-family: Arial, Helvetica, sans-serif; 
             font-size: 11px; 
             margin: 0; 
-            padding: 20px; 
+            padding: 0; 
             color: #000;
-            background: #fff;
+            background: #f3f4f6;
         }
         * { box-sizing: border-box; }
-        .invoice-box {
-            max-width: 800px;
-            margin: auto;
+        .page {
+            width: 210mm;
+            height: 297mm;
+            margin: 20px auto;
             border: 1px solid #000;
             background: #fff;
+            display: flex;
+            flex-direction: column;
+            padding: 8mm 10mm;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            position: relative;
+        }
+        .page-content {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            justify-content: space-between;
+            border: 1px solid #000;
         }
         .header-top {
             display: flex;
@@ -1068,27 +1379,67 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
         }
         .header-main {
             text-align: center;
-            padding: 10px;
+            padding: 6px 10px;
             border-bottom: 1px solid #000;
             border-top: 1px solid #000;
             position: relative;
         }
+        .header-main.has-logo {
+            position: relative;
+            text-align: center;
+            padding: 6px 20px;
+        }
+        .logo-img {
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            max-width: 120px;
+            max-height: 60px;
+            object-fit: contain;
+        }
+        .header-text {
+            flex: 1;
+        }
         .header-main h1 {
             color: #d32f2f;
-            margin: 5px 0;
-            font-size: 24px;
+            margin: 3px 0;
+            font-size: 20px;
         }
         .header-main p {
-            margin: 2px 0;
+            margin: 1px 0;
             font-size: 10px;
         }
         .logo-placeholder {
             position: absolute;
             left: 20px;
-            top: 20px;
-            width: 80px;
-            height: 80px;
+            top: 15px;
+            width: 60px;
+            height: 60px;
             object-fit: contain;
+        }
+        .payment-info-section {
+            display: flex;
+            border-bottom: 1px solid #000;
+            font-size: 10px;
+        }
+        .payment-info-col {
+            flex: 1;
+            padding: 8px 10px;
+        }
+        .payment-info-col.bank-details {
+            flex: 1.8;
+        }
+        .payment-info-col.payment-upi,
+        .payment-info-col.website-info {
+            flex: 1;
+        }
+        .payment-info-col:not(:last-child) {
+            border-right: 1px solid #000;
+        }
+        .payment-info-col strong {
+            display: inline-block;
+            margin-bottom: 4px;
         }
         .meta-section {
             display: flex;
@@ -1106,31 +1457,37 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
         .address-section {
             display: flex;
             border-bottom: 1px solid #000;
-            min-height: 120px;
+            min-height: 80px;
         }
         .address-col {
             flex: 1;
-            padding: 10px;
+            padding: 6px 10px;
         }
         .address-col:first-child { border-right: 1px solid #000; }
         .address-col p { margin: 2px 0; line-height: 1.4; }
         
         .items-section {
             border-bottom: 1px solid #000;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 5px;
         }
         .items-table {
             width: 100%;
+            height: 100%;
             border-collapse: collapse;
             font-size: 10px;
         }
         .items-table th, .items-table td {
             border-right: 1px solid #000;
-            padding: 5px;
+            border-bottom: none;
+            padding: 4px;
         }
         .items-table th { border-bottom: 1px solid #000; text-align: center; font-weight: bold; }
         .items-table th:last-child, .items-table td:last-child { border-right: none; }
-        .item-row td { border-bottom: none; }
-        .empty-row td { color: transparent; height: 18px; }
+        .item-row { height: 24px; }
+        .spacer-row td { height: auto; border-bottom: none; color: transparent; }
         
         .text-center { text-align: center; }
         .text-right { text-align: right; }
@@ -1139,7 +1496,6 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
         .text-blue-600 { color: #2563eb; }
         
         .totals-section {
-
         }
         .border-bottom {
             border-bottom: 1px solid #000;
@@ -1148,174 +1504,56 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
             display: flex;
         }
         .totals-row > div {
-            padding: 5px 10px;
+            padding: 4px 10px;
         }
         .totals-label { flex: 1; text-align: right; border-right: 1px solid #000; }
-        .totals-qty { width: 100px; text-align: center; font-weight: bold; border-right: 1px solid #000; padding: 5px 0 !important; }
-        .totals-value { width: 100px; text-align: right; font-weight: bold; padding: 5px 0 !important;}
+        .totals-qty { width: 100px; text-align: center; font-weight: bold; border-right: 1px solid #000; padding: 4px 0 !important; }
+        .totals-value { width: 100px; text-align: right; font-weight: bold; padding: 4px 0 !important;}
         
         .tax-summary {
             border-bottom: 1px solid #000;
             border-top: 1px solid #000;
-            padding: 5px;
+            padding: 4px 5px;
             display: flex;
         }
         .tax-table { width: 350px; border-collapse: collapse; font-size: 9px; margin: 0 10px; border-right: 1px solid #ccc; padding-right: 10px; }
-        .tax-table th, .tax-table td { padding: 3px; border: none; }
+        .tax-table th, .tax-table td { padding: 2px 3px; border: none; }
         .tax-table th { border-bottom: 1px solid #000; text-align: right; }
         .tax-table th:first-child { text-align: center; }
         
-        .words-section { padding: 10px; font-weight: bold; border-bottom: 1px solid #000; font-size: 12px; }
+        .words-section { padding: 6px 10px; font-weight: bold; border-bottom: 1px solid #000; font-size: 11px; }
         
         .bank-section { padding: 5px 10px; border-bottom: 1px solid #000; font-size: 10px; }
         
-        .footer-section { display: flex; min-height: 140px; }
-        .tnc-box { flex: 2; padding: 10px; border-right: 1px solid #000; font-size: 9px; line-height: 1.5; }
-        .tnc-box h4 { margin: 0 0 5px 0; text-decoration: underline; font-size: 10px; }
-        .sign-box { flex: 1; position: relative; padding: 10px; padding-top: 20px;}
-        .sign-box h4 { margin: 0 0 70px 0; text-align: center; font-size: 11px; }
-        .sign-box p { position: absolute; bottom: 10px; width: 100%; text-align: center; font-weight: bold; margin: 0; left: 0; }
+        .footer-section { display: flex; min-height: 95px; }
+        .tnc-box { flex: 2; padding: 6px 10px; border-right: 1px solid #000; font-size: 9px; line-height: 1.4; }
+        .tnc-box h4 { margin: 0 0 4px 0; text-decoration: underline; font-size: 10px; }
+        .sign-box { flex: 1; position: relative; padding: 6px 10px; padding-top: 15px;}
+        .sign-box h4 { margin: 0 0 45px 0; text-align: center; font-size: 11px; }
+        .sign-box p { position: absolute; bottom: 8px; width: 100%; text-align: center; font-weight: bold; margin: 0; left: 0; }
         
-        .regd-office { text-align: center; padding: 5px; font-size: 9px; border-top: 1px solid #000; }
+        .regd-office { text-align: center; padding: 4px; font-size: 9px; border-top: 1px solid #000; }
+        .continued-line { text-align: right; font-weight: bold; font-style: italic; font-size: 10px; padding: 5px 10px; }
         
+        @page { margin: 0; size: A4; }
         @media print {
-            body { padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            .invoice-box { border: 1px solid #000; border-collapse: collapse; box-shadow: none; }
+            body { padding: 0; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .page { 
+                margin: 0; 
+                border: 1px solid #000; 
+                box-shadow: none; 
+                page-break-after: always; 
+                height: 297mm;
+                width: 210mm;
+            }
+            .page:last-child {
+                page-break-after: avoid;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="invoice-box">
-        <div class="header-top">
-            <div>GSTIN : ${companyGST}</div>
-            <div style="text-decoration: underline; font-size: 14px;">${documentTitle}</div>
-            <div>Original Copy</div>
-        </div>
-        
-        <div class="header-main">
-            ${company?.logo_url ? `<img src="${company.logo_url}" class="logo-placeholder" alt="Logo">` : ''}
-            <h1>${companyName.toUpperCase()}</h1>
-            <p><strong>WORK :</strong> ${companyAddress}</p>
-            <p><strong>Tel.:</strong> ${companyPhone} ${companyEmail ? `&nbsp;|&nbsp; <strong>Email :</strong> ${companyEmail}` : ''}</p>
-        </div>
-        
-        <div class="meta-section">
-            <div class="meta-col">
-                <table class="meta-table">
-                    <tr><td>Invoice No.</td><td>: <strong>${invoiceNo}</strong></td></tr>
-                    <tr><td>Dated</td><td>: ${invoiceDate}</td></tr>
-                    <tr><td>Place of Supply</td><td>: ${address?.state || company?.state || ''}</td></tr>
-                    <tr><td>Reference No.</td><td>: ${order.order_number || order.id.substring(0,8).toUpperCase()}</td></tr>
-                </table>
-            </div>
-            <div class="meta-col">
-                <table class="meta-table">
-                    <tr><td>Reverse Charge</td><td>: N</td></tr>
-                    <tr><td>Terms of Payment</td><td>: ${paymentTerms}</td></tr>
-                </table>
-            </div>
-        </div>
-        
-        <div class="address-section">
-            <div class="address-col">
-                <p><strong>Billed to : ${custName.toUpperCase()}</strong></p>
-                <p>${custAddress}</p>
-                ${address?.phone || customer?.phone ? `<p>MOB. NO.-${address?.phone || customer?.phone}</p>` : ''}
-                <p style="margin-top: 5px;"><strong>GSTIN / UIN &nbsp;&nbsp;&nbsp;: ${custGST}</strong></p>
-            </div>
-            <div class="address-col">
-                <p><strong>Shipped to : ${custName.toUpperCase()}</strong></p>
-                <p>${custAddress}</p>
-                ${address?.phone || customer?.phone ? `<p>MOB. NO.-${address?.phone || customer?.phone}</p>` : ''}
-                <p style="margin-top: 5px;"><strong>GSTIN / UIN &nbsp;&nbsp;&nbsp;: ${custGST}</strong></p>
-            </div>
-        </div>
-        
-        <div class="items-section">
-            <table class="items-table">
-                <thead>
-                    ${showExtraDisc ? `
-                    <tr>
-                        <th style="width: 3%;">S.N.</th>
-                        <th style="width: 25%;">Description of Goods</th>
-                        <th style="width: 8%;">HSN/SAC</th>
-                        <th style="width: 7%;">Qty</th>
-                        <th style="width: 6%;">Price</th>
-                        <th style="width: 6%;">Disc%</th>
-                        <th style="width: 10%;">Taxable Value (A)</th>
-                        <th style="width: 8%;">Extra Disc</th>
-                        <th style="width: 9%;">Net Taxable (B)</th>
-                        <th style="width: 6%;">GST%</th>
-                        <th style="width: 12%;">Total(₹)</th>
-                    </tr>
-                    ` : `
-                    <tr>
-                        <th style="width: 4%;">S.N.</th>
-                        <th style="width: 35%;">Description of Goods</th>
-                        <th style="width: 10%;">HSN/SAC</th>
-                        <th style="width: 10%;">Qty</th>
-                        <th style="width: 8%;">Price</th>
-                        <th style="width: 7%;">Disc%</th>
-                        <th style="width: 10%;">Taxable Value (A)</th>
-                        <th style="width: 6%;">GST%</th>
-                        <th style="width: 10%;">Total(₹)</th>
-                    </tr>
-                    `}
-                </thead>
-                <tbody>
-                    ${itemsHTML}
-                </tbody>
-            </table>
-        </div>
-        
-        <div class="totals-section">
-            ${totalsSummaryHTML}
-            <div class="totals-row">
-                <div class="totals-label font-bold">Grand Total</div>
-                <div class="totals-qty">${totalQty.toFixed(3)} ${order.order_items[0]?.variant?.unit_type || ''}</div>
-                <div class="totals-value font-bold">${grandTotal.toFixed(2)}</div>
-            </div>
-        </div>
-        
-        <div class="tax-summary">
-            <table class="tax-table">
-                <thead>
-                    <tr>
-                        <th>Tax Rate</th>
-                        <th>Taxable Amt.</th>
-                        <th>CGST Amt.</th>
-                        <th>SGST Amt.</th>
-                        <th>Total Tax</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${taxSummaryHTML}
-                </tbody>
-            </table>
-        </div>
-        
-        <div class="words-section">
-            ${amountInWords}
-        </div>
-        
-        <div class="bank-section">
-            <div style="font-weight: bold; margin-bottom: 5px;">Bank Details :</div>
-            ${bankHTML}
-        </div>
-        
-        <div class="footer-section">
-            <div class="tnc-box">
-                <h4>Terms & Conditions</h4>
-                ${formattedTnc}
-            </div>
-            <div class="sign-box">
-                <h4>For ${companyName.toUpperCase()}</h4>
-                <p>Authorised Signatory</p>
-            </div>
-        </div>
-        
-        ${companyAddress ? `<div class="regd-office">Regd. Office : ${companyAddress}</div>` : ''}
-    </div>
+    ${pagesHTML}
 </body>
 </html>`;
 };
@@ -1411,11 +1649,49 @@ export const getQuotationDocument = async (req: Request, res: Response, next: Ne
     const totalExtraCharges = Number(quotation.total_extra_charges || 0);
     const roundOff = Number(quotation.round_off_amount || 0);
 
-    const taxSummary: Record<string, { taxable: number; taxRate: number; cgst: number; sgst: number }> = {};
-    let itemsHTML = '';
+    // Bank Details HTML
+    const bankDetailsObj = company?.bank_details && company.bank_details.length > 0 ? company.bank_details[0] : null;
+    let bankHTML = '';
+    if (bankDetailsObj) {
+        bankHTML = `
+            <strong>BANK NAME :</strong> ${bankDetailsObj.bank_name || ''} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+            <strong>A/C No. :</strong> ${bankDetailsObj.account_number || ''} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+            <strong>IFSC CODE :</strong> ${bankDetailsObj.ifsc_code || ''}
+        `;
+    } else {
+        bankHTML = `<em>Bank details not configured. Add bank details in Company Settings.</em>`;
+    }
 
-    (quotation.quotation_items || []).forEach((item: any, idx: number) => {
+    // Generate QR codes
+    let paymentQrDataUrl = '';
+    if (company?.payment_qr_code_url) {
+        paymentQrDataUrl = company.payment_qr_code_url;
+    } else if (company?.payment_upi_id) {
+        const upiLink = `upi://pay?pa=${company.payment_upi_id}&pn=${encodeURIComponent(companyName)}&am=${grandTotal.toFixed(2)}&cu=INR`;
+        try {
+            paymentQrDataUrl = await QRCode.toDataURL(upiLink, { margin: 1, width: 200 });
+        } catch (err) {
+            console.error('Failed to generate UPI QR code for quotation:', err);
+        }
+    }
+
+    let websiteQrDataUrl = '';
+    if (company?.website_qr_code_url) {
+        websiteQrDataUrl = company.website_qr_code_url;
+    } else if (company?.website_url) {
+        try {
+            websiteQrDataUrl = await QRCode.toDataURL(company.website_url, { margin: 1, width: 200 });
+        } catch (err) {
+            console.error('Failed to generate Website QR code for quotation:', err);
+        }
+    }
+
+    const taxSummary: Record<string, { taxable: number; taxRate: number; cgst: number; sgst: number }> = {};
+    let totalQty = 0;
+
+    const computedItems = (quotation.quotation_items || []).map((item: any, idx: number) => {
       const qty = Number(item.quantity) || 0;
+      totalQty += qty;
       const price = Number(item.unit_price) || 0;
       const lineDiscount = Number(item.discount_amount || 0);
       const taxableAmtA = (price * qty) - lineDiscount;
@@ -1437,11 +1713,20 @@ export const getQuotationDocument = async (req: Request, res: Response, next: Ne
       taxSummary[key].cgst += (netTaxableB * cgstSgstRate) / 100;
       taxSummary[key].sgst += (netTaxableB * cgstSgstRate) / 100;
 
-      if (showExtraDisc) {
-        itemsHTML += `<tr class="item-row"><td class="text-center">${idx + 1}</td><td>${desc}</td><td class="text-center">${hsn}</td><td class="text-center">${qty.toFixed(3)} ${unit}</td><td class="text-right">${price.toFixed(2)}</td><td class="text-right">${discPct ? discPct + '%' : '-'}</td><td class="text-right">${taxableAmtA.toFixed(2)}</td><td class="text-right">${extraDiscShare.toFixed(2)}</td><td class="text-right">${netTaxableB.toFixed(2)}</td><td class="text-center">${taxRate}%</td><td class="text-right">${totalLineAmount.toFixed(2)}</td></tr>`;
-      } else {
-        itemsHTML += `<tr class="item-row"><td class="text-center">${idx + 1}</td><td>${desc}</td><td class="text-center">${hsn}</td><td class="text-center">${qty.toFixed(3)} ${unit}</td><td class="text-right">${price.toFixed(2)}</td><td class="text-right">${discPct ? discPct + '%' : '-'}</td><td class="text-right">${taxableAmtA.toFixed(2)}</td><td class="text-center">${taxRate}%</td><td class="text-right">${totalLineAmount.toFixed(2)}</td></tr>`;
-      }
+      return {
+        sn: idx + 1,
+        desc,
+        hsn,
+        qty,
+        unit,
+        price,
+        discPct,
+        taxableAmtA,
+        extraDiscShare,
+        netTaxableB,
+        taxRate,
+        totalLineAmount
+      };
     });
 
     const taxSummaryHTML = Object.values(taxSummary).map(t => {
@@ -1453,106 +1738,474 @@ export const getQuotationDocument = async (req: Request, res: Response, next: Ne
       const taxPct = Number(ec.tax_percent || 0);
       const total = ec.amount + (ec.amount * taxPct / 100);
       const colSpan = showExtraDisc ? 10 : 8;
-      return `<tr><td colspan="${colSpan}" class="text-right" style="color:#2563eb;">${ec.name}${taxPct > 0 ? ` (incl. ${taxPct}% tax)` : ''}</td><td class="text-right">${total.toFixed(2)}</td></tr>`;
+      return `<tr class="item-row"><td colspan="${colSpan}" class="text-right" style="color:#2563eb; font-weight: bold;">${ec.name}${taxPct > 0 ? ` (incl. ${taxPct}% tax)` : ''}</td><td class="text-right font-bold">${total.toFixed(2)}</td></tr>`;
     }).join('');
 
-    const amountInWords = numberToWords(Math.round(grandTotal));
+    const amountInWordsStr = 'Rupees ' + numberToWords(Math.round(grandTotal));
 
-    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Quotation ${docNo}</title><style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: Arial, sans-serif; font-size: 11px; padding: 10px; background: #f9f9f9; }
-      .invoice-box { max-width: 900px; margin: auto; background: #fff; border: 2px solid #000; }
-      .header-top { display: flex; justify-content: space-between; align-items: center; padding: 5px 10px; border-bottom: 1px solid #000; font-size: 11px; font-weight: bold; }
-      .header-main { text-align: center; padding: 10px; border-bottom: 1px solid #000; }
-      .header-main h1 { color: #d32f2f; margin: 5px 0; font-size: 24px; }
-      .header-main p { margin: 2px 0; font-size: 10px; }
-      .logo-placeholder { position: absolute; left: 20px; top: 20px; width: 80px; height: 80px; object-fit: contain; }
-      .meta-section { display: flex; border-bottom: 1px solid #000; }
-      .meta-col { flex: 1; padding: 5px 10px; }
-      .meta-col:first-child { border-right: 1px solid #000; }
-      .meta-table { width: 100%; font-size: 10px; }
-      .meta-table td { padding: 2px 0; vertical-align: top; }
-      .meta-table td:first-child { width: 110px; }
-      .items-table { width: 100%; border-collapse: collapse; font-size: 10px; }
-      .items-table th, .items-table td { border-right: 1px solid #000; padding: 5px; }
-      .items-table th { border-bottom: 1px solid #000; text-align: center; font-weight: bold; }
-      .items-table th:last-child, .items-table td:last-child { border-right: none; }
-      .item-row td { border-bottom: none; }
-      .totals-section { border-top: 1px solid #000; }
-      .totals-row { display: flex; }
-      .totals-left { flex: 1; padding: 10px; border-right: 1px solid #000; }
-      .totals-right { width: 260px; }
-      .total-line { display: flex; justify-content: space-between; padding: 3px 10px; font-size: 10px; }
-      .total-line.grand { font-weight: bold; font-size: 12px; border-top: 2px solid #000; background: #f5f5f5; }
-      .tax-summary-table { width: 100%; border-collapse: collapse; font-size: 10px; }
-      .tax-summary-table th, .tax-summary-table td { border: 1px solid #000; padding: 4px; text-align: center; }
-      .amount-words { padding: 8px 10px; font-size: 10px; border-top: 1px solid #000; }
-      .text-right { text-align: right; } .text-center { text-align: center; }
-      @media print { body { padding: 0; } .invoice-box { border: 2px solid #000; box-shadow: none; } }
-    </style></head><body>
-    <div class="invoice-box">
-      <div class="header-top">
-        <div>GSTIN : ${companyGST}</div>
-        <div style="text-decoration: underline; font-size: 14px;">QUOTATION</div>
-        <div>Copy</div>
-      </div>
-      <div class="header-main" style="position:relative;">
-        ${company?.logo_url ? `<img src="${company.logo_url}" class="logo-placeholder" alt="Logo">` : ''}
-        <h1>${companyName.toUpperCase()}</h1>
-        <p><strong>WORK :</strong> ${companyAddress}</p>
-        <p><strong>Tel.:</strong> ${companyPhone}${companyEmail ? ` &nbsp;|&nbsp; <strong>Email :</strong> ${companyEmail}` : ''}</p>
-      </div>
-      <div class="meta-section">
-        <div class="meta-col">
-          <table class="meta-table"><tbody>
-            <tr><td><strong>Quotation No.</strong></td><td>: ${docNo}</td></tr>
-            <tr><td><strong>Date</strong></td><td>: ${docDate}</td></tr>
-            <tr><td><strong>Valid Until</strong></td><td>: ${validUntil}</td></tr>
-          </tbody></table>
-        </div>
-        <div class="meta-col">
-          <table class="meta-table"><tbody>
-            <tr><td><strong>Customer</strong></td><td>: ${custName}</td></tr>
-            ${custGST ? `<tr><td><strong>GSTIN</strong></td><td>: ${custGST}</td></tr>` : ''}
-            <tr><td><strong>Status</strong></td><td>: ${(quotation.status || '').toUpperCase()}</td></tr>
-          </tbody></table>
-        </div>
-      </div>
-      <div style="border-bottom: 1px solid #000;">
-        <table class="items-table">
-          <thead><tr>
-            ${showExtraDisc
-              ? `<th>#</th><th>Description</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Disc%</th><th>Taxable(A)</th><th>Extra Disc</th><th>Net Taxable(B)</th><th>GST%</th><th>Total</th>`
-              : `<th>#</th><th>Description</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Disc%</th><th>Taxable Value</th><th>GST%</th><th>Total</th>`}
-          </tr></thead>
-          <tbody>${itemsHTML}${extraChargesHTML}</tbody>
-        </table>
-      </div>
-      <div class="totals-section">
-        <div class="totals-row">
-          <div class="totals-left">
-            <table class="tax-summary-table">
-              <thead><tr><th>GST%</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>Total Tax</th></tr></thead>
-              <tbody>${taxSummaryHTML}</tbody>
-            </table>
-          </div>
-          <div class="totals-right">
-            <div class="total-line"><span>Subtotal</span><span>&#8377; ${subtotal.toFixed(2)}</span></div>
-            ${totalDiscount > 0 ? `<div class="total-line"><span>Item Discount</span><span>-&#8377; ${totalDiscount.toFixed(2)}</span></div>` : ''}
-            ${showExtraDisc ? `<div class="total-line"><span>Extra Discount</span><span>-&#8377; ${extraDiscount.toFixed(2)}</span></div>` : ''}
-            <div class="total-line"><span>Total Tax</span><span>&#8377; ${totalTax.toFixed(2)}</span></div>
-            ${totalExtraCharges > 0 ? `<div class="total-line"><span>Extra Charges</span><span>&#8377; ${totalExtraCharges.toFixed(2)}</span></div>` : ''}
-            ${roundOff !== 0 ? `<div class="total-line"><span>Round Off</span><span>${roundOff > 0 ? '+' : ''}${roundOff.toFixed(2)}</span></div>` : ''}
-            <div class="total-line grand"><span>Grand Total</span><span>&#8377; ${grandTotal.toFixed(2)}</span></div>
-          </div>
-        </div>
-      </div>
-      <div class="amount-words"><strong>Amount in Words:</strong> ${amountInWords} Rupees</div>
-      ${quotation.notes ? `<div style="padding:8px 10px;font-size:10px;border-top:1px solid #000;"><strong>Notes:</strong> ${quotation.notes}</div>` : ''}
-      ${quotation.terms_and_conditions ? `<div style="padding:8px 10px;font-size:10px;border-top:1px solid #000;"><strong>Terms &amp; Conditions:</strong> ${quotation.terms_and_conditions}</div>` : ''}
-      <div style="padding:10px;text-align:right;border-top:1px solid #000;font-size:10px;">For ${companyName}<br><br><br>Authorised Signatory</div>
-    </div>
-    </body></html>`;
+    // Quotations pagination budgets:
+    // Single page: Max 12 items.
+    // Page 1 multi-page: Max 20 items.
+    // Middle pages: Max 25 items.
+    // Last page: Max 14 items.
+    const pages = paginateItems(computedItems, 12, 20, 25, 14);
+    const totalPages = pages.length;
+    let pagesHTML = '';
+
+    for (let p = 1; p <= totalPages; p++) {
+        const pageItems = pages[p - 1];
+        const pageItemsCount = pageItems.length;
+        
+        let targetRows = 12;
+        if (totalPages > 1) {
+            if (p === 1) targetRows = 20;
+            else if (p === totalPages) targetRows = 14;
+            else targetRows = 25;
+        }
+        
+        const extraRowsCount = (p === totalPages) ? rawExtraCharges.length : 0;
+        const paddingCount = Math.max(0, targetRows - pageItemsCount - extraRowsCount);
+        const colsCount = showExtraDisc ? 11 : 9;
+        
+        let tableRowsHTML = '';
+        pageItems.forEach((item: any) => {
+            if (showExtraDisc) {
+                tableRowsHTML += `
+                    <tr class="item-row">
+                        <td class="text-center">${item.sn}</td>
+                        <td>${item.desc}</td>
+                        <td class="text-center">${item.hsn}</td>
+                        <td class="text-center">${item.qty.toFixed(3)} ${item.unit}</td>
+                        <td class="text-right">${item.price.toFixed(2)}</td>
+                        <td class="text-right">${item.discPct ? item.discPct + '%' : '-'}</td>
+                        <td class="text-right">${item.taxableAmtA.toFixed(2)}</td>
+                        <td class="text-right">${item.extraDiscShare.toFixed(2)}</td>
+                        <td class="text-right">${item.netTaxableB.toFixed(2)}</td>
+                        <td class="text-center">${item.taxRate}%</td>
+                        <td class="text-right">${item.totalLineAmount.toFixed(2)}</td>
+                    </tr>
+                `;
+            } else {
+                tableRowsHTML += `
+                    <tr class="item-row">
+                        <td class="text-center">${item.sn}</td>
+                        <td>${item.desc}</td>
+                        <td class="text-center">${item.hsn}</td>
+                        <td class="text-center">${item.qty.toFixed(3)} ${item.unit}</td>
+                        <td class="text-right">${item.price.toFixed(2)}</td>
+                        <td class="text-right">${item.discPct ? item.discPct + '%' : '-'}</td>
+                        <td class="text-right">${item.taxableAmtA.toFixed(2)}</td>
+                        <td class="text-center">${item.taxRate}%</td>
+                        <td class="text-right">${item.totalLineAmount.toFixed(2)}</td>
+                    </tr>
+                `;
+            }
+        });
+        
+        // Add padding rows
+        tableRowsHTML += generateEmptyRowsHTML(paddingCount, colsCount);
+        
+        // Add extra charges rows on last page
+        if (p === totalPages && extraChargesHTML) {
+            tableRowsHTML += extraChargesHTML;
+        }
+        
+        // Add spacer row
+        tableRowsHTML += `
+            <tr class="item-row spacer-row">
+                ${Array(colsCount).fill('<td>&nbsp;</td>').join('')}
+            </tr>
+        `;
+
+        let pageHeaderHTML = '';
+        if (p === 1) {
+            pageHeaderHTML = `
+                <div class="header-top">
+                    <div>GSTIN : ${companyGST}</div>
+                    <div style="text-decoration: underline; font-size: 14px;">QUOTATION</div>
+                    <div>Copy</div>
+                </div>
+                
+                <div class="header-main ${company?.logo_url ? 'has-logo' : ''}">
+                    ${company?.logo_url ? `<img src="${company.logo_url}" class="logo-img" alt="Logo">` : ''}
+                    <div class="header-text">
+                        <h1>${companyName.toUpperCase()}</h1>
+                        <p><strong>WORK :</strong> ${companyAddress}</p>
+                        <p><strong>Tel.:</strong> ${companyPhone} ${companyEmail ? `&nbsp;|&nbsp; <strong>Email :</strong> ${companyEmail}` : ''}</p>
+                    </div>
+                </div>
+                
+                <div class="meta-section">
+                    <div class="meta-col">
+                        <table class="meta-table">
+                            <tr><td><strong>Quotation No.</strong></td><td>: <strong>${docNo}</strong></td></tr>
+                            <tr><td><strong>Date</strong></td><td>: ${docDate}</td></tr>
+                            <tr><td><strong>Valid Until</strong></td><td>: ${validUntil}</td></tr>
+                        </table>
+                    </div>
+                    <div class="meta-col">
+                        <table class="meta-table">
+                            <tr><td><strong>Customer</strong></td><td>: ${custName}</td></tr>
+                            ${custGST ? `<tr><td><strong>GSTIN</strong></td><td>: ${custGST}</td></tr>` : ''}
+                            <tr><td><strong>Status</strong></td><td>: ${(quotation.status || '').toUpperCase()}</td></tr>
+                        </table>
+                    </div>
+                </div>
+            `;
+        } else {
+            pageHeaderHTML = `
+                <div class="header-top" style="border-bottom: 1px solid #000; padding: 5px 10px;">
+                    <div>GSTIN : ${companyGST}</div>
+                    <div style="text-decoration: underline; font-size: 12px; font-weight: bold;">QUOTATION (Page ${p} of ${totalPages})</div>
+                    <div>Quotation No: <strong>${docNo}</strong></div>
+                </div>
+                <div class="header-mini-meta" style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px solid #000; font-size: 10px;">
+                    <div><strong>Date:</strong> ${docDate}</div>
+                    <div><strong>Customer:</strong> ${custName}</div>
+                </div>
+            `;
+        }
+
+        let pageFooterHTML = '';
+        if (p === totalPages) {
+            pageFooterHTML = `
+                <div class="totals-section">
+                    <div class="totals-row" style="display: flex; border-bottom: 1px solid #000;">
+                        <div class="totals-left" style="flex: 1; padding: 10px; border-right: 1px solid #000;">
+                            <table class="tax-summary-table">
+                                <thead>
+                                    <tr>
+                                        <th>GST%</th>
+                                        <th>Taxable</th>
+                                        <th>CGST</th>
+                                        <th>SGST</th>
+                                        <th>Total Tax</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${taxSummaryHTML}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="totals-right" style="width: 260px;">
+                            <div class="total-line"><span>Subtotal</span><span>&#8377; ${subtotal.toFixed(2)}</span></div>
+                            ${totalDiscount > 0 ? `<div class="total-line"><span>Item Discount</span><span>-&#8377; ${totalDiscount.toFixed(2)}</span></div>` : ''}
+                            ${showExtraDisc ? `<div class="total-line"><span>Extra Discount</span><span>-&#8377; ${extraDiscount.toFixed(2)}</span></div>` : ''}
+                            <div class="total-line"><span>Total Tax</span><span>&#8377; ${totalTax.toFixed(2)}</span></div>
+                            ${totalExtraCharges > 0 ? `<div class="total-line"><span>Extra Charges</span><span>&#8377; ${totalExtraCharges.toFixed(2)}</span></div>` : ''}
+                            ${roundOff !== 0 ? `<div class="total-line"><span>Round Off</span><span>${roundOff > 0 ? '+' : ''}${roundOff.toFixed(2)}</span></div>` : ''}
+                            <div class="total-line grand" style="font-weight: bold; font-size: 12px; border-top: 2px solid #000; background: #f5f5f5;">
+                                <span>Grand Total</span><span>&#8377; ${grandTotal.toFixed(2)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="amount-words" style="padding: 6px 10px; font-size: 10px; border-bottom: 1px solid #000; font-weight: bold;">
+                    Amount in Words: ${amountInWordsStr}
+                </div>
+                
+                <div class="payment-info-section">
+                    <div class="payment-info-col bank-details">
+                        <div style="font-weight: bold; margin-bottom: 5px;">Bank Details :</div>
+                        ${bankHTML}
+                    </div>
+                    ${(company?.payment_upi_id || paymentQrDataUrl) ? `
+                    <div class="payment-info-col payment-upi" style="display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="font-weight: bold; margin-bottom: 5px;">UPI Payment :</div>
+                            ${company.payment_upi_id ? `<div><strong>UPI ID:</strong> ${company.payment_upi_id}</div>` : ''}
+                        </div>
+                        ${paymentQrDataUrl ? `
+                        <div style="margin-top: 5px; display: flex; align-items: center; gap: 10px;">
+                            <img src="${paymentQrDataUrl}" style="width: 60px; height: 60px; object-fit: contain;" alt="Payment QR" />
+                            <span style="font-size: 8px; font-weight: bold; line-height: 1.2;">Scan QR Code<br/>to Pay ₹${grandTotal.toFixed(2)}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                    ` : ''}
+                    ${(company?.website_url || websiteQrDataUrl) ? `
+                    <div class="payment-info-col website-info" style="display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="font-weight: bold; margin-bottom: 5px;">Website :</div>
+                            ${company.website_url ? `<div><a href="${company.website_url}" target="_blank" style="color: #000; text-decoration: none;">${company.website_url}</a></div>` : ''}
+                        </div>
+                        ${websiteQrDataUrl ? `
+                        <div style="margin-top: 5px; display: flex; align-items: center; gap: 10px;">
+                            <img src="${websiteQrDataUrl}" style="width: 60px; height: 60px; object-fit: contain;" alt="Website QR" />
+                            <span style="font-size: 8px; font-weight: bold; line-height: 1.2;">Scan QR Code<br/>to Visit Website</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                    ` : ''}
+                </div>
+                
+                ${quotation.notes ? `<div style="padding:8px 10px;font-size:10px;border-bottom:1px solid #000;"><strong>Notes:</strong> ${quotation.notes}</div>` : ''}
+                ${quotation.terms_and_conditions ? `<div style="padding:8px 10px;font-size:10px;border-bottom:1px solid #000;"><strong>Terms &amp; Conditions:</strong> ${quotation.terms_and_conditions}</div>` : ''}
+                
+                <div class="footer-section" style="display: flex; min-height: 75px; justify-content: flex-end;">
+                    <div class="sign-box" style="width: 250px; position: relative; padding: 6px 10px; text-align: right;">
+                        <h4 style="margin: 0 0 35px 0; font-size: 11px; text-align: right;">For ${companyName.toUpperCase()}</h4>
+                        <p style="font-weight: bold; margin: 0; text-align: right;">Authorised Signatory</p>
+                    </div>
+                </div>
+                
+                ${company?.invoice_custom_message ? `
+                <div class="custom-message-section" style="text-align: center; padding: 8px; font-style: italic; border-top: 1px solid #000; font-size: 10px; font-weight: bold; background-color: #fcfcfc;">
+                    ${company.invoice_custom_message}
+                </div>
+                ` : ''}
+                ${companyAddress ? `<div class="regd-office" style="text-align: center; padding: 4px; font-size: 9px; border-top: 1px solid #000;">Regd. Office : ${companyAddress}</div>` : ''}
+            `;
+        } else {
+            pageFooterHTML = `
+                <div class="continued-line">Continued on Page ${p + 1}...</div>
+                <div style="flex-grow: 1;"></div>
+                ${company?.invoice_custom_message ? `
+                <div class="custom-message-section" style="text-align: center; padding: 8px; font-style: italic; border-top: 1px solid #000; font-size: 10px; font-weight: bold; background-color: #fcfcfc;">
+                    ${company.invoice_custom_message}
+                </div>
+                ` : ''}
+                ${companyAddress ? `<div class="regd-office" style="text-align: center; padding: 4px; font-size: 9px; border-top: 1px solid #000;">Regd. Office : ${companyAddress}</div>` : ''}
+            `;
+        }
+
+        pagesHTML += `
+            <div class="page">
+                <div class="page-content">
+                    <div>
+                        ${pageHeaderHTML}
+                        <div class="items-section">
+                            <table class="items-table">
+                                <thead>
+                                    ${showExtraDisc ? `
+                                    <tr>
+                                        <th style="width: 3%;">#</th>
+                                        <th style="width: 25%;">Description</th>
+                                        <th style="width: 8%;">HSN</th>
+                                        <th style="width: 7%;">Qty</th>
+                                        <th style="width: 6%;">Rate</th>
+                                        <th style="width: 6%;">Disc%</th>
+                                        <th style="width: 10%;">Taxable(A)</th>
+                                        <th style="width: 8%;">Extra Disc</th>
+                                        <th style="width: 9%;">Net Taxable(B)</th>
+                                        <th style="width: 6%;">GST%</th>
+                                        <th style="width: 12%;">Total</th>
+                                    </tr>
+                                    ` : `
+                                    <tr>
+                                        <th style="width: 4%;">#</th>
+                                        <th style="width: 35%;">Description</th>
+                                        <th style="width: 10%;">HSN</th>
+                                        <th style="width: 10%;">Qty</th>
+                                        <th style="width: 8%;">Rate</th>
+                                        <th style="width: 7%;">Disc%</th>
+                                        <th style="width: 10%;">Taxable Value</th>
+                                        <th style="width: 6%;">GST%</th>
+                                        <th style="width: 10%;">Total</th>
+                                    </tr>
+                                    `}
+                                </thead>
+                                <tbody>
+                                    ${tableRowsHTML}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div>
+                        ${pageFooterHTML}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quotation - ${docNo}</title>
+    <style>
+        body { 
+            font-family: Arial, Helvetica, sans-serif; 
+            font-size: 11px; 
+            margin: 0; 
+            padding: 0; 
+            color: #000;
+            background: #f3f4f6;
+        }
+        * { box-sizing: border-box; }
+        .page {
+            width: 210mm;
+            height: 297mm;
+            margin: 20px auto;
+            border: 1px solid #000;
+            background: #fff;
+            display: flex;
+            flex-direction: column;
+            padding: 8mm 10mm;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            position: relative;
+        }
+        .page-content {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            justify-content: space-between;
+            border: 1px solid #000;
+        }
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 10px;
+            font-weight: bold;
+        }
+        .header-main {
+            text-align: center;
+            padding: 6px 10px;
+            border-bottom: 1px solid #000;
+            border-top: 1px solid #000;
+            position: relative;
+        }
+        .header-main.has-logo {
+            position: relative;
+            text-align: center;
+            padding: 6px 20px;
+        }
+        .logo-img {
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            max-width: 120px;
+            max-height: 60px;
+            object-fit: contain;
+        }
+        .header-text {
+            flex: 1;
+        }
+        .header-main h1 {
+            color: #d32f2f;
+            margin: 3px 0;
+            font-size: 20px;
+        }
+        .header-main p {
+            margin: 1px 0;
+            font-size: 10px;
+        }
+        .payment-info-section {
+            display: flex;
+            border-bottom: 1px solid #000;
+            font-size: 10px;
+        }
+        .payment-info-col {
+            flex: 1;
+            padding: 8px 10px;
+        }
+        .payment-info-col.bank-details {
+            flex: 1.8;
+        }
+        .payment-info-col.payment-upi,
+        .payment-info-col.website-info {
+            flex: 1;
+        }
+        .payment-info-col:not(:last-child) {
+            border-right: 1px solid #000;
+        }
+        .payment-info-col strong {
+            display: inline-block;
+            margin-bottom: 4px;
+        }
+        .meta-section {
+            display: flex;
+            border-bottom: 1px solid #000;
+        }
+        .meta-col {
+            flex: 1;
+            padding: 5px 10px;
+        }
+        .meta-col:first-child { border-right: 1px solid #000; }
+        .meta-table { width: 100%; font-size: 10px; }
+        .meta-table td { padding: 2px 0; vertical-align: top; }
+        .meta-table td:first-child { width: 110px; }
+        
+        .items-section {
+            border-bottom: 1px solid #000;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 5px;
+        }
+        .items-table {
+            width: 100%;
+            height: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+        }
+        .items-table th, .items-table td {
+            border-right: 1px solid #000;
+            border-bottom: none;
+            padding: 4px;
+        }
+        .items-table th { border-bottom: 1px solid #000; text-align: center; font-weight: bold; }
+        .items-table th:last-child, .items-table td:last-child { border-right: none; }
+        .item-row { height: 24px; }
+        .spacer-row td { height: auto; border-bottom: none; color: transparent; }
+        
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .text-left { text-align: left; }
+        .font-bold { font-weight: bold; }
+        
+        .totals-section {
+        }
+        .border-bottom {
+            border-bottom: 1px solid #000;
+        }
+        .totals-row {
+            display: flex;
+        }
+        .totals-left { flex: 1; padding: 10px; border-right: 1px solid #000; }
+        .totals-right { width: 260px; }
+        .total-line { display: flex; justify-content: space-between; padding: 3px 10px; font-size: 10px; }
+        .total-line.grand { font-weight: bold; font-size: 12px; border-top: 2px solid #000; background: #f5f5f5; }
+        
+        .tax-summary-table { width: 100%; border-collapse: collapse; font-size: 9px; }
+        .tax-summary-table th, .tax-summary-table td { border: none; padding: 2px 3px; }
+        .tax-summary-table th { border-bottom: 1px solid #000; text-align: right; }
+        .tax-summary-table th:first-child { text-align: center; }
+        .tax-summary-table td { text-align: right; }
+        .tax-summary-table td:first-child { text-align: center; }
+        
+        .amount-words { padding: 6px 10px; font-weight: bold; border-bottom: 1px solid #000; font-size: 11px; }
+        
+        .footer-section { display: flex; min-height: 75px; }
+        
+        .regd-office { text-align: center; padding: 4px; font-size: 9px; border-top: 1px solid #000; }
+        .continued-line { text-align: right; font-weight: bold; font-style: italic; font-size: 10px; padding: 5px 10px; }
+        
+        @page { margin: 0; size: A4; }
+        @media print {
+            body { padding: 0; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .page { 
+                margin: 0; 
+                border: 1px solid #000; 
+                box-shadow: none; 
+                page-break-after: always; 
+                height: 297mm;
+                width: 210mm;
+            }
+            .page:last-child {
+                page-break-after: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    ${pagesHTML}
+</body>
+</html>`;
 
     const isDownload = req.query.download === 'true';
     res.setHeader('Content-Type', 'text/html');

@@ -312,7 +312,13 @@ export const updateMyCompany = async (req: Request, res: Response) => {
       phone,
       email,
       gstin,
-      bank_details
+      bank_details,
+      logo_url,
+      payment_upi_id,
+      payment_qr_code_url,
+      website_url,
+      website_qr_code_url,
+      invoice_custom_message
     } = req.body;
 
     const updateData: any = {
@@ -329,6 +335,12 @@ export const updateMyCompany = async (req: Request, res: Response) => {
     if (email !== undefined) updateData.email = email;
     if (gstin !== undefined) updateData.gstin = gstin;
     if (bank_details !== undefined) updateData.bank_details = bank_details;
+    if (logo_url !== undefined) updateData.logo_url = logo_url;
+    if (payment_upi_id !== undefined) updateData.payment_upi_id = payment_upi_id;
+    if (payment_qr_code_url !== undefined) updateData.payment_qr_code_url = payment_qr_code_url;
+    if (website_url !== undefined) updateData.website_url = website_url;
+    if (website_qr_code_url !== undefined) updateData.website_qr_code_url = website_qr_code_url;
+    if (invoice_custom_message !== undefined) updateData.invoice_custom_message = invoice_custom_message;
 
     const { data: updatedCompany, error } = await (supabaseAdmin || supabase)
       .from('companies')
