@@ -96,7 +96,7 @@
 
 **Required Environment Variables:**
 ```bash
-VITE_API_BASE_URL=https://rishabh.dtsanskar.tech/api
+VITE_API_BASE_URL=https://www.rishabhgofreshco.dev/api
 VITE_SUPABASE_URL=https://[project].supabase.co
 VITE_SUPABASE_ANON_KEY=[anon_key]
 ```
@@ -108,14 +108,14 @@ VITE_SUPABASE_ANON_KEY=[anon_key]
 - **Process Manager:** PM2
 - **Reverse Proxy:** nginx (on DigitalOcean Droplet)
 - **Port:** 5000 (internal), proxied via nginx on port 443
-- **Domain:** `rishabh.dtsanskar.tech`
+- **Domain:** `www.rishabhgofreshco.dev`
 
 **Deployment Process:**
 1. Build TypeScript: `cd backend && npm run build`
 2. Set environment variables in `.env` file
 3. Start with PM2: `pm2 start dist/index.js --name fresh-breeze-api`
 4. Configure nginx (see `docs/nginx-backend-config-updated.conf`)
-5. Test: `curl https://rishabh.dtsanskar.tech/health`
+5. Test: `curl https://www.rishabhgofreshco.dev/health`
 
 **Required Environment Variables:**
 ```bash
@@ -1880,7 +1880,7 @@ await paymentService.processPayment({
 3. ✅ Start with PM2: `pm2 start dist/index.js --name fresh-breeze-api`
 4. ✅ Configure nginx (see `docs/nginx-backend-config-updated.conf`)
 5. ✅ Ensure nginx preserves `X-Tenant-Subdomain` header
-6. ✅ Test health endpoint: `curl https://rishabh.dtsanskar.tech/health`
+6. ✅ Test health endpoint: `curl https://www.rishabhgofreshco.dev/health`
 
 ### Frontend (Vercel)
 

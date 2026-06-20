@@ -5,7 +5,7 @@ This document provides nginx configuration examples for deploying the Fresh Bree
 ## Architecture Overview
 
 - **Frontend**: `*.gofreshco.com` (e.g., `gulffresh.gofreshco.com`)
-- **Backend API**: `rishabh.dtsanskar.tech`
+- **Backend API**: `www.rishabhgofreshco.dev`
 
 ## 1. Frontend Server Configuration (gofreshco.com)
 
@@ -100,27 +100,27 @@ sudo nginx -t  # Test configuration
 sudo systemctl reload nginx
 ```
 
-## 2. Backend API Server Configuration (rishabh.dtsanskar.tech)
+## 2. Backend API Server Configuration (www.rishabhgofreshco.dev)
 
-### Main Configuration: `/etc/nginx/sites-available/rishabh.dtsanskar.tech`
+### Main Configuration: `/etc/nginx/sites-available/www.rishabhgofreshco.dev`
 
 ```nginx
 # Redirect HTTP to HTTPS
 server {
     listen 80;
     listen [::]:80;
-    server_name rishabh.dtsanskar.tech;
+    server_name www.rishabhgofreshco.dev;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name rishabh.dtsanskar.tech;
+    server_name www.rishabhgofreshco.dev;
 
     # SSL Configuration
-    ssl_certificate /etc/letsencrypt/live/rishabh.dtsanskar.tech/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/rishabh.dtsanskar.tech/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/www.rishabhgofreshco.dev/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/www.rishabhgofreshco.dev/privkey.pem;
     
     # SSL Security Settings
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -130,8 +130,8 @@ server {
     ssl_session_timeout 10m;
 
     # Logging
-    access_log /var/log/nginx/rishabh.dtsanskar.tech.access.log;
-    error_log /var/log/nginx/rishabh.dtsanskar.tech.error.log;
+    access_log /var/log/nginx/www.rishabhgofreshco.dev.access.log;
+    error_log /var/log/nginx/www.rishabhgofreshco.dev.error.log;
 
     # Increase body size for file uploads (50MB)
     client_max_body_size 50M;
@@ -202,7 +202,7 @@ server {
 
 ### Enable the site:
 ```bash
-sudo ln -s /etc/nginx/sites-available/rishabh.dtsanskar.tech /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/www.rishabhgofreshco.dev /etc/nginx/sites-enabled/
 sudo nginx -t  # Test configuration
 sudo systemctl reload nginx
 ```
@@ -249,9 +249,9 @@ location /api/ {
 sudo certbot --nginx -d gofreshco.com -d *.gofreshco.com
 ```
 
-### For Backend (rishabh.dtsanskar.tech):
+### For Backend (www.rishabhgofreshco.dev):
 ```bash
-sudo certbot --nginx -d rishabh.dtsanskar.tech
+sudo certbot --nginx -d www.rishabhgofreshco.dev
 ```
 
 ## 6. Testing the Configuration
@@ -271,7 +271,7 @@ sudo nginx -t
 ```bash
 curl -H "X-Tenant-Subdomain: gulffresh" \
      -H "Origin: https://gulffresh.gofreshco.com" \
-     https://rishabh.dtsanskar.tech/api/health
+     https://www.rishabhgofreshco.dev/api/health
 ```
 
 ## 7. Common Issues and Solutions
