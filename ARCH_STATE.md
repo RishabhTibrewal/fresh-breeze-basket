@@ -1,6 +1,6 @@
 # Architecture State Document
 
-**Last Updated:** 2026-05-04 (Thermal KOT & Customer Bill Print System Redesign)
+**Last Updated:** 2026-06-30 (Profile Update RLS Fix + Sales Report Warehouse Filter Fix)
 **Purpose:** Technical reference for current system architecture, routing patterns, and critical implementation details to prevent architectural mistakes. This document serves as the long-term memory and architectural blueprint for all future AI interactions.
 
 ---
@@ -446,6 +446,51 @@ fresh-breeze-basket/
 - ⚠️ Module defined in config
 - ⚠️ Basic structure in place
 - ⚠️ Full implementation pending
+
+### Recent Changes (2026-06-30) — Profile Update RLS Fix & Auth Controller Supabase Client Hardening
+
+#### Objective
+Fix a bug where a user on the `/account` settings page was unable to update their name, last name, or phone number. Submitting the form resulted in a `400` error with Supabase error code `PGRST116` ("Cannot coerce the result to a single JSON object") because the update affected 0 rows.
+
+#### Root Cause
+Three functions in `backend/src/controllers/auth.ts` were using the global anonymous `supabase` client (initialized with the anon key, no user JWT) to perform writes against the `profiles` table. Because no Authorization header was carried, Supabase's **Row Level Security (RLS)** evaluated `auth.uid()` as `NULL`, rejected the update, and returned 0 rows. Calling `.single()` on a 0-row result triggers `PGRST116`.
+
+#### Files Changed
+
+**`backend/src/controllers/auth.ts`**
+
+All three affected functions now resolve the Supabase client using the authenticated pattern:
+```typescript
+const token = req.headers.authorization?.split(' ')[1];
+const client = supabaseAdmin || (token ? createAuthClient(token) : supabase);
+```
+- If `supabaseAdmin` (service-role client) is configured → use it (bypasses RLS safely on the backend).
+- Else if a JWT is present → use `createAuthClient(token)` which passes `Authorization: Bearer <token>`, satisfying RLS.
+- Else → fall back to anonymous client (last resort, will still fail RLS on RLS-protected tables).
+
+**Functions fixed:**
+1. `updateProfile` — was using raw `supabase` for the profile `.update()` call.
+2. `checkAdminStatus` — was using raw `supabase` for the profile `.select()` and `.rpc('is_admin', ...)` call.
+3. `updateRole` — was using raw `supabase` for the profile `.update()` and `company_memberships` `.upsert()` calls.
+
+#### Verification
+- TypeScript build (`npm run build`) passes with no errors.
+- The `PUT /api/auth/profile` request now completes successfully and the profile is updated in Supabase.
+
+---
+
+### Recent Changes (2026-06-30) — Sales Report Warehouse Totals Filter Fix
+
+#### Objective
+Fix the Sales Order Summary report so that the "Order Summary" total row respects the selected warehouse/branch filter instead of summing data from all warehouses.
+
+#### Root Cause
+The backend sales report service was computing summary totals across the full unfiltered dataset before applying the `branch_ids` filter. The filter was applied to the row-level data but not to the aggregate `COUNT`/`SUM` used in the summary object.
+
+#### Fix
+The summary aggregation in `salesReportService.ts` was updated to apply the same `branch_ids` (warehouse) filter that is applied to the per-row data, ensuring the summary totals match the displayed rows.
+
+---
 
 ### Recent Changes (2026-05-04) — Thermal KOT & Customer Bill Print System Redesign
 
@@ -1868,6 +1913,30 @@ await paymentService.processPayment({
 - `frontend/src/pages/admin/reports/sales/{CategoryBrandSales,AverageBasketMetrics,ModifierRevenue,HourlyWeekdayTrend,TopBottomMovers,OutletLeaderboard}.tsx`
 - `frontend/src/pages/pos/PosAnalyticsBatchBWidgets.tsx`
 - `frontend/src/pages/pos/CreatePOSOrder.tsx`
+
+#### 18. Supabase Client Selection for Authenticated Write Operations
+
+**NEVER:**
+- Use the global anonymous `supabase` client (initialized with the anon key) to `.update()`, `.upsert()`, or `.delete()` rows in RLS-protected tables from a backend controller that has a user JWT available.
+- Call `.single()` on an update/select query against an RLS-protected table when using the anonymous client — this will return 0 rows and raise `PGRST116`.
+
+**ALWAYS:**
+- Resolve the Supabase client using the authenticated pattern in any controller that performs writes against RLS-protected tables:
+  ```typescript
+  const token = req.headers.authorization?.split(' ')[1];
+  const client = supabaseAdmin || (token ? createAuthClient(token) : supabase);
+  ```
+- Prefer `supabaseAdmin` (service-role) for backend-initiated writes; it bypasses RLS safely and is already available when `SUPABASE_SERVICE_ROLE_KEY` is set.
+- When `supabaseAdmin` is not configured and the request carries a JWT, use `createAuthClient(token)` to pass the `Authorization: Bearer <token>` header so RLS resolves `auth.uid()` correctly.
+- The raw anonymous `supabase` singleton should only be used for public/unauthenticated reads (e.g., categories, products for the e-commerce storefront).
+
+**Root cause pattern:**  
+A controller that receives a valid JWT in `req.headers.authorization` but queries Supabase without forwarding that token hits RLS as an unauthenticated request. This causes 0-row results on `.update()` which then triggers `PGRST116` ("Cannot coerce the result to a single JSON object") when `.single()` is chained.
+
+**Fixed on 2026-06-30 in `backend/src/controllers/auth.ts`:**
+- `updateProfile` (affects `/account` name/phone update page)
+- `checkAdminStatus`
+- `updateRole`
 
 ---
 

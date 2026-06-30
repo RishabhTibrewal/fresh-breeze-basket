@@ -78,8 +78,11 @@ export const partiesService = {
     return response.data.data ?? response.data;
   },
 
-  async getPartyLedger(partyId: string): Promise<PartyLedgerResponse> {
-    const response = await apiClient.get(`/parties/${partyId}/ledger`);
+  async getPartyLedger(partyId: string, dateFrom?: string, dateTo?: string): Promise<PartyLedgerResponse> {
+    const params: any = {};
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    const response = await apiClient.get(`/parties/${partyId}/ledger`, { params });
     return response.data.data ?? response.data;
   },
 };

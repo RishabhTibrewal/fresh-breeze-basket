@@ -561,7 +561,8 @@ BEGIN
         first_name,
         last_name,
         phone,
-        role
+        role,
+        company_id
     )
     VALUES (
         NEW.id,
@@ -569,7 +570,8 @@ BEGIN
         NULLIF(NEW.raw_user_meta_data->>'first_name', ''),
         NULLIF(NEW.raw_user_meta_data->>'last_name', ''),
         NULLIF(NEW.raw_user_meta_data->>'phone', ''),
-        v_role
+        v_role,
+        v_company_id
     );
 
     -- Create company membership if company_id is provided

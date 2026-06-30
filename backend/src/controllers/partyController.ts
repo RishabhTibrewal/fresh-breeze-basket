@@ -334,6 +334,7 @@ export const partyController = {
   async getLedger(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
+      const { date_from, date_to } = req.query;
 
       if (!req.companyId) {
         throw new ApiError(400, 'Company context is required');
@@ -356,19 +357,66 @@ export const partyController = {
         throw new ApiError(404, 'Party not found');
       }
 
-      const { data: entries, error: ledgerError } = await db
+      // 1. Fetch opening balance components (suppliers table has it)
+      const { data: supplier } = await db
+        .from('suppliers')
+        .select('opening_balance')
+        .eq('party_id', id)
+        .eq('company_id', req.companyId)
+        .maybeSingle();
+
+      let baseOpeningBalance = 0;
+      if (supplier && supplier.opening_balance) {
+        // supplier opening balance is we owe them (Credit / negative side in unified ledger)
+        baseOpeningBalance = -Number(supplier.opening_balance);
+      }
+
+      // 2. Fetch pre-period entries to calculate period opening balance if date_from is provided
+      let periodOpeningBalance = baseOpeningBalance;
+      if (date_from) {
+        const { data: preEntries } = await db
+          .from('party_ledger')
+          .select('*')
+          .eq('party_id', id)
+          .eq('company_id', req.companyId)
+          .lt('doc_date', date_from);
+
+        const filteredPre = (preEntries || []).filter(e => e.status !== 'cancelled' && e.status !== 'failed');
+        for (const entry of filteredPre) {
+          const amt = Number(entry.amount) || 0;
+          if (entry.doc_type === 'sale' || entry.doc_type === 'payment_out') {
+            periodOpeningBalance += amt;
+          } else if (entry.doc_type === 'purchase' || entry.doc_type === 'payment_in' || entry.doc_type === 'credit_note') {
+            periodOpeningBalance -= amt;
+          }
+        }
+      }
+
+      // 3. Fetch period entries
+      let query = db
         .from('party_ledger')
         .select('*')
         .eq('party_id', id)
         .eq('company_id', req.companyId)
         .order('doc_date', { ascending: false });
 
+      if (date_from) {
+        query = query.gte('doc_date', date_from);
+      }
+      if (date_to) {
+        query = query.lte('doc_date', date_to);
+      }
+
+      const { data: entries, error: ledgerError } = await query;
+
       if (ledgerError) {
         console.error('Error fetching party ledger:', ledgerError);
         throw new ApiError(500, 'Failed to fetch party ledger');
       }
 
-      const list = entries || [];
+      const list = (entries || []).filter(
+        (e) => e.status !== 'cancelled' && e.status !== 'failed'
+      );
 
       const receivables = list.filter((e) => e.ledger_side === 'receivable');
       const payables = list.filter((e) => e.ledger_side === 'payable');
@@ -391,13 +439,14 @@ export const partyController = {
         return sum + amount;
       }, 0);
 
-      const netPosition = totalReceivable - totalPayable;
+      const netPosition = periodOpeningBalance + totalReceivable - totalPayable;
 
       res.json({
         success: true,
         data: {
           party,
           entries: list,
+          periodOpeningBalance,
           totals: {
             totalReceivable,
             totalPayable,

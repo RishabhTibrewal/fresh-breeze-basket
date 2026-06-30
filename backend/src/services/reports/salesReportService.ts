@@ -131,6 +131,12 @@ export async function getSalesOrderSummary(q: ReportQuery, companyId: string) {
   if (q.pos_session_id) {
     aggQuery = aggQuery.eq('pos_session_id', q.pos_session_id);
   }
+  if (q.branch_ids?.length) {
+    aggQuery = aggQuery.in('outlet_id', q.branch_ids);
+  }
+  if (q.search) {
+    aggQuery = aggQuery.ilike('id::text', `%${q.search}%`);
+  }
 
   const { data: aggData, error: aggError } = await aggQuery;
   if (aggError) {
@@ -171,15 +177,27 @@ export interface SalespersonPerformanceRow {
 
 export async function getSalespersonPerformance(q: ReportQuery, companyId: string) {
   // Get all sales orders with exec info
-  const { data: orders, error } = await db()
+  let ordersQuery = db()
     .from('orders')
-    .select('sales_executive_id, total_amount, user_id')
+    .select('sales_executive_id, total_amount, user_id, outlet_id')
     .eq('company_id', companyId)
     .eq('order_type', 'sales')
     .neq('status', 'cancelled')
     .not('sales_executive_id', 'is', null)
     .gte('created_at', q.from_date)
     .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.order_source) {
+    ordersQuery = ordersQuery.eq('order_source', q.order_source);
+  }
+  if (q.pos_session_id) {
+    ordersQuery = ordersQuery.eq('pos_session_id', q.pos_session_id);
+  }
+  if (q.branch_ids?.length) {
+    ordersQuery = ordersQuery.in('outlet_id', q.branch_ids);
+  }
+
+  const { data: orders, error } = await ordersQuery;
 
   if (error) throw toServiceError('Salesperson performance query', error);
 
@@ -269,14 +287,26 @@ export interface CustomerWiseSalesRow {
 }
 
 export async function getCustomerWiseSales(q: ReportQuery, companyId: string) {
-  const { data: orders, error } = await db()
+  let query = db()
     .from('orders')
-    .select('customer_id, total_amount, created_at, customers:customer_id(id, name, email, phone)')
+    .select('customer_id, total_amount, created_at, outlet_id, customers:customer_id(id, name, email, phone)')
     .eq('company_id', companyId)
     .eq('order_type', 'sales')
     .neq('status', 'cancelled')
     .gte('created_at', q.from_date)
     .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.order_source) {
+    query = query.eq('order_source', q.order_source);
+  }
+  if (q.pos_session_id) {
+    query = query.eq('pos_session_id', q.pos_session_id);
+  }
+  if (q.branch_ids?.length) {
+    query = query.in('outlet_id', q.branch_ids);
+  }
+
+  const { data: orders, error } = await query;
 
   if (error) throw toServiceError('Customer-wise sales query', error);
 
@@ -518,7 +548,7 @@ export interface PendingDeliveryRow {
 }
 
 export async function getPendingDeliveries(q: ReportQuery, companyId: string) {
-  const { data, count, error } = await db()
+  let query = db()
     .from('orders')
     .select(`
       id, created_at, status, total_amount, outlet_id,
@@ -529,9 +559,23 @@ export async function getPendingDeliveries(q: ReportQuery, companyId: string) {
     .eq('order_type', 'sales')
     .in('status', ['pending', 'confirmed', 'processing', 'packed'])
     .gte('created_at', q.from_date)
-    .lte('created_at', q.to_date + 'T23:59:59Z')
+    .lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.order_source) {
+    query = query.eq('order_source', q.order_source);
+  }
+  if (q.pos_session_id) {
+    query = query.eq('pos_session_id', q.pos_session_id);
+  }
+  if (q.branch_ids?.length) {
+    query = query.in('outlet_id', q.branch_ids);
+  }
+
+  query = query
     .order('created_at', { ascending: true })
     .range((q.page - 1) * q.page_size, q.page * q.page_size - 1);
+
+  const { data, count, error } = await query;
 
   if (error) throw toServiceError('Pending deliveries query', error);
 
@@ -680,10 +724,30 @@ export async function getSalesDashboardKpis(q: ReportQuery, companyId: string): 
   const prevFrom = new Date(fromDate.getTime() - diffMs).toISOString().split('T')[0];
   const prevTo = q.from_date;
 
+  let currQuery = db().from('orders').select('total_amount').eq('company_id', companyId).eq('order_type', 'sales').neq('status', 'cancelled').gte('created_at', q.from_date).lte('created_at', q.to_date + 'T23:59:59Z');
+  let prevQuery = db().from('orders').select('total_amount').eq('company_id', companyId).eq('order_type', 'sales').neq('status', 'cancelled').gte('created_at', prevFrom).lte('created_at', prevTo + 'T23:59:59Z');
+  let returnQuery = db().from('orders').select('total_amount').eq('company_id', companyId).eq('order_type', 'return').gte('created_at', q.from_date).lte('created_at', q.to_date + 'T23:59:59Z');
+
+  if (q.order_source) {
+    currQuery = currQuery.eq('order_source', q.order_source);
+    prevQuery = prevQuery.eq('order_source', q.order_source);
+    returnQuery = returnQuery.eq('order_source', q.order_source);
+  }
+  if (q.pos_session_id) {
+    currQuery = currQuery.eq('pos_session_id', q.pos_session_id);
+    prevQuery = prevQuery.eq('pos_session_id', q.pos_session_id);
+    returnQuery = returnQuery.eq('pos_session_id', q.pos_session_id);
+  }
+  if (q.branch_ids?.length) {
+    currQuery = currQuery.in('outlet_id', q.branch_ids);
+    prevQuery = prevQuery.in('outlet_id', q.branch_ids);
+    returnQuery = returnQuery.in('outlet_id', q.branch_ids);
+  }
+
   const [currRes, prevRes, returnRes] = await Promise.all([
-    db().from('orders').select('total_amount').eq('company_id', companyId).eq('order_type', 'sales').neq('status', 'cancelled').gte('created_at', q.from_date).lte('created_at', q.to_date + 'T23:59:59Z'),
-    db().from('orders').select('total_amount').eq('company_id', companyId).eq('order_type', 'sales').neq('status', 'cancelled').gte('created_at', prevFrom).lte('created_at', prevTo + 'T23:59:59Z'),
-    db().from('orders').select('total_amount').eq('company_id', companyId).eq('order_type', 'return').gte('created_at', q.from_date).lte('created_at', q.to_date + 'T23:59:59Z'),
+    currQuery,
+    prevQuery,
+    returnQuery,
   ]);
 
   const curr = currRes.data ?? [];

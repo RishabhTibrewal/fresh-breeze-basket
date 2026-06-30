@@ -34,17 +34,21 @@ import {
   Receipt,
   Search,
   Link as LinkIcon,
-  Plus
+  Plus,
+  Printer
 } from 'lucide-react';
 import { customerService } from '@/api/customer';
 import { ErrorMessage } from '@/components/ui/error-message';
 import { partiesService } from '@/api/parties';
+import { invoicesService } from '@/api/invoices';
 
 export default function AdminCustomerDetails() {
   const { id: customerOrUserId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const [ledgerSearch, setLedgerSearch] = React.useState("");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
   
   // Determine the back route based on current path
   const getBackRoute = () => {
@@ -83,8 +87,8 @@ export default function AdminCustomerDetails() {
   });
 
   const { data: partyLedger } = useQuery({
-    queryKey: ['customer-party-ledger', customer?.party_id],
-    queryFn: () => partiesService.getPartyLedger(customer!.party_id!),
+    queryKey: ['customer-party-ledger', customer?.party_id, dateFrom, dateTo],
+    queryFn: () => partiesService.getPartyLedger(customer!.party_id!, dateFrom || undefined, dateTo || undefined),
     enabled: !!customer?.party_id,
   });
 
@@ -179,10 +183,21 @@ export default function AdminCustomerDetails() {
 
   const sortedPartyLedgerEntries = React.useMemo(() => {
     if (!partyLedger?.entries) return [];
-    return [...partyLedger.entries].sort((a, b) => 
+    let entries = [...partyLedger.entries];
+    
+    if (dateFrom) {
+      const fromTime = new Date(dateFrom).getTime();
+      entries = entries.filter(e => new Date(e.doc_date).getTime() >= fromTime);
+    }
+    if (dateTo) {
+      const toTime = new Date(dateTo).getTime() + 86400000;
+      entries = entries.filter(e => new Date(e.doc_date).getTime() <= toTime);
+    }
+
+    return entries.sort((a, b) => 
       new Date(b.doc_date).getTime() - new Date(a.doc_date).getTime()
     );
-  }, [partyLedger?.entries]);
+  }, [partyLedger?.entries, dateFrom, dateTo]);
 
   if (isLoading) {
     return (
@@ -1044,14 +1059,62 @@ export default function AdminCustomerDetails() {
         {customer.party_id && (
           <TabsContent value="party-ledger" className="w-full min-w-0">
             <Card className="w-full min-w-0 overflow-hidden">
-              <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
-                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                  <LinkIcon className="h-4 w-4 sm:h-5 sm:w-5" />
-                  Trading Partner Ledger
-                </CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Combined receivables and payables for this business partner
-                </CardDescription>
+              <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                    <LinkIcon className="h-4 w-4 sm:h-5 sm:w-5" />
+                    Trading Partner Ledger
+                  </CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">
+                    Combined receivables and payables for this business partner
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span>From</span>
+                    <Input 
+                      type="date" 
+                      value={dateFrom} 
+                      onChange={(e) => setDateFrom(e.target.value)} 
+                      className="h-8 text-xs py-1"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span>To</span>
+                    <Input 
+                      type="date" 
+                      value={dateTo} 
+                      onChange={(e) => setDateTo(e.target.value)} 
+                      className="h-8 text-xs py-1"
+                    />
+                  </div>
+                  {(dateFrom || dateTo) && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => { setDateFrom(''); setDateTo(''); }}
+                      className="h-8 text-xs"
+                    >
+                      Clear
+                    </Button>
+                  )}
+                  <Button 
+                    size="sm" 
+                    onClick={async () => {
+                      if (customer.party_id) {
+                        try {
+                          await invoicesService.printPartyLedger(customer.party_id, dateFrom || undefined, dateTo || undefined);
+                        } catch (err) {
+                          console.error('Error printing ledger:', err);
+                        }
+                      }
+                    }} 
+                    className="h-8 text-xs ml-auto sm:ml-0"
+                  >
+                    <Printer className="h-3.5 w-3.5 mr-1" />
+                    Print Ledger
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
                 {partyLedger ? (

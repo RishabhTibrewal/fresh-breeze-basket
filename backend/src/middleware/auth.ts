@@ -379,3 +379,33 @@ export const canManageWarehouse = async (
     return false;
   }
 }; 
+
+/**
+ * Helper function to check if user can manage a specific POS outlet
+ */
+export const canManagePosOutlet = async (
+  userId: string,
+  companyId: string,
+  warehouseId: string
+): Promise<boolean> => {
+  try {
+    const client = supabaseAdmin || supabase;
+    
+    // Check using database function
+    const { data, error } = await client.rpc('has_pos_outlet_access', {
+      p_user_id: userId,
+      p_warehouse_id: warehouseId,
+      p_company_id: companyId
+    });
+
+    if (error) {
+      console.error(`Error checking POS outlet access for user ${userId}:`, error);
+      return false;
+    }
+
+    return data === true;
+  } catch (error) {
+    console.error(`Error checking POS outlet access for user ${userId}:`, error);
+    return false;
+  }
+}; 

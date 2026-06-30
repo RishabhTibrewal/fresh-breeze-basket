@@ -10,7 +10,7 @@ const tenantCache = new Map<string, { companyId: string; companySlug: string; ex
 const extractSubdomain = (host: string): string | null => {
   const cleanHost = host.split(':')[0].toLowerCase();
 
-  if (cleanHost === 'localhost' || cleanHost.endsWith('.localhost')) {
+  if (cleanHost === 'localhost' || cleanHost.endsWith('.localhost') || cleanHost === '127.0.0.1') {
     return DEFAULT_COMPANY_SLUG;
   }
 

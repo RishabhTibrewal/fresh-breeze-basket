@@ -85,7 +85,8 @@ BEGIN
     first_name,
     last_name,
     phone,
-    role
+    role,
+    company_id
   )
   VALUES (
     NEW.id,
@@ -93,7 +94,8 @@ BEGIN
     NULLIF(NEW.raw_user_meta_data->>'first_name', ''),
     NULLIF(NEW.raw_user_meta_data->>'last_name', ''),
     NULLIF(NEW.raw_user_meta_data->>'phone', ''),
-    v_role
+    v_role,
+    v_company_id
   )
   ON CONFLICT (id) DO UPDATE
     SET email = EXCLUDED.email,
@@ -101,6 +103,7 @@ BEGIN
         last_name = COALESCE(EXCLUDED.last_name, public.profiles.last_name),
         phone = COALESCE(EXCLUDED.phone, public.profiles.phone),
         role = COALESCE(EXCLUDED.role, public.profiles.role),
+        company_id = COALESCE(EXCLUDED.company_id, public.profiles.company_id),
         updated_at = CURRENT_TIMESTAMP;
 
   IF v_company_id IS NOT NULL THEN

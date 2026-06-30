@@ -1160,6 +1160,30 @@ export default function CreatePOSOrder() {
     }
   };
 
+  const handlePrintThermalReport = async (period: 'daily' | 'weekly' | 'monthly' | 'session') => {
+    try {
+      const filters = buildPosReportFilters(period);
+      const params: Record<string, any> = {
+        period,
+        from_date: filters.from_date,
+        to_date: filters.to_date
+      };
+      if (filters.pos_session_id) {
+        params.pos_session_id = filters.pos_session_id;
+      }
+      if (filters.branch_ids && filters.branch_ids.length > 0) {
+        params.outlet_id = filters.branch_ids[0];
+      }
+
+      toast.loading(`Preparing thermal report print...`, { id: 'thermal-report-print' });
+      await invoicesService.printThermalReport(params);
+      toast.success(`Thermal report print started`, { id: 'thermal-report-print' });
+    } catch (error) {
+      console.error('Thermal print error:', error);
+      toast.error('Failed to print thermal report', { id: 'thermal-report-print' });
+    }
+  };
+
   const handleDownloadItemWiseReport = async () => {
     try {
       toast.loading('Preparing item-wise report...', { id: 'item-wise-report-download' });
@@ -2455,6 +2479,13 @@ export default function CreatePOSOrder() {
                   Download Report
                 </button>
                 <button
+                  onClick={() => handlePrintThermalReport(reportPeriod)}
+                  className="h-8 bg-amber-600 hover:bg-amber-500 text-white px-3 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Thermal Print
+                </button>
+                <button
                   onClick={handleSnapshotPdf}
                   className="h-8 bg-violet-600 hover:bg-violet-500 text-white px-3 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors"
                 >
@@ -2830,6 +2861,33 @@ export default function CreatePOSOrder() {
                   </div>
                 </div>
               </div>
+
+              {((profile?.roles || []).includes('admin') || profile?.role === 'admin' || (profile?.roles || []).includes('accounts')) && (
+                <div className="bg-[#1a1d27] border border-indigo-500/20 p-6 rounded-3xl">
+                  <h3 className="font-bold mb-2 flex items-center gap-2 text-indigo-400">
+                    <Users className="h-4 w-4" /> POS Manager Outlets
+                  </h3>
+                  <p className="text-xs text-gray-500 mb-4">
+                    Assign specific outlets to POS managers. POS managers can only see and manage transactions and reports for their assigned outlets.
+                  </p>
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => navigate('/pos/manager-permissions')}
+                      className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-[#12151f] hover:bg-white/5 border border-indigo-500/25 text-left transition-colors"
+                    >
+                      <span className="flex items-center gap-3 min-w-0">
+                        <SlidersHorizontal className="h-5 w-5 text-indigo-400 shrink-0" />
+                        <span>
+                          <span className="block text-sm font-semibold text-white">POS Manager Assignments</span>
+                          <span className="block text-[11px] text-gray-500 truncate">Assign outlets to POS managers</span>
+                        </span>
+                      </span>
+                      <ChevronRight className="h-4 w-4 text-gray-500 shrink-0" />
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="bg-[#1a1d27] border border-amber-500/20 p-6 rounded-3xl">
                 <h3 className="font-bold mb-2 flex items-center gap-2 text-amber-400">

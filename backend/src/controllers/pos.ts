@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { ApiError, ValidationError } from '../middleware/error';
 import { OrderService } from '../services/core/OrderService';
 import { KotService } from '../services/core/KotService';
+import { canManagePosOutlet } from '../middleware/auth';
 
 async function resolvePosOutletId(
   companyId: string,
@@ -61,6 +62,12 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
     const effectiveOutletId = await resolvePosOutletId(req.companyId, outlet_id, items);
     if (!effectiveOutletId) {
       throw new ValidationError('outlet_id is required for POS (select an outlet or configure a default warehouse).');
+    }
+
+    // Verify outlet access permissions
+    const hasAccess = await canManagePosOutlet(userId, req.companyId, effectiveOutletId);
+    if (!hasAccess) {
+      throw new ApiError(403, 'Access denied. You do not have permission to place orders for this outlet.');
     }
 
     // ── PERF: Prefetch KOT settings once; reuse in generateTickets ──────────
@@ -285,6 +292,12 @@ export const startSession = async (req: Request, res: Response, next: NextFuncti
 
     const { outlet_id, opening_cash = 0 } = req.body;
     if (!outlet_id) throw new ValidationError('Outlet ID is required');
+
+    // Verify POS outlet access permissions
+    const hasAccess = await canManagePosOutlet(userId, req.companyId, outlet_id);
+    if (!hasAccess) {
+      throw new ApiError(403, 'Access denied. You are not assigned to this outlet.');
+    }
 
     // Check if already open
     const { data: existing } = await supabaseAdmin

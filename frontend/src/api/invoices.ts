@@ -233,6 +233,23 @@ export const invoicesService = {
   },
 
   /**
+   * Print Daily or Session Thermal Report
+   */
+  async printThermalReport(params: {
+    period: 'daily' | 'weekly' | 'monthly' | 'session';
+    from_date?: string;
+    to_date?: string;
+    pos_session_id?: string;
+    outlet_id?: string;
+  }): Promise<void> {
+    const response = await apiClient.get('/invoices/reports/thermal', {
+      params,
+      responseType: 'text',
+    });
+    await this.printHTML(response.data);
+  },
+
+  /**
    * Get Kitchen KOT (Thermal HTML)
    */
   async getKitchenKOTHTML(orderId: string): Promise<string> {
@@ -257,6 +274,20 @@ export const invoicesService = {
       responseType: 'text',
     });
     return response.data;
+  },
+
+  /**
+   * Print unified party ledger statement in standard A4 format
+   */
+  async printPartyLedger(partyId: string, dateFrom?: string, dateTo?: string): Promise<void> {
+    const params: any = {};
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    const response = await apiClient.get(`/invoices/party/${partyId}/ledger/print`, {
+      params,
+      responseType: 'text',
+    });
+    await this.printHTML(response.data);
   },
 
   /**

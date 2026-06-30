@@ -2217,3 +2217,1198 @@ export const getQuotationDocument = async (req: Request, res: Response, next: Ne
     next(error);
   }
 };
+
+/**
+ * GET /api/invoices/reports/thermal
+ * Generate an 80mm thermal-optimized daily or session report HTML.
+ */
+export const getThermalReport = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    const {
+      period = 'daily',
+      from_date,
+      to_date,
+      pos_session_id,
+      outlet_id
+    } = req.query as Record<string, string>;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const targetFromDate = from_date || todayStr;
+    const targetToDate = to_date || todayStr;
+
+    // 1. Fetch Company details
+    const { data: company } = await (supabaseAdmin || supabase)
+      .from('companies')
+      .select('*')
+      .eq('id', companyId)
+      .single();
+
+    // 2. Fetch Printed By user profile
+    let printedBy = 'Unknown';
+    if (req.user?.id) {
+      const { data: profile } = await (supabaseAdmin || supabase)
+        .from('profiles')
+        .select('first_name, last_name, email')
+        .eq('id', req.user.id)
+        .maybeSingle();
+      if (profile) {
+        printedBy = `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || profile.email || 'Unknown';
+      }
+    }
+
+    // 3. Fetch POS Session & Cashier details if period is session
+    let session = null;
+    let targetOutletId = outlet_id;
+    let cashierName = '-';
+    if (period === 'session' && pos_session_id) {
+      const { data: sData } = await (supabaseAdmin || supabase)
+        .from('pos_sessions')
+        .select('*')
+        .eq('id', pos_session_id)
+        .eq('company_id', companyId)
+        .maybeSingle();
+
+      if (sData) {
+        session = sData;
+        targetOutletId = sData.outlet_id;
+        
+        // Fetch cashier profile
+        if (sData.cashier_id) {
+          const { data: cProfile } = await (supabaseAdmin || supabase)
+            .from('profiles')
+            .select('first_name, last_name, email')
+            .eq('id', sData.cashier_id)
+            .maybeSingle();
+          if (cProfile) {
+            cashierName = `${cProfile.first_name || ''} ${cProfile.last_name || ''}`.trim() || cProfile.email || '-';
+          }
+        }
+      }
+    }
+
+    // 4. Fetch Outlet/Warehouse details
+    let outlet = null;
+    if (targetOutletId) {
+      const { data: oData } = await (supabaseAdmin || supabase)
+        .from('warehouses')
+        .select('*')
+        .eq('id', targetOutletId)
+        .maybeSingle();
+      outlet = oData;
+    }
+
+    // 5. Query orders in scope
+    let ordersQuery = (supabaseAdmin || supabase)
+      .from('orders')
+      .select(`
+        *,
+        order_items (
+          *,
+          product:products(name, category:categories!category_id(name)),
+          variant:product_variants(name)
+        )
+      `)
+      .eq('company_id', companyId)
+      .eq('order_source', 'pos');
+
+    if (period === 'session' && pos_session_id) {
+      ordersQuery = ordersQuery.eq('pos_session_id', pos_session_id);
+    } else {
+      ordersQuery = ordersQuery
+        .gte('created_at', `${targetFromDate}T00:00:00`)
+        .lte('created_at', `${targetToDate}T23:59:59.999`);
+      if (targetOutletId) {
+        ordersQuery = ordersQuery.eq('outlet_id', targetOutletId);
+      }
+    }
+
+    const { data: orders, error: ordersErr } = await ordersQuery;
+    if (ordersErr) {
+      throw new ApiError(500, `Failed to query orders: ${ordersErr.message}`);
+    }
+
+    // 6. Query POS returns in scope
+    let returnsQuery = (supabaseAdmin || supabase)
+      .from('orders')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('order_type', 'return')
+      .eq('order_source', 'pos');
+
+    if (period === 'session' && pos_session_id) {
+      returnsQuery = returnsQuery.eq('pos_session_id', pos_session_id);
+    } else {
+      returnsQuery = returnsQuery
+        .gte('created_at', `${targetFromDate}T00:00:00`)
+        .lte('created_at', `${targetToDate}T23:59:59.999`);
+      if (targetOutletId) {
+        returnsQuery = returnsQuery.eq('outlet_id', targetOutletId);
+      }
+    }
+
+    const { data: returns } = await returnsQuery;
+
+    // 7. Query payments for orders in scope
+    const orderIds = (orders || []).map((o: any) => o.id);
+    let payments: any[] = [];
+    if (orderIds.length > 0) {
+      const { data: pData } = await (supabaseAdmin || supabase)
+        .from('payments')
+        .select('*')
+        .in('order_id', orderIds);
+      payments = pData || [];
+    }
+
+    // 8. Generate Report HTML
+    const html = generateThermalReportHTML({
+      company,
+      printedBy,
+      period,
+      from_date: targetFromDate,
+      to_date: targetToDate,
+      session,
+      cashierName,
+      outlet,
+      orders: orders || [],
+      returns: returns || [],
+      payments
+    });
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Helper to build the 80mm monospace thermal report HTML template
+ */
+function generateThermalReportHTML(data: {
+  company: any;
+  printedBy: string;
+  period: string;
+  from_date: string;
+  to_date: string;
+  session: any;
+  cashierName: string;
+  outlet: any;
+  orders: any[];
+  returns: any[];
+  payments: any[];
+}) {
+  const {
+    company,
+    printedBy,
+    period,
+    from_date,
+    to_date,
+    session,
+    cashierName,
+    outlet,
+    orders,
+    returns,
+    payments
+  } = data;
+
+  const isSession = period === 'session';
+  const companyName = company?.name || 'Store';
+  const companyAddress = [company?.address, company?.city, company?.state].filter(Boolean).join(', ');
+  const companyPhone = company?.phone || '';
+
+  // Get current timestamp formatted locally
+  const printedOn = new Date().toLocaleString('en-IN', {
+    dateStyle: 'short',
+    timeStyle: 'medium'
+  });
+
+  // Calculate Date Range display
+  let dateRangeStr = '';
+  if (isSession && session) {
+    const openedStr = new Date(session.opened_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
+    const closedStr = session.closed_at 
+      ? new Date(session.closed_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) 
+      : 'OPEN';
+    dateRangeStr = `Session: ${openedStr} to ${closedStr}`;
+  } else {
+    dateRangeStr = `Period: ${from_date} to ${to_date}`;
+  }
+
+  // Filter cancelled orders
+  const activeOrders = orders.filter((o: any) => o.status !== 'cancelled');
+  const cancelledOrders = orders.filter((o: any) => o.status === 'cancelled');
+
+  // Sales Summary computations
+  const grossSales = activeOrders.reduce((sum, o) => sum + Number(o.subtotal || 0), 0);
+  const totalDiscount = activeOrders.reduce((sum, o) => sum + Number(o.total_discount || 0), 0);
+  const totalTax = activeOrders.reduce((sum, o) => sum + Number(o.tax_amount || 0), 0);
+  const netSales = activeOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
+  const totalOrdersCount = activeOrders.length;
+  const voidedOrdersCount = cancelledOrders.length;
+
+  const totalReturnsValue = returns.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
+  const totalReturnsCount = returns.length;
+
+  // Payments Mix computation
+  const paymentTotals: Record<string, { amount: number; count: number }> = {};
+  const standardMethods = ['cash', 'card', 'upi', 'credit'];
+  standardMethods.forEach(m => { paymentTotals[m] = { amount: 0, count: 0 }; });
+
+  activeOrders.forEach((o: any) => {
+    const method = (o.payment_method || 'cash').toLowerCase();
+    const amount = Number(o.total_amount || 0);
+    if (method === 'split') {
+      const orderPayments = payments.filter((p: any) => p.order_id === o.id && p.status !== 'failed');
+      orderPayments.forEach((p: any) => {
+        const pm = (p.payment_method || 'other').toLowerCase();
+        if (!paymentTotals[pm]) paymentTotals[pm] = { amount: 0, count: 0 };
+        paymentTotals[pm].amount += Number(p.amount || 0);
+        paymentTotals[pm].count += 1;
+      });
+    } else {
+      if (!paymentTotals[method]) paymentTotals[method] = { amount: 0, count: 0 };
+      paymentTotals[method].amount += amount;
+      paymentTotals[method].count += 1;
+    }
+  });
+
+  // Expected Cash calculation (opening cash + cash payments - cash refunds)
+  let openingCash = 0;
+  let closingCash = null;
+  let expectedCash = 0;
+  let cashVariance = null;
+  let cashRefunds = 0;
+
+  returns.forEach((r: any) => {
+    if ((r.payment_method || '').toLowerCase() === 'cash') {
+      cashRefunds += Number(r.total_amount || 0);
+    }
+  });
+
+  if (isSession && session) {
+    openingCash = Number(session.opening_cash || 0);
+    closingCash = session.closing_cash !== null ? Number(session.closing_cash) : null;
+    expectedCash = openingCash + (paymentTotals['cash']?.amount || 0) - cashRefunds;
+    cashVariance = closingCash !== null ? (closingCash - expectedCash) : null;
+  }
+
+  // 1. Order Type Summary
+  const orderTypeSummary: Record<string, { type: string; orders: number; charges: number; discount: number; netSale: number; grossSale: number }> = {};
+  activeOrders.forEach((o: any) => {
+    const typeRaw = o.fulfillment_type || 'cash_counter';
+    const type = typeRaw.replace(/_/g, ' ').toUpperCase();
+    if (!orderTypeSummary[type]) {
+      orderTypeSummary[type] = { type, orders: 0, charges: 0, discount: 0, netSale: 0, grossSale: 0 };
+    }
+    const entry = orderTypeSummary[type];
+    entry.orders += 1;
+    entry.charges += Number(o.total_extra_charges || 0);
+    entry.discount += Number(o.total_discount || 0);
+    entry.netSale += Number(o.total_amount || 0);
+    entry.grossSale += Number(o.subtotal || 0);
+  });
+
+  // 2. Category Summary
+  const categorySummary: Record<string, { name: string; qty: number; amount: number }> = {};
+  activeOrders.forEach((o: any) => {
+    (o.order_items || []).forEach((it: any) => {
+      const catName = it.product?.category?.name || 'UNCATEGORIZED';
+      const qty = Number(it.quantity || 0);
+      const amt = Number(it.unit_price || 0) * qty - Number(it.discount_amount || 0);
+      if (!categorySummary[catName]) {
+        categorySummary[catName] = { name: catName, qty: 0, amount: 0 };
+      }
+      categorySummary[catName].qty += qty;
+      categorySummary[catName].amount += amt;
+    });
+  });
+
+  // 3. Sold Items Summary
+  const itemSummary: Record<string, { name: string; qty: number; amount: number }> = {};
+  activeOrders.forEach((o: any) => {
+    (o.order_items || []).forEach((it: any) => {
+      const pName = it.product?.name || 'Item';
+      const vName = it.variant?.name || '';
+      const name = vName ? `${pName} (${vName})` : pName;
+      const qty = Number(it.quantity || 0);
+      const amt = Number(it.unit_price || 0) * qty - Number(it.discount_amount || 0);
+      if (!itemSummary[name]) {
+        itemSummary[name] = { name, qty: 0, amount: 0 };
+      }
+      itemSummary[name].qty += qty;
+      itemSummary[name].amount += amt;
+    });
+  });
+
+  // Helper formatting routines
+  const formatCurrency = (val: any) => {
+    if (val === null || val === undefined) return '-';
+    return `Rs ${Number(val).toFixed(2)}`;
+  };
+
+  const formatStr = (val: any) => {
+    return val ? String(val) : '-';
+  };
+
+  // Build rows for tables
+  const orderTypeRows = Object.values(orderTypeSummary).map(entry => `
+    <tr>
+      <td>${entry.type}</td>
+      <td class="text-right">${entry.orders}</td>
+      <td class="text-right">${entry.charges.toFixed(2)}</td>
+      <td class="text-right">${entry.discount.toFixed(2)}</td>
+      <td class="text-right">${entry.netSale.toFixed(2)}</td>
+      <td class="text-right">${entry.grossSale.toFixed(2)}</td>
+    </tr>
+  `).join('');
+
+  const orderTypeTotals = Object.values(orderTypeSummary).reduce(
+    (acc, entry) => {
+      acc.orders += entry.orders;
+      acc.charges += entry.charges;
+      acc.discount += entry.discount;
+      acc.netSale += entry.netSale;
+      acc.grossSale += entry.grossSale;
+      return acc;
+    },
+    { orders: 0, charges: 0, discount: 0, netSale: 0, grossSale: 0 }
+  );
+
+  const paymentMixRows = Object.entries(paymentTotals)
+    .filter(([_, data]) => data.count > 0 || data.amount > 0)
+    .map(([method, data]) => `
+      <tr>
+        <td>${method.toUpperCase()}</td>
+        <td class="text-center">${data.count}</td>
+        <td class="text-right">${formatCurrency(data.amount)}</td>
+      </tr>
+    `).join('');
+
+  const paymentMixTotals = Object.values(paymentTotals).reduce(
+    (acc, data) => {
+      acc.count += data.count;
+      acc.amount += data.amount;
+      return acc;
+    },
+    { count: 0, amount: 0 }
+  );
+
+  const billRows = orders.map((o: any) => {
+    const billNo = o.receipt_number ? o.receipt_number.split('-').pop() : o.id.substring(0, 8).toUpperCase();
+    const qty = (o.order_items || []).reduce((sum: number, it: any) => sum + Number(it.quantity || 0), 0);
+    const payMode = (o.payment_method || 'CASH').toUpperCase();
+    return `
+      <tr>
+        <td>${billNo}</td>
+        <td class="text-center">${qty}</td>
+        <td class="text-right">${Number(o.tax_amount || 0).toFixed(2)}</td>
+        <td class="text-right">${Number(o.total_discount || 0).toFixed(2)}</td>
+        <td class="text-right">${Number(o.total_amount || 0).toFixed(2)}</td>
+        <td class="text-center">${o.status.toUpperCase()}</td>
+        <td class="text-center">${payMode}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const billTotals = orders.reduce(
+    (acc, o) => {
+      acc.qty += (o.order_items || []).reduce((sum: number, it: any) => sum + Number(it.quantity || 0), 0);
+      acc.tax += Number(o.tax_amount || 0);
+      acc.disc += Number(o.total_discount || 0);
+      acc.amt += Number(o.total_amount || 0);
+      return acc;
+    },
+    { qty: 0, tax: 0, disc: 0, amt: 0 }
+  );
+
+  const categoryRows = Object.values(categorySummary).map(entry => `
+    <tr>
+      <td>${entry.name}</td>
+      <td class="text-center">${entry.qty}</td>
+      <td class="text-right">${formatCurrency(entry.amount)}</td>
+    </tr>
+  `).join('');
+
+  const categoryTotals = Object.values(categorySummary).reduce(
+    (acc, entry) => {
+      acc.qty += entry.qty;
+      acc.amount += entry.amount;
+      return acc;
+    },
+    { qty: 0, amount: 0 }
+  );
+
+  const itemRows = Object.values(itemSummary).map(entry => `
+    <tr>
+      <td>${entry.name}</td>
+      <td class="text-center">${entry.qty}</td>
+      <td class="text-right">${formatCurrency(entry.amount)}</td>
+    </tr>
+  `).join('');
+
+  const itemTotals = Object.values(itemSummary).reduce(
+    (acc, entry) => {
+      acc.qty += entry.qty;
+      acc.amount += entry.amount;
+      return acc;
+    },
+    { qty: 0, amount: 0 }
+  );
+
+  const reportTitle = isSession ? 'Session Report' : 'Sales Report';
+  const summaryTitle = isSession ? 'Z Report Summary' : 'Sales Summary';
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${reportTitle}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      width: 300px;
+      padding: 10px;
+      font-size: 11px;
+      line-height: 1.3;
+      color: #000;
+      background: #fff;
+    }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .text-left { text-align: left; }
+    .bold { font-weight: bold; }
+    .divider { border-bottom: 1px dashed #000; margin: 6px 0; }
+    .solid-divider { border-bottom: 1px solid #000; margin: 6px 0; }
+    
+    .header { margin-bottom: 10px; text-align: center; }
+    .header .company-name { font-size: 13px; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }
+    .header .report-name { font-size: 15px; font-weight: bold; margin: 4px 0; text-transform: uppercase; }
+    .header .location { font-size: 10px; line-height: 1.2; margin-bottom: 4px; }
+    .header .meta { font-size: 9px; line-height: 1.2; }
+    
+    .section-title { font-weight: bold; text-align: center; margin: 8px 0 4px 0; text-transform: uppercase; }
+    .kv-row { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 11px; }
+    .kv-val { text-align: right; font-weight: bold; }
+    
+    .report-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+    .report-table th { font-size: 10px; text-transform: uppercase; font-weight: bold; border-bottom: 1px solid #000; padding: 4px 0; }
+    .report-table td { font-size: 10px; padding: 4px 0; vertical-align: top; }
+    .report-table .totals-row { border-top: 1px solid #000; font-weight: bold; }
+    
+    .footer { text-align: center; margin-top: 15px; font-size: 9px; }
+    @page { margin: 0; }
+    @media print {
+      body { width: 100%; padding: 5mm; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header Section -->
+  <div class="header">
+    <div class="company-name">${companyName}</div>
+    <div class="report-name">${reportTitle}</div>
+    <div class="location">
+      ${companyAddress ? `<div>${companyAddress}</div>` : ''}
+      ${companyPhone ? `<div>Tel: ${companyPhone}</div>` : ''}
+      ${outlet?.name ? `<div class="bold" style="margin-top: 2px;">Branch: ${outlet.name}</div>` : ''}
+    </div>
+    <div class="divider"></div>
+    <div class="meta">
+      <div>Printed report on: ${printedOn}</div>
+      <div class="bold" style="margin-top: 2px;">${dateRangeStr}</div>
+    </div>
+  </div>
+  
+  <div class="divider"></div>
+
+  <!-- Main Summary Blocks -->
+  <div class="solid-divider"></div>
+  <div class="section-title">${summaryTitle}</div>
+  <div class="solid-divider"></div>
+  
+  <div class="kv-row">
+    <span>Printed by</span>
+    <span class="kv-val">${formatStr(printedBy)}</span>
+  </div>
+  
+  ${isSession && session ? `
+    <div class="kv-row">
+      <span>Cashier</span>
+      <span class="kv-val">${formatStr(cashierName)}</span>
+    </div>
+    <div class="kv-row">
+      <span>Session Status</span>
+      <span class="kv-val">${session.status.toUpperCase()}</span>
+    </div>
+    <div class="kv-row">
+      <span>Opening Cash</span>
+      <span class="kv-val">${formatCurrency(openingCash)}</span>
+    </div>
+    <div class="kv-row">
+      <span>Closing Cash</span>
+      <span class="kv-val">${formatCurrency(closingCash)}</span>
+    </div>
+    <div class="kv-row">
+      <span>Expected Cash</span>
+      <span class="kv-val">${formatCurrency(expectedCash)}</span>
+    </div>
+    <div class="kv-row">
+      <span>Cash Variance</span>
+      <span class="kv-val" style="${cashVariance !== null && cashVariance < 0 ? 'color: red;' : ''}">${formatCurrency(cashVariance)}</span>
+    </div>
+    <div class="divider"></div>
+  ` : ''}
+
+  <div class="kv-row">
+    <span>Total Orders</span>
+    <span class="kv-val">${totalOrdersCount}</span>
+  </div>
+  <div class="kv-row">
+    <span>Voided Orders</span>
+    <span class="kv-val">${voidedOrdersCount}</span>
+  </div>
+  <div class="kv-row">
+    <span>Gross Sales</span>
+    <span class="kv-val">${formatCurrency(grossSales)}</span>
+  </div>
+  <div class="kv-row">
+    <span>Total Discount</span>
+    <span class="kv-val">${formatCurrency(totalDiscount)}</span>
+  </div>
+  <div class="kv-row">
+    <span>Total Tax</span>
+    <span class="kv-val">${formatCurrency(totalTax)}</span>
+  </div>
+  <div class="kv-row bold">
+    <span>Net Sale Amt</span>
+    <span class="kv-val">${formatCurrency(netSales)}</span>
+  </div>
+  
+  <div class="divider"></div>
+  
+  <div class="kv-row">
+    <span>Returns Count</span>
+    <span class="kv-val">${totalReturnsCount}</span>
+  </div>
+  <div class="kv-row">
+    <span>Returns Value</span>
+    <span class="kv-val">${formatCurrency(totalReturnsValue)}</span>
+  </div>
+
+  <!-- Tabular Summaries: Order Type Summary -->
+  <div class="solid-divider"></div>
+  <div class="section-title">Order Type Summary</div>
+  <div class="solid-divider"></div>
+  <table class="report-table">
+    <thead>
+      <tr>
+        <th class="text-left">Type</th>
+        <th class="text-right">Ord</th>
+        <th class="text-right">Chg</th>
+        <th class="text-right">Disc</th>
+        <th class="text-right">Net</th>
+        <th class="text-right">Gross</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${orderTypeRows || '<tr><td colspan="6" class="text-center">No orders</td></tr>'}
+      ${orderTypeRows ? `
+        <tr class="totals-row">
+          <td>TOTAL</td>
+          <td class="text-right">${orderTypeTotals.orders}</td>
+          <td class="text-right">${orderTypeTotals.charges.toFixed(2)}</td>
+          <td class="text-right">${orderTypeTotals.discount.toFixed(2)}</td>
+          <td class="text-right">${orderTypeTotals.netSale.toFixed(2)}</td>
+          <td class="text-right">${orderTypeTotals.grossSale.toFixed(2)}</td>
+        </tr>
+      ` : ''}
+    </tbody>
+  </table>
+
+  <!-- Tabular Summaries: Payment Type Summary -->
+  <div class="solid-divider"></div>
+  <div class="section-title">Payment Type Summary</div>
+  <div class="solid-divider"></div>
+  <table class="report-table">
+    <thead>
+      <tr>
+        <th class="text-left">Payment</th>
+        <th class="text-center">Count</th>
+        <th class="text-right">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${paymentMixRows || '<tr><td colspan="3" class="text-center">No payments</td></tr>'}
+      ${paymentMixRows ? `
+        <tr class="totals-row">
+          <td>TOTAL</td>
+          <td class="text-center">${paymentMixTotals.count}</td>
+          <td class="text-right">${formatCurrency(paymentMixTotals.amount)}</td>
+        </tr>
+      ` : ''}
+    </tbody>
+  </table>
+
+  <!-- Tabular Summaries: Bill Summary -->
+  <div class="solid-divider"></div>
+  <div class="section-title">Bill Summary</div>
+  <div class="solid-divider"></div>
+  <table class="report-table">
+    <thead>
+      <tr>
+        <th class="text-left">Bill</th>
+        <th class="text-center">Qty</th>
+        <th class="text-right">Tax</th>
+        <th class="text-right">Disc</th>
+        <th class="text-right">Amt</th>
+        <th class="text-center">Stat</th>
+        <th class="text-center">Mode</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${billRows || '<tr><td colspan="7" class="text-center">No transactions</td></tr>'}
+      ${billRows ? `
+        <tr class="totals-row">
+          <td>TOTAL</td>
+          <td class="text-center">${billTotals.qty}</td>
+          <td class="text-right">${billTotals.tax.toFixed(2)}</td>
+          <td class="text-right">${billTotals.disc.toFixed(2)}</td>
+          <td class="text-right">${billTotals.amt.toFixed(2)}</td>
+          <td colspan="2"></td>
+        </tr>
+      ` : ''}
+    </tbody>
+  </table>
+
+  <!-- Tabular Summaries: Category Summary -->
+  <div class="solid-divider"></div>
+  <div class="section-title">Category Summary</div>
+  <div class="solid-divider"></div>
+  <table class="report-table">
+    <thead>
+      <tr>
+        <th class="text-left">Category</th>
+        <th class="text-center">Qty</th>
+        <th class="text-right">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${categoryRows || '<tr><td colspan="3" class="text-center">No sales</td></tr>'}
+      ${categoryRows ? `
+        <tr class="totals-row">
+          <td>TOTAL</td>
+          <td class="text-center">${categoryTotals.qty}</td>
+          <td class="text-right">${formatCurrency(categoryTotals.amount)}</td>
+        </tr>
+      ` : ''}
+    </tbody>
+  </table>
+
+  <!-- Tabular Summaries: Sold Items Summary -->
+  <div class="solid-divider"></div>
+  <div class="section-title">Sold Items Summary</div>
+  <div class="solid-divider"></div>
+  <table class="report-table">
+    <thead>
+      <tr>
+        <th class="text-left">Item Name</th>
+        <th class="text-center">Qty</th>
+        <th class="text-right">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemRows || '<tr><td colspan="3" class="text-center">No items sold</td></tr>'}
+      ${itemRows ? `
+        <tr class="totals-row">
+          <td>TOTAL</td>
+          <td class="text-center">${itemTotals.qty}</td>
+          <td class="text-right">${formatCurrency(itemTotals.amount)}</td>
+        </tr>
+      ` : ''}
+    </tbody>
+  </table>
+
+  <!-- Footer Section -->
+  <div class="divider"></div>
+  <div class="footer">
+    <p>Powered by Fresh Breeze Basket</p>
+    <p>&copy; ${new Date().getFullYear()} ${companyName}</p>
+  </div>
+</body>
+</html>
+  `;
+}
+
+export const getPartyLedgerPrint = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { partyId } = req.params;
+    const companyId = req.companyId;
+    const { date_from, date_to } = req.query;
+
+    if (!companyId) {
+      throw new ApiError(400, 'Company context is required');
+    }
+
+    const db = supabaseAdmin || supabase;
+
+    // 1. Fetch Company details
+    const { data: company, error: companyErr } = await db
+      .from('companies')
+      .select('*')
+      .eq('id', companyId)
+      .single();
+
+    if (companyErr || !company) {
+      throw new ApiError(404, 'Company not found');
+    }
+
+    // 2. Fetch Party details
+    const { data: party, error: partyErr } = await db
+      .from('contact_parties')
+      .select('*')
+      .eq('id', partyId)
+      .eq('company_id', companyId)
+      .single();
+
+    if (partyErr || !party) {
+      throw new ApiError(404, 'Trading partner not found');
+    }
+
+    // 3. Fetch opening balance components (suppliers table has it)
+    const { data: supplier } = await db
+      .from('suppliers')
+      .select('opening_balance, gst_no, pan_number')
+      .eq('party_id', partyId)
+      .eq('company_id', companyId)
+      .maybeSingle();
+
+    const { data: customer } = await db
+      .from('customers')
+      .select('trn_number')
+      .eq('party_id', partyId)
+      .eq('company_id', companyId)
+      .maybeSingle();
+
+    const gstNo = supplier?.gst_no || customer?.trn_number || '';
+    const panNo = supplier?.pan_number || '';
+
+    // Standard opening balance is from the supplier's opening_balance. Since customers don't have it, we start here.
+    // If it's a supplier, opening balance represents a Credit (we owe them).
+    // Let's model Opening Balance as: Debit is positive, Credit is negative.
+    let baseOpeningBalance = 0;
+    if (supplier && supplier.opening_balance) {
+      baseOpeningBalance = -Number(supplier.opening_balance); // Credit balance initially
+    }
+
+    // 4. Calculate dynamic opening balance if date_from is provided
+    let periodOpeningBalance = baseOpeningBalance;
+    let preEntries: any[] = [];
+
+    if (date_from) {
+      const { data: fetchedPreEntries, error: preErr } = await db
+        .from('party_ledger')
+        .select('*')
+        .eq('party_id', partyId)
+        .eq('company_id', companyId)
+        .lt('doc_date', date_from);
+
+      if (preErr) {
+        console.error('Error fetching pre-ledger entries:', preErr);
+      } else {
+        preEntries = (fetchedPreEntries || []).filter(e => e.status !== 'cancelled' && e.status !== 'failed');
+        for (const entry of preEntries) {
+          const amt = Number(entry.amount) || 0;
+          if (entry.doc_type === 'sale' || entry.doc_type === 'payment_out') {
+            // Debit
+            periodOpeningBalance += amt;
+          } else if (entry.doc_type === 'purchase' || entry.doc_type === 'payment_in' || entry.doc_type === 'credit_note') {
+            // Credit
+            periodOpeningBalance -= amt;
+          }
+        }
+      }
+    }
+
+    // 5. Fetch ledger entries within the period
+    let query = db
+      .from('party_ledger')
+      .select('*')
+      .eq('party_id', partyId)
+      .eq('company_id', companyId)
+      .order('doc_date', { ascending: true });
+
+    if (date_from) {
+      query = query.gte('doc_date', date_from);
+    }
+    if (date_to) {
+      query = query.lte('doc_date', date_to);
+    }
+
+    const { data: periodEntries, error: entriesErr } = await query;
+    if (entriesErr) {
+      throw new ApiError(500, 'Failed to fetch ledger entries');
+    }
+
+    const entries = (periodEntries || []).filter(e => e.status !== 'cancelled' && e.status !== 'failed');
+
+    // Process entries and calculate running balance
+    let runningBalance = periodOpeningBalance;
+    let totalDebits = 0;
+    let totalCredits = 0;
+
+    const tableRows: string[] = [];
+
+    // Add first row as Opening Balance
+    const opBalDr = periodOpeningBalance > 0 ? periodOpeningBalance : 0;
+    const opBalCr = periodOpeningBalance < 0 ? Math.abs(periodOpeningBalance) : 0;
+    const opBalSide = periodOpeningBalance >= 0 ? 'Dr' : 'Cr';
+
+    tableRows.push(`
+      <tr class="opening-row" style="background-color: #fafafa; font-weight: bold;">
+        <td>${date_from ? new Date(date_from as string).toLocaleDateString('en-IN') : 'Start'}</td>
+        <td colspan="3">Opening Balance</td>
+        <td class="text-right">${opBalDr > 0 ? opBalDr.toFixed(2) : '-'}</td>
+        <td class="text-right">${opBalCr > 0 ? opBalCr.toFixed(2) : '-'}</td>
+        <td class="text-right">${Math.abs(periodOpeningBalance).toFixed(2)} ${opBalSide}</td>
+      </tr>
+    `);
+
+    for (const entry of entries) {
+      const amt = Number(entry.amount) || 0;
+      let debit = 0;
+      let credit = 0;
+      let typeLabel = '';
+      let particulars = '';
+
+      if (entry.doc_type === 'sale') {
+        debit = amt;
+        totalDebits += amt;
+        runningBalance += amt;
+        typeLabel = 'Sale';
+        particulars = `Sales Invoice #${entry.doc_id.substring(0, 8).toUpperCase()}`;
+      } else if (entry.doc_type === 'payment_out') {
+        debit = amt;
+        totalDebits += amt;
+        runningBalance += amt;
+        typeLabel = 'Payment Out';
+        particulars = `Supplier Payment Ref: ${entry.doc_id.substring(0, 8).toUpperCase()}`;
+      } else if (entry.doc_type === 'purchase') {
+        credit = amt;
+        totalCredits += amt;
+        runningBalance -= amt;
+        typeLabel = 'Purchase';
+        particulars = `Purchase Invoice #${entry.doc_id.substring(0, 8).toUpperCase()}`;
+      } else if (entry.doc_type === 'payment_in') {
+        credit = amt;
+        totalCredits += amt;
+        runningBalance -= amt;
+        typeLabel = 'Payment In';
+        particulars = `Customer Payment Ref: ${entry.doc_id.substring(0, 8).toUpperCase()}`;
+      } else if (entry.doc_type === 'credit_note') {
+        credit = amt;
+        totalCredits += amt;
+        runningBalance -= amt;
+        typeLabel = 'Credit Note';
+        particulars = `Credit Note #${entry.doc_id.substring(0, 8).toUpperCase()}`;
+      } else {
+        if (entry.ledger_side === 'receivable') {
+          debit = amt;
+          totalDebits += amt;
+          runningBalance += amt;
+        } else {
+          credit = amt;
+          totalCredits += amt;
+          runningBalance -= amt;
+        }
+        typeLabel = entry.doc_type.replace(/_/g, ' ');
+        particulars = `Doc ID: ${entry.doc_id.substring(0, 8).toUpperCase()}`;
+      }
+
+      const balSide = runningBalance >= 0 ? 'Dr' : 'Cr';
+
+      tableRows.push(`
+        <tr>
+          <td>${new Date(entry.doc_date).toLocaleDateString('en-IN')}</td>
+          <td>${particulars}</td>
+          <td class="capitalize">${typeLabel}</td>
+          <td>${entry.status || 'Completed'}</td>
+          <td class="text-right">${debit > 0 ? debit.toFixed(2) : '-'}</td>
+          <td class="text-right">${credit > 0 ? credit.toFixed(2) : '-'}</td>
+          <td class="text-right">${Math.abs(runningBalance).toFixed(2)} ${balSide}</td>
+        </tr>
+      `);
+    }
+
+    const netClosingBalance = runningBalance;
+    const closingSide = netClosingBalance >= 0 ? 'Dr' : 'Cr';
+
+    // Add closing row
+    tableRows.push(`
+      <tr class="closing-row" style="border-top: 2px solid #333; background-color: #f9f9f9; font-weight: bold;">
+        <td>${date_to ? new Date(date_to as string).toLocaleDateString('en-IN') : new Date().toLocaleDateString('en-IN')}</td>
+        <td colspan="3">Closing Balance / Net Position</td>
+        <td class="text-right">${totalDebits.toFixed(2)}</td>
+        <td class="text-right">${totalCredits.toFixed(2)}</td>
+        <td class="text-right" style="background-color: #f5f5f5;">${Math.abs(netClosingBalance).toFixed(2)} ${closingSide}</td>
+      </tr>
+    `);
+
+    const companyName = company.name || 'Our Company';
+    const companyAddress = [company.address, company.city, company.state, company.postal_code].filter(Boolean).join(', ');
+    const companyPhone = company.phone || '';
+    const companyEmail = company.email || '';
+    const companyGSTIN = company.gstin || '';
+
+    let periodText = 'All Transactions';
+    if (date_from && date_to) {
+      periodText = `Period: ${new Date(date_from as string).toLocaleDateString('en-IN')} to ${new Date(date_to as string).toLocaleDateString('en-IN')}`;
+    } else if (date_from) {
+      periodText = `From: ${new Date(date_from as string).toLocaleDateString('en-IN')}`;
+    } else if (date_to) {
+      periodText = `To: ${new Date(date_to as string).toLocaleDateString('en-IN')}`;
+    }
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Party Ledger Statement - ${party.name}</title>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-size: 11px;
+      line-height: 1.4;
+      color: #333;
+      margin: 0;
+      padding: 20px;
+      background-color: #fff;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    .header {
+      width: 100%;
+      border-bottom: 2px solid #333;
+      padding-bottom: 10px;
+      margin-bottom: 20px;
+    }
+    .company-name {
+      font-size: 18px;
+      font-weight: bold;
+      text-transform: uppercase;
+      color: #111;
+      margin-bottom: 5px;
+    }
+    .company-details {
+      color: #555;
+      font-size: 10px;
+    }
+    .statement-title {
+      font-size: 14px;
+      font-weight: bold;
+      text-align: center;
+      margin: 15px 0 5px 0;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .statement-period {
+      font-size: 10px;
+      text-align: center;
+      color: #666;
+      margin-bottom: 20px;
+      font-style: italic;
+    }
+    .details-table {
+      width: 100%;
+      margin-bottom: 20px;
+      border-collapse: collapse;
+    }
+    .details-table td {
+      padding: 4px 0;
+      vertical-align: top;
+    }
+    .details-label {
+      font-weight: bold;
+      width: 120px;
+    }
+    .summary-box {
+      width: 100%;
+      border: 1px solid #ddd;
+      background-color: #fcfcfc;
+      padding: 10px 15px;
+      margin-bottom: 20px;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .summary-item {
+      text-align: center;
+      padding: 5px 10px;
+    }
+    .summary-item-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 3px;
+    }
+    .summary-item-value {
+      font-size: 13px;
+      font-weight: bold;
+    }
+    .ledger-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    .ledger-table th, .ledger-table td {
+      border: 1px solid #ddd;
+      padding: 6px 8px;
+      text-align: left;
+    }
+    .ledger-table th {
+      background-color: #f5f5f5;
+      font-weight: bold;
+      text-transform: uppercase;
+      font-size: 9px;
+    }
+    .text-right {
+      text-align: right;
+    }
+    .text-center {
+      text-align: center;
+    }
+    .font-bold {
+      font-weight: bold;
+    }
+    .opening-row td {
+      background-color: #fafafa;
+      color: #444;
+    }
+    .closing-row td {
+      border-top: 2px solid #333;
+      background-color: #f9f9f9;
+    }
+    .footer {
+      margin-top: 40px;
+      text-align: center;
+      font-size: 8px;
+      color: #999;
+      border-top: 1px solid #eee;
+      padding-top: 10px;
+    }
+    @media print {
+      body {
+        padding: 0;
+      }
+      .no-print {
+        display: none;
+      }
+      .ledger-table th {
+        background-color: #eaeaea !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .summary-box {
+        background-color: #f7f7f7 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      @page {
+        margin: 1.5cm;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="company-name">${companyName}</div>
+    <div class="company-details">
+      ${companyAddress ? `Address: ${companyAddress} | ` : ''}
+      ${companyPhone ? `Phone: ${companyPhone} | ` : ''}
+      ${companyEmail ? `Email: ${companyEmail} | ` : ''}
+      ${companyGSTIN ? `GSTIN: ${companyGSTIN}` : ''}
+    </div>
+  </div>
+
+  <div class="statement-title">Account Ledger Statement</div>
+  <div class="statement-period">${periodText}</div>
+
+  <table class="details-table">
+    <tr>
+      <td class="details-label">Account of:</td>
+      <td>
+        <strong>${party.name}</strong><br/>
+        ${party.email ? `Email: ${party.email}<br/>` : ''}
+        ${party.phone ? `Phone: ${party.phone}<br/>` : ''}
+        ${gstNo ? `GSTIN: ${gstNo}<br/>` : ''}
+        ${panNo ? `PAN: ${panNo}<br/>` : ''}
+      </td>
+      <td class="details-label" style="text-align: right;">Report Generated:</td>
+      <td style="text-align: right;">${new Date().toLocaleString('en-IN')}</td>
+    </tr>
+  </table>
+
+  <div class="summary-box">
+    <div class="summary-item">
+      <div class="summary-item-label">Opening Balance</div>
+      <div class="summary-item-value" style="color: ${periodOpeningBalance >= 0 ? '#b45309' : '#047857'};">
+        ₹ ${Math.abs(periodOpeningBalance).toFixed(2)} ${periodOpeningBalance >= 0 ? 'Dr' : 'Cr'}
+      </div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-item-label">Total Debits (+)</div>
+      <div class="summary-item-value">₹ ${totalDebits.toFixed(2)}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-item-label">Total Credits (-)</div>
+      <div class="summary-item-value">₹ ${totalCredits.toFixed(2)}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-item-label">Closing Balance</div>
+      <div class="summary-item-value" style="color: ${netClosingBalance >= 0 ? '#b45309' : '#047857'}; font-size: 14px;">
+        ₹ ${Math.abs(netClosingBalance).toFixed(2)} ${closingSide}
+      </div>
+    </div>
+  </div>
+
+  <table class="ledger-table">
+    <thead>
+      <tr>
+        <th style="width: 10%;">Date</th>
+        <th style="width: 35%;">Particulars / Reference</th>
+        <th style="width: 15%;">Vch Type</th>
+        <th style="width: 10%;">Status</th>
+        <th style="width: 10%; text-align: right;">Debit (Dr)</th>
+        <th style="width: 10%; text-align: right;">Credit (Cr)</th>
+        <th style="width: 10%; text-align: right;">Balance</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRows.join('')}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <p>This is a computer-generated ledger statement and does not require a physical signature.</p>
+    <p>Powered by Fresh Breeze Basket</p>
+  </div>
+</body>
+</html>
+    `;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+};

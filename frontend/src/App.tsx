@@ -66,6 +66,7 @@ const CreateGoodsReceipt = lazy(() => import("./pages/admin/CreateGoodsReceipt")
 const GoodsReceiptDetail = lazy(() => import("./pages/admin/GoodsReceiptDetail"));
 const Suppliers = lazy(() => import("./pages/admin/Suppliers"));
 const SupplierForm = lazy(() => import("./pages/admin/SupplierForm"));
+const SupplierDetails = lazy(() => import("./pages/admin/SupplierDetails"));
 const PurchaseInvoices = lazy(() => import("./pages/admin/PurchaseInvoices"));
 const CreatePurchaseInvoice = lazy(() => import("./pages/admin/CreatePurchaseInvoice"));
 const PurchaseInvoiceDetail = lazy(() => import("./pages/admin/PurchaseInvoiceDetail"));
@@ -169,6 +170,7 @@ const CreateCreditNote = lazy(() => import("./pages/sales/CreateCreditNote"));
 const CreatePOSOrder = lazy(() => import("./pages/pos/CreatePOSOrder"));
 const PosKotSettings = lazy(() => import("./pages/pos/KotSettings"));
 const KitchenKDS = lazy(() => import("./pages/pos/KitchenKDS"));
+const PosManagerPermissions = lazy(() => import("./pages/pos/PosManagerPermissions"));
 
 // Shared order pages
 const CreateReturnOrderPage = lazy(() => import("./pages/orders/CreateReturnOrderPage"));
@@ -329,7 +331,7 @@ const App: React.FC = () => {
                       <Route path="goods-receipts/:id" element={<GoodsReceiptDetail />} />
                       <Route path="suppliers" element={<Suppliers />} />
                       <Route path="suppliers/new" element={<SupplierForm />} />
-                      <Route path="suppliers/:id" element={<SupplierForm />} />
+                      <Route path="suppliers/:id" element={<SupplierDetails />} />
                       <Route path="suppliers/:id/edit" element={<SupplierForm />} />
                       <Route path="supplier-payments" element={<SupplierPayments />} />
                       <Route path="supplier-payments/new" element={<CreateSupplierPayment />} />
@@ -355,6 +357,7 @@ const App: React.FC = () => {
                     <Route path="/pos" element={<ProtectedRoute><CreatePOSOrder /></ProtectedRoute>} />
                     <Route path="/pos/kot-settings" element={<ProtectedRoute><PosKotSettings /></ProtectedRoute>} />
                     <Route path="/pos/kds" element={<ProtectedRoute><KitchenKDS /></ProtectedRoute>} />
+                    <Route path="/pos/manager-permissions" element={<ProtectedRoute><PosManagerPermissions /></ProtectedRoute>} />
                     
                     {/* Module Routes with Contextual Sidebar */}
                     {/* Inventory Module */}
@@ -451,7 +454,7 @@ const App: React.FC = () => {
                       <Route path="purchase-orders/:id" element={<PurchaseOrderDetail />} />
                       <Route path="suppliers" element={<Suppliers />} />
                       <Route path="suppliers/new" element={<SupplierForm />} />
-                      <Route path="suppliers/:id" element={<SupplierForm />} />
+                      <Route path="suppliers/:id" element={<SupplierDetails />} />
                       <Route path="suppliers/:id/edit" element={<SupplierForm />} />
                       <Route path="goods-receipts" element={<GoodsReceipts />} />
                       <Route path="goods-receipts/new" element={<CreateGoodsReceipt />} />

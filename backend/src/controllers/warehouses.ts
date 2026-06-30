@@ -54,6 +54,34 @@ export const getAllWarehouses = async (req: Request, res: Response) => {
     if (is_active !== undefined) {
       query = query.eq('is_active', is_active === 'true');
     }
+
+    const userRoles = req.user?.roles || [];
+    const isPosManager = userRoles.includes('pos_manager');
+    const isAdminOrAccounts = userRoles.includes('admin') || userRoles.includes('accounts');
+
+    if (isPosManager && !isAdminOrAccounts) {
+      const adminClient = supabaseAdmin || supabase;
+      const { data: assignments, error: assignError } = await adminClient
+        .from('pos_managers')
+        .select('warehouse_id')
+        .eq('user_id', req.user!.id)
+        .eq('company_id', req.companyId)
+        .eq('is_active', true);
+      
+      if (assignError) {
+        throw new ApiError(500, `Error fetching POS assignments: ${assignError.message}`);
+      }
+
+      const assignedIds = assignments?.map((a: any) => a.warehouse_id) || [];
+      if (assignedIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          data: []
+        });
+      }
+
+      query = query.in('id', assignedIds);
+    }
     
     const { data, error } = await query;
     

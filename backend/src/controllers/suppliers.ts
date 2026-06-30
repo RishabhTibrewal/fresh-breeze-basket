@@ -411,7 +411,13 @@ export const getSupplierById = async (req: Request, res: Response, next: NextFun
       .from('suppliers')
       .select(`
         *,
-        supplier_bank_accounts (*)
+        supplier_bank_accounts (*),
+        party:contact_parties(
+          id,
+          name,
+          is_customer,
+          is_supplier
+        )
       `)
       .eq('id', id)
       .eq('company_id', req.companyId)

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { supabase, supabaseAdmin } from '../config/supabase';
 
 // ---------------------------------------------------------------------------
 // Shared report query parameter schema
@@ -65,7 +66,7 @@ declare global {
 // ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
-export const validateReportQuery = (req: Request, res: Response, next: NextFunction): void => {
+export const validateReportQuery = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const rawQuery = req.query as Record<string, unknown>;
     const parsed = ReportQuerySchema.safeParse(rawQuery);
@@ -102,6 +103,46 @@ export const validateReportQuery = (req: Request, res: Response, next: NextFunct
       order_source: data.order_source,
       pos_session_id: data.pos_session_id,
     };
+
+    // Apply POS manager branch restriction
+    if (req.user) {
+      const userRoles = req.user.roles || [];
+      const isAdminOrAccounts = userRoles.includes('admin') || userRoles.includes('accounts');
+      const isPosManager = userRoles.includes('pos_manager');
+
+      if (isPosManager && !isAdminOrAccounts) {
+        const { data: assignments, error: assignError } = await (supabaseAdmin || supabase)
+          .from('pos_managers')
+          .select('warehouse_id')
+          .eq('user_id', req.user.id)
+          .eq('company_id', req.companyId || '')
+          .eq('is_active', true);
+
+        if (assignError) {
+          console.error('[validateReportQuery] Error fetching POS assignments:', assignError);
+          res.status(500).json({
+            success: false,
+            error: { message: 'Failed to verify outlet permissions' }
+          });
+          return;
+        }
+
+        const assignedOutlets = assignments?.map((a: any) => a.warehouse_id) || [];
+        if (assignedOutlets.length === 0) {
+          req.reportQuery.branch_ids = ['00000000-0000-0000-0000-000000000000'];
+        } else {
+          const requestedOutlets = req.reportQuery.branch_ids || [];
+          if (requestedOutlets.length === 0) {
+            req.reportQuery.branch_ids = assignedOutlets;
+          } else {
+            const intersection = requestedOutlets.filter(id => assignedOutlets.includes(id));
+            req.reportQuery.branch_ids = intersection.length === 0
+              ? ['00000000-0000-0000-0000-000000000000']
+              : intersection;
+          }
+        }
+      }
+    }
 
     next();
   } catch (err) {

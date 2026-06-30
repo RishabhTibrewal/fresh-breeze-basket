@@ -237,7 +237,7 @@ export const register = async (req: Request, res: Response) => {
           // Update or create profile if needed
           const { data: currentProfile } = await supabaseAdmin
             .from('profiles')
-            .select('id, first_name, last_name, phone')
+            .select('id, first_name, last_name, phone, company_id')
             .eq('id', existingUserId)
             .maybeSingle();
 
@@ -251,7 +251,8 @@ export const register = async (req: Request, res: Response) => {
                 first_name: first_name || null,
                 last_name: last_name || null,
                 phone: phone || null,
-                role: userRoles[0] || 'user'
+                role: userRoles[0] || 'user',
+                company_id: req.companyId
               });
 
             if (profileInsertError) {
@@ -264,6 +265,7 @@ export const register = async (req: Request, res: Response) => {
             if (first_name && !currentProfile.first_name) updateData.first_name = first_name;
             if (last_name && !currentProfile.last_name) updateData.last_name = last_name;
             if (phone && !currentProfile.phone) updateData.phone = phone;
+            if (!currentProfile.company_id) updateData.company_id = req.companyId;
             if (Object.keys(updateData).length > 0) {
               updateData.role = userRoles[0] || 'user';
               const { error: profileUpdateError } = await supabaseAdmin
@@ -315,7 +317,8 @@ export const register = async (req: Request, res: Response) => {
       first_name: first_name || null,
       last_name: last_name || null,
       phone: phone || null,
-      role: userRoles[0] || 'user' // Primary role for backward compatibility
+      role: userRoles[0] || 'user', // Primary role for backward compatibility
+      company_id: req.companyId
     };
 
     const { error: profileError } = await supabaseAdmin
@@ -712,8 +715,11 @@ export const updateProfile = async (req: Request, res: Response) => {
     
     console.log('[updateProfile] Update data:', updateData);
     
+    const token = req.headers.authorization?.split(' ')[1];
+    const client = supabaseAdmin || (token ? createAuthClient(token) : supabase);
+
     // Update profile
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from('profiles')
       .update(updateData)
       .eq('id', userId)
@@ -1205,9 +1211,11 @@ export const checkAdminStatus = async (req: Request, res: Response) => {
       });
     }
     const userId = req.user.id;
+    const token = req.headers.authorization?.split(' ')[1];
+    const client = supabaseAdmin || (token ? createAuthClient(token) : supabase);
     
     // Get user's profile
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile, error: profileError } = await client
       .from('profiles')
       .select('*')
       .eq('id', userId)
@@ -1222,7 +1230,7 @@ export const checkAdminStatus = async (req: Request, res: Response) => {
     }
     
     // Check admin status using RPC function (uses memberships)
-    const { data: isAdminRpc, error: rpcError } = await supabase.rpc('is_admin', { user_id: userId });
+    const { data: isAdminRpc, error: rpcError } = await client.rpc('is_admin', { user_id: userId });
     
     if (rpcError) {
       console.error('Error in is_admin RPC call:', rpcError);
@@ -1300,8 +1308,11 @@ export const updateRole = async (req: Request, res: Response) => {
       });
     }
 
+    const token = req.headers.authorization?.split(' ')[1];
+    const client = supabaseAdmin || (token ? createAuthClient(token) : supabase);
+
     // Update profile role for backward compatibility
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile, error: profileError } = await client
       .from('profiles')
       .update({ role })
       .eq('id', userId)
@@ -1313,7 +1324,7 @@ export const updateRole = async (req: Request, res: Response) => {
     }
 
     // Update company_memberships for backward compatibility
-    const { error: membershipError } = await supabase
+    const { error: membershipError } = await client
       .from('company_memberships')
       .upsert({
         user_id: userId,

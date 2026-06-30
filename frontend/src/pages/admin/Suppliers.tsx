@@ -195,7 +195,7 @@ export default function Suppliers() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => navigate(`/procurement/suppliers/${supplier.id}`)}
+                            onClick={() => navigate(`${moduleBase}/suppliers/${supplier.id}`)}
                           >
                             <Eye className="h-4 w-4" />
                           </Button>

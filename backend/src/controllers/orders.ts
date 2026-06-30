@@ -57,12 +57,44 @@ export const getOrders = async (req: Request, res: Response) => {
     if (!req.companyId) {
       throw new ApiError(400, 'Company context is required');
     }
+
+    let assignedIds: string[] = [];
+    let isPosManagerRestricted = false;
+
+    if (isPosManager && !isAdmin) {
+      const adminClient = supabaseAdmin || supabase;
+      const { data: assignments, error: assignError } = await adminClient
+        .from('pos_managers')
+        .select('warehouse_id')
+        .eq('user_id', userId)
+        .eq('company_id', req.companyId)
+        .eq('is_active', true);
+      
+      if (assignError) {
+        throw new ApiError(500, `Error fetching POS assignments: ${assignError.message}`);
+      }
+
+      assignedIds = assignments?.map((a: any) => a.warehouse_id) || [];
+      isPosManagerRestricted = true;
+
+      if (assignedIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          count: 0,
+          data: []
+        });
+      }
+    }
     
     // First get the total count (filtered by company_id)
     let countQuery = (supabaseAdmin || supabase)
       .from('orders')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', req.companyId);
+
+    if (isPosManagerRestricted) {
+      countQuery = countQuery.in('outlet_id', assignedIds);
+    }
 
     if (order_type) {
       countQuery = countQuery.eq('order_type', order_type);
@@ -113,6 +145,10 @@ export const getOrders = async (req: Request, res: Response) => {
         )
       `)
       .eq('company_id', req.companyId);
+
+    if (isPosManagerRestricted) {
+      query = query.in('outlet_id', assignedIds);
+    }
     
     // Apply filters
     if (status) {
