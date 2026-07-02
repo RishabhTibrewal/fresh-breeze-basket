@@ -203,10 +203,35 @@ export default function MenuManagement({ warehouses }: Props) {
       const matchSearch = !q ||
         v.display_name.toLowerCase().includes(q) ||
         v.sku.toLowerCase().includes(q);
-      const matchCat = activeCategory === 'all' || v.category_id === activeCategory;
+      
+      let matchCat = activeCategory === 'all';
+      if (!matchCat) {
+        if (v.category_id === activeCategory) {
+          matchCat = true;
+        } else {
+          // If activeCategory is a parent, match its subcategories too
+          const parentCat = (categories as any[]).find(c => c.id === activeCategory);
+          if (parentCat && Array.isArray(parentCat.subcategories)) {
+            matchCat = parentCat.subcategories.some((sub: any) => sub.id === v.category_id);
+          }
+        }
+      }
       return matchSearch && matchCat;
     });
-  }, [allVariants, searchQuery, activeCategory]);
+  }, [allVariants, searchQuery, activeCategory, categories]);
+
+  const flatCategories = useMemo(() => {
+    const list: any[] = [];
+    for (const cat of categories as any[]) {
+      list.push({ ...cat, isSubcategory: false });
+      if (Array.isArray(cat.subcategories)) {
+        for (const sub of cat.subcategories) {
+          list.push({ ...sub, isSubcategory: true, parentName: cat.name });
+        }
+      }
+    }
+    return list;
+  }, [categories]);
 
   const stockDraftDirty = useMemo(
     () =>
@@ -599,25 +624,57 @@ export default function MenuManagement({ warehouses }: Props) {
                       </span>
                     )}
                   </p>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="space-y-3">
                     {(categories as any[]).length === 0 ? (
                       <p className="text-gray-600 text-xs">No categories found</p>
                     ) : (
                       (categories as any[]).map((c: any) => {
-                        const active = displayCategoryIds.includes(c.id);
+                        const parentActive = displayCategoryIds.includes(c.id);
                         return (
-                          <button
-                            key={c.id}
-                            onClick={() => toggleDisplayCategory(c.id)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
-                              active
-                                ? 'bg-indigo-600/25 border-indigo-500/50 text-indigo-300'
-                                : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
-                            }`}
-                          >
-                            {active && <Check className="h-3 w-3 flex-shrink-0" />}
-                            {c.name}
-                          </button>
+                          <div key={c.id} className="bg-white/[0.02] border border-white/5 rounded-xl p-3">
+                            {/* Parent Category Button */}
+                            <div className="flex items-center justify-between mb-2 pb-2 border-b border-white/5">
+                              <span className="text-xs font-semibold text-gray-300">{c.name} (Parent)</span>
+                              <button
+                                type="button"
+                                onClick={() => toggleDisplayCategory(c.id)}
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-md border text-[11px] font-medium transition-all ${
+                                  parentActive
+                                    ? 'bg-indigo-600/25 border-indigo-500/50 text-indigo-300'
+                                    : 'bg-[#1a1d27] border-white/10 text-gray-400 hover:bg-white/10'
+                                }`}
+                              >
+                                {parentActive && <Check className="h-3 w-3 flex-shrink-0" />}
+                                Select Parent
+                              </button>
+                            </div>
+                            
+                            {/* Subcategories */}
+                            {Array.isArray(c.subcategories) && c.subcategories.length > 0 ? (
+                              <div className="flex flex-wrap gap-2 pt-1 pl-2">
+                                {c.subcategories.map((sub: any) => {
+                                  const subActive = displayCategoryIds.includes(sub.id);
+                                  return (
+                                    <button
+                                      key={sub.id}
+                                      type="button"
+                                      onClick={() => toggleDisplayCategory(sub.id)}
+                                      className={`flex items-center gap-1 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                                        subActive
+                                          ? 'bg-indigo-600/25 border-indigo-500/50 text-indigo-300'
+                                          : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                                      }`}
+                                    >
+                                      {subActive && <Check className="h-3 w-3 flex-shrink-0" />}
+                                      ↳ {sub.name}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <p className="text-[10px] text-gray-600 italic pl-2">No subcategories</p>
+                            )}
+                          </div>
                         );
                       })
                     )}
@@ -704,11 +761,13 @@ export default function MenuManagement({ warehouses }: Props) {
                   <select
                     value={activeCategory}
                     onChange={e => setActiveCategory(e.target.value)}
-                    className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                    className="bg-[#1a1d27] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                   >
                     <option value="all">All Categories</option>
-                    {(categories as any[]).map((c: any) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
+                    {flatCategories.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.isSubcategory ? `  — ${c.name}` : c.name}
+                      </option>
                     ))}
                   </select>
 

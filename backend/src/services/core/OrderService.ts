@@ -70,7 +70,7 @@ export class OrderService {
   async createOrder(
     data: CreateOrderData,
     context: CreateOrderContext
-  ): Promise<{ id: string; orderNumber: string }> {
+  ): Promise<{ id: string; orderNumber: string; orderItems: any[] }> {
     try {
       const {
         items,
@@ -261,9 +261,10 @@ export class OrderService {
         warehouse_id: item.outletId || finalOutletId,
       }));
 
-      const { error: itemsError } = await supabaseAdmin
+      const { data: savedItems, error: itemsError } = await supabaseAdmin
         .from('order_items')
-        .insert(orderItems);
+        .insert(orderItems)
+        .select('*');
 
       if (itemsError) {
         // Rollback order and stock reservations
@@ -360,6 +361,7 @@ export class OrderService {
       return {
         id: order.id,
         orderNumber,
+        orderItems: savedItems || [],
       };
     } catch (error: any) {
       console.error('Error creating order:', error);

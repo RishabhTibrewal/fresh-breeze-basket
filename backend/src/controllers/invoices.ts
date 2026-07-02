@@ -139,7 +139,11 @@ const generateThermalKOTHTML = async (orderId: string, companyId: string, type: 
   order.order_items.forEach((item: any) => {
     const itemName = formatThermalItemName(item.product?.name, item.variant?.name);
     const mods = item.order_item_modifiers || [];
-    const modsHTML = mods.map((m: any) => `<div class="modifier">- ${m.modifier?.name}</div>`).join('');
+    const modsHTML = mods.map((m: any) => {
+      const priceVal = Number(m.price_adjust || 0);
+      const priceStr = (!isKitchen && priceVal > 0) ? ` (+${priceVal.toFixed(2)})` : '';
+      return `<div class="modifier">- ${m.modifier?.name || 'Modifier'}${priceStr}</div>`;
+    }).join('');
     
     if (isKitchen) {
       itemsHTML += `
@@ -548,25 +552,41 @@ async function generateQuickBillKOTHTML(
     if (w?.name) outletName = w.name;
   }
 
-  let items: Array<{ name: string; qty: number }> = [];
+  let items: Array<{ name: string; qty: number; modifiers?: Array<{ name: string; price_adjust?: number }> }> = [];
 
   if (ticket?.ticket_items_snapshot) {
     const lines = parseTicketSnapshot(ticket.ticket_items_snapshot) as KotSnapshotLine[];
     items = lines.map((l) => ({
       name: String(l.kitchen_display_name || 'Item'),
       qty: Number(l.quantity) || 1,
+      modifiers: (l.modifiers_snapshot || []).map((m: any) => ({
+        name: m.name || 'Modifier',
+        price_adjust: Number(m.price_adjust || 0),
+      })),
     }));
   }
 
   if (items.length === 0) {
     const { data: orderItems } = await (supabaseAdmin || supabase)
       .from('order_items')
-      .select('quantity, product:products(name), variant:product_variants(name)')
+      .select(`
+        quantity,
+        product:products(name),
+        variant:product_variants(name),
+        order_item_modifiers (
+          price_adjust,
+          modifier:modifiers(name)
+        )
+      `)
       .eq('order_id', orderId);
     if (orderItems) {
       items = (orderItems as any[]).map((oi) => ({
         name: formatThermalItemName(oi.product?.name, oi.variant?.name),
         qty: Number(oi.quantity) || 1,
+        modifiers: (oi.order_item_modifiers || []).map((m: any) => ({
+          name: m.modifier?.name || 'Modifier',
+          price_adjust: Number(m.price_adjust || 0),
+        })),
       }));
     }
   }
@@ -578,11 +598,21 @@ async function generateQuickBillKOTHTML(
 
   const itemRows = items
     .map(
-      (item) => `
-    <tr>
-      <td class="item-name">${item.name}</td>
-      <td class="item-qty">${item.qty}</td>
-    </tr>`
+      (item) => {
+        const modsHTML = (item.modifiers || []).map((m: any) => {
+          const priceVal = Number(m.price_adjust || 0);
+          const priceStr = priceVal > 0 ? ` (+${priceVal.toFixed(2)})` : '';
+          return `<div class="modifier">- ${m.name}${priceStr}</div>`;
+        }).join('');
+        return `
+        <tr>
+          <td class="item-name">
+            ${item.name}
+            ${modsHTML}
+          </td>
+          <td class="item-qty">${item.qty}</td>
+        </tr>`;
+      }
     )
     .join('');
 
@@ -641,6 +671,7 @@ async function generateQuickBillKOTHTML(
     .items-table th.right { text-align: right; }
     .item-name { text-align: left; font-size: 12px; padding: 3px 0; }
     .item-qty  { text-align: right; font-size: 12px; padding: 3px 0; width: 36px; }
+    .modifier { font-size: 10px; padding-left: 5px; font-style: italic; color: #333; }
     .total-row {
       display: flex;
       justify-content: space-between;
@@ -795,7 +826,15 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
       (supabaseAdmin || supabase).from('companies').select('*').eq('id', companyId).single(),
       (supabaseAdmin || supabase).from('orders').select(`
         *,
-        order_items (*, variant:product_variants(*), product:products(*))
+        order_items (
+          *,
+          variant:product_variants(*),
+          product:products(*),
+          order_item_modifiers (
+            *,
+            modifier:modifiers(name)
+          )
+        )
       `).eq('id', orderId).eq('company_id', companyId).single(),
       (supabaseAdmin || supabase).from('credit_periods').select('end_date').eq('order_id', orderId).maybeSingle()
     ]);
@@ -897,7 +936,16 @@ const generateInvoiceHTML = async (orderId: string, companyId: string, documentT
         
         totalLineAmounts += totalLineAmount;
         
-        const desc = item.variant?.name || item.product?.name || 'Item';
+        let desc = item.variant?.name || item.product?.name || 'Item';
+        const mods = item.order_item_modifiers || [];
+        if (mods.length > 0) {
+            const modsList = mods.map((m: any) => {
+                const priceVal = Number(m.price_adjust || 0);
+                const priceStr = priceVal > 0 ? ` (+₹${priceVal.toFixed(2)})` : '';
+                return `${m.modifier?.name || 'Modifier'}${priceStr}`;
+            }).join(', ');
+            desc = `${desc} [Mods: ${modsList}]`;
+        }
         const hsn = item.variant?.hsn || '-';
         const unit = item.variant?.unit_type || 'PCS';
         const discPct = Number(item.discount_percentage || 0);

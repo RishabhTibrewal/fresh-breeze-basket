@@ -102,14 +102,23 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
 
     const orderService = new OrderService(req.companyId);
 
-    const orderItems = items.map((item: any) => ({
-      productId: item.product_id,
-      variantId: item.variant_id || null,
-      quantity: item.quantity,
-      unitPrice: item.price || item.unit_price,
-      outletId: item.warehouse_id || item.outlet_id || effectiveOutletId,
-      taxPercentage: item.tax_percentage || 0,
-    }));
+    const orderItems = items.map((item: any) => {
+      const modifierTotal = (item.selected_modifiers || []).reduce(
+        (sum: number, mod: any) => sum + Number(mod.price_adjust || 0),
+        0
+      );
+      const basePrice = Number(item.price || item.unit_price || 0);
+      const unitPriceWithModifiers = basePrice + modifierTotal;
+
+      return {
+        productId: item.product_id,
+        variantId: item.variant_id || null,
+        quantity: item.quantity,
+        unitPrice: unitPriceWithModifiers,
+        outletId: item.warehouse_id || item.outlet_id || effectiveOutletId,
+        taxPercentage: item.tax_percentage || 0,
+      };
+    });
 
     const result = await orderService.createOrder(
       {
@@ -185,18 +194,13 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
       item.selected_modifiers?.length > 0
     );
     if (itemsWithModifiers.length > 0) {
-      // Fetch the created order_items to get their IDs
-      const { data: orderItemRows } = await supabaseAdmin
-        .from('order_items')
-        .select('id, product_id')
-        .eq('order_id', orderId);
-
+      const orderItemRows = result.orderItems;
       if (orderItemRows?.length) {
         const modifierInserts: any[] = [];
         items.forEach((item: any, idx: number) => {
           if (!item.selected_modifiers?.length) return;
-          // Match by product_id (best effort)
-          const match = orderItemRows.find((r: any) => r.product_id === item.product_id);
+          // Match by index (guaranteed to match correctly)
+          const match = orderItemRows[idx];
           if (!match) return;
           item.selected_modifiers.forEach((mod: any) => {
             modifierInserts.push({
@@ -213,13 +217,8 @@ export const createPOSOrder = async (req: Request, res: Response, next: NextFunc
       }
     }
 
-    const { data: orderItemRows, error: oiErr } = await supabaseAdmin
-      .from('order_items')
-      .select('id, product_id, variant_id, quantity, created_at')
-      .eq('order_id', orderId)
-      .order('created_at', { ascending: true });
-
-    if (oiErr || !orderItemRows?.length) {
+    const orderItemRows = result.orderItems;
+    if (!orderItemRows?.length) {
       throw new ApiError(500, 'Failed to load order lines for KOT');
     }
     if (orderItemRows.length !== items.length) {
