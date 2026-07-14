@@ -10,20 +10,45 @@ const tenantCache = new Map<string, { companyId: string; companySlug: string; ex
 const extractSubdomain = (host: string): string | null => {
   const cleanHost = host.split(':')[0].toLowerCase();
 
+  // 1. Handle localhost and local IPs
   if (cleanHost === 'localhost' || cleanHost.endsWith('.localhost') || cleanHost === '127.0.0.1') {
     return DEFAULT_COMPANY_SLUG;
   }
 
-  if (!cleanHost.endsWith(BASE_DOMAIN)) {
-    return null;
-  }
-
-  const hostWithoutBase = cleanHost.slice(0, -(BASE_DOMAIN.length)).replace(/\.$/, '');
-  if (!hostWithoutBase || hostWithoutBase === 'www') {
+  // 2. Handle raw IP addresses (IPv4)
+  const ipv4Regex = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
+  if (ipv4Regex.test(cleanHost)) {
     return DEFAULT_COMPANY_SLUG;
   }
 
-  return hostWithoutBase.split('.')[0] || null;
+  // 3. If it ends with the configured BASE_DOMAIN (e.g. gofreshco.com)
+  if (cleanHost.endsWith(BASE_DOMAIN)) {
+    const hostWithoutBase = cleanHost.slice(0, -(BASE_DOMAIN.length)).replace(/\.$/, '');
+    if (!hostWithoutBase || hostWithoutBase === 'www') {
+      return DEFAULT_COMPANY_SLUG;
+    }
+    return hostWithoutBase.split('.')[0] || null;
+  }
+
+  // 4. Fallback auto-detection when BASE_DOMAIN doesn't match (e.g. missing/incorrect env var in production)
+  const parts = cleanHost.split('.');
+  
+  // If it's a root domain with 2 parts (e.g., rishabhgofreshco.dev)
+  if (parts.length === 2) {
+    return DEFAULT_COMPANY_SLUG;
+  }
+
+  // If it has www prefix (e.g., www.rishabhgofreshco.dev)
+  if (parts.length === 3 && parts[0] === 'www') {
+    return DEFAULT_COMPANY_SLUG;
+  }
+
+  // Otherwise, extract the first part as the subdomain (e.g. tenant.rishabhgofreshco.dev -> tenant)
+  if (parts.length >= 3) {
+    return parts[0];
+  }
+
+  return DEFAULT_COMPANY_SLUG;
 };
 
 export const resolveTenant = async (req: Request, res: Response, next: NextFunction) => {
