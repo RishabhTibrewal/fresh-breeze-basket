@@ -28,6 +28,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { formatCurrency } from '@/lib/utils';
 
 export default function ProductList() {
   const navigate = useNavigate();
@@ -449,7 +450,7 @@ export function AdminOrderList() {
                       {order.status}
                     </Badge>
                   </TableCell>
-                  <TableCell>₹ {order.total_amount?.toFixed(2) ?? '0.00'}</TableCell>
+                  <TableCell>{formatCurrency(order.total_amount || 0)}</TableCell>
                   <TableCell>{order.created_at ? format(new Date(order.created_at), 'MMM dd, yyyy, HH:mm') : 'Unknown'}</TableCell>
                   <TableCell className="text-right">
                     <Link to={`/sales/orders/${order.id}`}>

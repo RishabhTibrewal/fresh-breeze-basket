@@ -25,6 +25,8 @@ import type {
   MenuItemPerformanceRow,
 } from '@/api/reports';
 
+import { formatCurrency } from '@/lib/utils';
+
 interface Props {
   kotVolumeQuery: UseQueryResult<ReportResponse<KotVolumeByCounterRow>, Error>;
   kotStatusQuery: UseQueryResult<ReportResponse<KotStatusBreakdownRow>, Error>;
@@ -38,7 +40,7 @@ interface Props {
 
 const PIE_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
 
-const formatPrice = (p: number) => `₹${p.toFixed(2)}`;
+const formatPrice = (p: number) => formatCurrency(p);
 const formatNumber = (n: number) => Number(n).toLocaleString();
 
 function formatDateTime(iso: string | null | undefined) {

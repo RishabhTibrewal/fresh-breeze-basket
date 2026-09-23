@@ -30,7 +30,24 @@ type AuthContextType = {
   warehouses: string[]; // Array of warehouse IDs assigned to user
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, firstName: string, lastName: string, phone: string) => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string,
+    phone: string,
+    businessDetails?: {
+      customer_type?: 'individual' | 'business';
+      legal_business_name?: string;
+      trn_number?: string;
+      tax_id?: string;
+      business_address?: string;
+      business_city?: string;
+      business_state?: string;
+      business_postal_code?: string;
+      business_country?: string;
+    }
+  ) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   hasRole: (roleName: string) => boolean;
@@ -604,9 +621,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signUp = async (email: string, password: string, firstName: string, lastName: string, phone: string) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string,
+    phone: string,
+    businessDetails?: {
+      customer_type?: 'individual' | 'business';
+      legal_business_name?: string;
+      trn_number?: string;
+      tax_id?: string;
+      business_address?: string;
+      business_city?: string;
+      business_state?: string;
+      business_postal_code?: string;
+      business_country?: string;
+    }
+  ) => {
     try {
-      console.log('Starting registration process', { email, firstName, lastName, phone });
+      console.log('Starting registration process', { email, firstName, lastName, phone, businessDetails });
       
       // Call backend registration endpoint which handles tenant context and company_id
       const response = await apiClient.post('/auth/register', {
@@ -614,7 +648,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         password,
         first_name: firstName,
         last_name: lastName,
-        phone: phone || undefined
+        phone: phone || undefined,
+        ...businessDetails,
       });
 
       console.log('Registration response:', response.data);

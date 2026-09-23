@@ -24,6 +24,8 @@ import type {
   OutletLeaderboardRow,
 } from '@/api/reports';
 
+import { formatCurrency } from '@/lib/utils';
+
 interface Props {
   categoryBrandQuery: UseQueryResult<ReportResponse<CategoryBrandSalesRow>, Error>;
   basketQuery: UseQueryResult<ReportResponse<AverageBasketRow>, Error>;
@@ -35,7 +37,7 @@ interface Props {
   handleDownloadPosWidget: (endpoint: string, label: string) => void;
 }
 
-const formatPrice = (p: number) => `₹${p.toFixed(2)}`;
+const formatPrice = (p: number) => formatCurrency(p);
 const formatDelta = (n: number) => `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

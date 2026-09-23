@@ -14,6 +14,7 @@ import {
 import { creditNotesService, CreditNote } from '@/api/creditNotes';
 import { FileText, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { formatCurrency } from '@/lib/utils';
 
 const STATUS_COLORS: Record<string, string> = {
   draft: 'bg-gray-400',
@@ -104,7 +105,7 @@ export default function CreditNotes() {
                     </TableCell>
                     <TableCell className="px-3 text-xs italic text-muted-foreground">{cn.reason}</TableCell>
                     <TableCell className="text-right px-3 text-xs font-medium">
-                      ₹{parseFloat(cn.total_amount.toString()).toFixed(2)}
+                      {formatCurrency(parseFloat(cn.total_amount.toString()))}
                     </TableCell>
                     <TableCell className="px-3">
                       <Badge className={`${STATUS_COLORS[cn.status] || 'bg-gray-400'} text-white text-xs`}>

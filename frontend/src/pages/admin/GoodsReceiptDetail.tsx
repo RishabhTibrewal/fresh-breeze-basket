@@ -12,6 +12,7 @@ import { handleApiError } from '@/utils/errorHandler';
 import { StatusBadge } from '@/components/procurement/StatusBadge';
 import { StatusTransitionButton } from '@/components/procurement/StatusTransitionButton';
 import { ProcurementWorkflow } from '@/components/procurement/ProcurementWorkflow';
+import { formatCurrency } from '@/lib/utils';
 
 export default function GoodsReceiptDetail() {
   const { id } = useParams<{ id: string }>();
@@ -266,9 +267,9 @@ export default function GoodsReceiptDetail() {
                         <TableCell className="text-red-600 font-medium">
                           {item.quantity_rejected || 0}
                         </TableCell>
-                        <TableCell>₹{item.unit_price?.toFixed(2) || '0.00'}</TableCell>
+                        <TableCell>{formatCurrency(item.unit_price || 0)}</TableCell>
                         <TableCell className="text-sm">{item.tax_percentage || 0}%</TableCell>
-                        <TableCell className="font-medium text-sm">₹{item.line_total?.toFixed(2) || '0.00'}</TableCell>
+                        <TableCell className="font-medium text-sm">{formatCurrency(item.line_total || 0)}</TableCell>
                         <TableCell>{item.batch_number || '-'}</TableCell>
                         <TableCell>
                           {item.expiry_date ? new Date(item.expiry_date).toLocaleDateString() : '-'}
@@ -284,15 +285,15 @@ export default function GoodsReceiptDetail() {
               <div className="mt-4 flex flex-col items-end gap-1 border-t pt-4">
                 <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
                   <span>Subtotal:</span>
-                  <span>₹{(grn.total_received_amount - (grn.total_tax || 0)).toFixed(2)}</span>
+                  <span>{formatCurrency(grn.total_received_amount - (grn.total_tax || 0))}</span>
                 </div>
                 <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
                   <span>Tax:</span>
-                  <span>₹{grn.total_tax?.toFixed(2) || '0.00'}</span>
+                  <span>{formatCurrency(grn.total_tax || 0)}</span>
                 </div>
                 <div className="flex justify-between w-full max-w-[250px] font-bold text-lg pt-2 border-t mt-1">
                   <span>Grand Total:</span>
-                  <span>₹{grn.total_received_amount?.toFixed(2) || '0.00'}</span>
+                  <span>{formatCurrency(grn.total_received_amount || 0)}</span>
                 </div>
               </div>
             </CardContent>
@@ -312,7 +313,7 @@ export default function GoodsReceiptDetail() {
                       <p className="font-medium">{relatedInvoice.invoice_number}</p>
                       <p className="text-sm text-muted-foreground">
                         {new Date(relatedInvoice.invoice_date).toLocaleDateString()} - 
-                        ₹{relatedInvoice.total_amount?.toFixed(2)}
+                        {formatCurrency(relatedInvoice.total_amount || 0)}
                       </p>
                     </div>
                     <StatusBadge status={relatedInvoice.status} />
@@ -356,10 +357,10 @@ export default function GoodsReceiptDetail() {
                               <TableCell className="text-sm">{item.hsn_code || '-'}</TableCell>
                               <TableCell className="text-sm">{item.quantity}</TableCell>
                               <TableCell className="text-sm">{item.unit || '-'}</TableCell>
-                              <TableCell className="text-sm">₹{item.unit_price?.toFixed(2) || '0.00'}</TableCell>
+                              <TableCell className="text-sm">{formatCurrency(item.unit_price || 0)}</TableCell>
                               <TableCell className="text-sm">{item.tax_percentage ? `${item.tax_percentage}%` : '-'}</TableCell>
-                              <TableCell className="text-sm">₹{item.tax_amount?.toFixed(2) || '0.00'}</TableCell>
-                              <TableCell className="font-medium text-sm">₹{item.line_total?.toFixed(2) || '0.00'}</TableCell>
+                              <TableCell className="text-sm">{formatCurrency(item.tax_amount || 0)}</TableCell>
+                              <TableCell className="font-medium text-sm">{formatCurrency(item.line_total || 0)}</TableCell>
                             </TableRow>
                           ))}
                         </TableBody>

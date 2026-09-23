@@ -3,6 +3,7 @@ import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { Disclosure } from '@headlessui/react';
 import { ChevronDown } from 'lucide-react';
+import { formatCurrency } from '@/lib/utils';
 
 const FAQ = () => {
   const faqs = [
@@ -36,7 +37,7 @@ const FAQ = () => {
     },
     {
       question: "What payment methods do you accept?",
-      answer: "We accept all major credit cards, Apple Pay, Google Pay, and cash on delivery for orders under ₹ 500."
+      answer: `We accept all major credit cards, Apple Pay, Google Pay, and cash on delivery for orders under ${formatCurrency(500)}.`
     },
     {
       question: "Are your products organic?",

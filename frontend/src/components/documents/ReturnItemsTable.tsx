@@ -8,7 +8,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 
 export interface ReturnItemInput {
   product_id: string;
@@ -116,10 +116,10 @@ export const ReturnItemsTable: React.FC<ReturnItemsTableProps> = ({
                   />
                 </TableCell>
                 <TableCell className="text-right text-sm">
-                  ₹ {item.unit_price.toFixed(2)}
+                  {formatCurrency(item.unit_price)}
                 </TableCell>
                 <TableCell className="text-right text-sm font-medium">
-                  ₹ {amount ? amount.toFixed(2) : "0.00"}
+                  {formatCurrency(amount || 0)}
                 </TableCell>
               </TableRow>
             );
@@ -136,7 +136,7 @@ export const ReturnItemsTable: React.FC<ReturnItemsTableProps> = ({
 
       <div className="flex justify-end text-sm font-semibold">
         <span className="mr-2 text-muted-foreground">Total Refund:</span>
-        <span>₹ {total.toFixed(2)}</span>
+        <span>{formatCurrency(total)}</span>
       </div>
     </div>
   );

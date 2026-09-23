@@ -71,7 +71,23 @@ const getGlobalProfile = async (userId: string, token?: string) => {
 export const register = async (req: Request, res: Response) => {
   try {
     console.log('Registration request body:', req.body);
-    const { email, password, first_name, last_name, phone, roles } = req.body;
+    const {
+      email,
+      password,
+      first_name,
+      last_name,
+      phone,
+      roles,
+      customer_type,
+      legal_business_name,
+      trn_number,
+      tax_id,
+      business_address,
+      business_city,
+      business_state,
+      business_postal_code,
+      business_country,
+    } = req.body;
     
     // Validate roles if provided
     const userRoles = roles && Array.isArray(roles) ? roles : ['user'];
@@ -318,7 +334,16 @@ export const register = async (req: Request, res: Response) => {
       last_name: last_name || null,
       phone: phone || null,
       role: userRoles[0] || 'user', // Primary role for backward compatibility
-      company_id: req.companyId
+      company_id: req.companyId,
+      customer_type: customer_type || 'individual',
+      legal_business_name: legal_business_name || null,
+      trn_number: trn_number || null,
+      tax_id: tax_id || null,
+      business_address: business_address || null,
+      business_city: business_city || null,
+      business_state: business_state || null,
+      business_postal_code: business_postal_code || null,
+      business_country: business_country || null,
     };
 
     const { error: profileError } = await supabaseAdmin
@@ -332,6 +357,28 @@ export const register = async (req: Request, res: Response) => {
         message: 'Failed to create user profile'
       });
     }
+
+    // Sync to customers table for current company
+    const customerPayload = {
+      user_id: authData.user.id,
+      company_id: req.companyId,
+      name: legal_business_name || `${first_name || ''} ${last_name || ''}`.trim() || authData.user.email,
+      email: authData.user.email,
+      phone: phone || null,
+      customer_type: customer_type || 'individual',
+      legal_business_name: legal_business_name || null,
+      trn_number: trn_number || null,
+      tax_id: tax_id || null,
+      business_address: business_address || null,
+      business_city: business_city || null,
+      business_state: business_state || null,
+      business_postal_code: business_postal_code || null,
+      business_country: business_country || null,
+    };
+
+    await supabaseAdmin
+      .from('customers')
+      .upsert(customerPayload, { onConflict: 'user_id,company_id' });
 
     const membershipError = await ensureMembership(authData.user.id, req.companyId, userRoles);
     if (membershipError) {
@@ -650,6 +697,13 @@ export const getCurrentUser = async (req: Request, res: Response) => {
     const userRoles = await getUserRoles(userId, activeCompanyId);
     const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
     
+    // Fetch company currency
+    const { data: companyData } = await (supabaseAdmin || supabase)
+      .from('companies')
+      .select('currency')
+      .eq('id', activeCompanyId)
+      .maybeSingle();
+
     return res.status(200).json({
       success: true,
       data: {
@@ -658,6 +712,7 @@ export const getCurrentUser = async (req: Request, res: Response) => {
         ...profile,
         isAdmin: isAdminCheck,
         company_id: activeCompanyId,
+        currency: companyData?.currency || 'INR',
         role: primaryRole, // Backward compatibility
         roles: userRoles // New: array of roles
       }
@@ -684,15 +739,25 @@ export const updateProfile = async (req: Request, res: Response) => {
       });
     }
     const userId = req.user.id;
-    const { first_name, last_name, phone, avatar_url } = req.body;
+    const {
+      first_name,
+      last_name,
+      phone,
+      avatar_url,
+      customer_type,
+      legal_business_name,
+      trn_number,
+      tax_id,
+      business_address,
+      business_city,
+      business_state,
+      business_postal_code,
+      business_country,
+    } = req.body;
     
     console.log('[updateProfile] Request received:', {
       userId,
       body: req.body,
-      first_name,
-      last_name,
-      phone,
-      avatar_url
     });
     
     // Build update object - only include fields that are provided (not undefined)
@@ -700,18 +765,19 @@ export const updateProfile = async (req: Request, res: Response) => {
       updated_at: new Date()
     };
     
-    if (first_name !== undefined && first_name !== null) {
-      updateData.first_name = first_name;
-    }
-    if (last_name !== undefined && last_name !== null) {
-      updateData.last_name = last_name;
-    }
-    if (phone !== undefined && phone !== null) {
-      updateData.phone = phone;
-    }
-    if (avatar_url !== undefined && avatar_url !== null) {
-      updateData.avatar_url = avatar_url;
-    }
+    if (first_name !== undefined && first_name !== null) updateData.first_name = first_name;
+    if (last_name !== undefined && last_name !== null) updateData.last_name = last_name;
+    if (phone !== undefined && phone !== null) updateData.phone = phone;
+    if (avatar_url !== undefined && avatar_url !== null) updateData.avatar_url = avatar_url;
+    if (customer_type !== undefined && customer_type !== null) updateData.customer_type = customer_type;
+    if (legal_business_name !== undefined && legal_business_name !== null) updateData.legal_business_name = legal_business_name;
+    if (trn_number !== undefined && trn_number !== null) updateData.trn_number = trn_number;
+    if (tax_id !== undefined && tax_id !== null) updateData.tax_id = tax_id;
+    if (business_address !== undefined && business_address !== null) updateData.business_address = business_address;
+    if (business_city !== undefined && business_city !== null) updateData.business_city = business_city;
+    if (business_state !== undefined && business_state !== null) updateData.business_state = business_state;
+    if (business_postal_code !== undefined && business_postal_code !== null) updateData.business_postal_code = business_postal_code;
+    if (business_country !== undefined && business_country !== null) updateData.business_country = business_country;
     
     console.log('[updateProfile] Update data:', updateData);
     

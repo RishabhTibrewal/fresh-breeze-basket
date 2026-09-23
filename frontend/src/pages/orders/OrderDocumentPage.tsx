@@ -9,6 +9,7 @@ import { invoicesService } from "@/api/invoices";
 import { warehousesService } from "@/api/warehouses";
 import { paymentsService, Payment } from "@/api/payments";
 import { customerService } from "@/api/customer";
+import { formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -373,7 +374,7 @@ export default function OrderDocumentPage() {
         metadata={[
           {
             label: "Total Amount",
-            value: `₹ ${order.total_amount?.toFixed(2) ?? "0.00"}`,
+            value: formatCurrency(order.total_amount),
           },
           {
             label: "Payment Status",
@@ -754,7 +755,7 @@ export default function OrderDocumentPage() {
                               )}
                         </TableCell>
                         <TableCell className="text-right text-sm">
-                              ₹ {unitPrice.toFixed(2)}
+                              {formatCurrency(unitPrice)}
                         </TableCell>
                         <TableCell className="text-right text-sm">
                               {discPct}%
@@ -763,7 +764,7 @@ export default function OrderDocumentPage() {
                               {taxPct}%
                         </TableCell>
                         <TableCell className="text-right text-sm font-medium">
-                              ₹ {Number(lineTotal).toFixed(2)}
+                              {formatCurrency(lineTotal)}
                         </TableCell>
                       </TableRow>
                         );
@@ -771,30 +772,30 @@ export default function OrderDocumentPage() {
                   )}
                     <TableRow className="border-t-2">
                       <TableCell colSpan={6} className="text-right font-medium">Subtotal (Sum of Items)</TableCell>
-                      <TableCell className="text-right font-medium">₹ {(order.subtotal || 0).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency(order.subtotal)}</TableCell>
                     </TableRow>
                     {((order.total_discount || 0) > 0) && (
                       <TableRow>
                         <TableCell colSpan={6} className="text-right text-muted-foreground">Total Discount (Item Level)</TableCell>
-                        <TableCell className="text-right text-muted-foreground text-red-500">-₹ {(order.total_discount || 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right text-muted-foreground text-red-500">-{formatCurrency(order.total_discount)}</TableCell>
                       </TableRow>
                     )}
                     <TableRow>
                       <TableCell colSpan={6} className="text-right text-muted-foreground">Taxable Amount</TableCell>
-                      <TableCell className="text-right text-muted-foreground">₹ {((order.subtotal || 0) - (order.total_discount || 0)).toFixed(2)}</TableCell>
+                      <TableCell className="text-right text-muted-foreground">{formatCurrency((order.subtotal || 0) - (order.total_discount || 0))}</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell colSpan={6} className="text-right text-muted-foreground">Total Item Tax</TableCell>
-                      <TableCell className="text-right text-muted-foreground">₹ {(order.total_tax || 0).toFixed(2)}</TableCell>
+                      <TableCell className="text-right text-muted-foreground">{formatCurrency(order.total_tax)}</TableCell>
                     </TableRow>
                     <TableRow className="bg-muted/30">
                       <TableCell colSpan={6} className="text-right font-medium">Total</TableCell>
-                      <TableCell className="text-right font-medium">₹ {((order.subtotal || 0) - (order.total_discount || 0) + (order.total_tax || 0)).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency((order.subtotal || 0) - (order.total_discount || 0) + (order.total_tax || 0))}</TableCell>
                     </TableRow>
                     {order.extra_discount_amount != null && order.extra_discount_amount > 0 && (
                       <TableRow>
                         <TableCell colSpan={6} className="text-right text-muted-foreground">Extra Discount</TableCell>
-                        <TableCell className="text-right text-muted-foreground text-red-500">-₹ {order.extra_discount_amount.toFixed(2)}</TableCell>
+                        <TableCell className="text-right text-muted-foreground text-red-500">-{formatCurrency(order.extra_discount_amount)}</TableCell>
                       </TableRow>
                     )}
                     {order.cd_enabled && order.cd_amount != null && (
@@ -802,24 +803,24 @@ export default function OrderDocumentPage() {
                         <TableCell colSpan={6} className="text-right text-blue-600">
                           Cash Discount ({order.cd_percentage}%{order.cd_settlement_mode === 'credit_note' ? ' — CN' : ''})
                         </TableCell>
-                        <TableCell className="text-right text-blue-600">-₹ {order.cd_amount.toFixed(2)}</TableCell>
+                        <TableCell className="text-right text-blue-600">-{formatCurrency(order.cd_amount)}</TableCell>
                       </TableRow>
                     )}
                     {order.total_extra_charges != null && order.total_extra_charges !== 0 && (
                       <TableRow>
                         <TableCell colSpan={6} className="text-right text-orange-600">Extra Charges</TableCell>
-                        <TableCell className="text-right text-orange-600">+₹ {order.total_extra_charges.toFixed(2)}</TableCell>
+                        <TableCell className="text-right text-orange-600">+{formatCurrency(order.total_extra_charges)}</TableCell>
                       </TableRow>
                     )}
                     {order.round_off_amount != null && order.round_off_amount !== 0 && (
                       <TableRow>
                         <TableCell colSpan={6} className="text-right text-muted-foreground">Round Off</TableCell>
-                        <TableCell className="text-right text-muted-foreground">{order.round_off_amount >= 0 ? '+' : ''}₹ {order.round_off_amount.toFixed(2)}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">{order.round_off_amount >= 0 ? '+' : ''}{formatCurrency(order.round_off_amount)}</TableCell>
                       </TableRow>
                     )}
                     <TableRow className="font-bold text-lg border-t-2">
                       <TableCell colSpan={6} className="text-right">Grand Total</TableCell>
-                      <TableCell className="text-right">₹ {order.total_amount?.toFixed(2) ?? "0.00"}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(order.total_amount)}</TableCell>
                     </TableRow>
                 </TableBody>
               </Table>
@@ -840,7 +841,7 @@ export default function OrderDocumentPage() {
                 <div>
                   <p className="text-muted-foreground">Total Amount</p>
                   <p className="font-medium text-lg">
-                ₹ {order.total_amount?.toFixed(2) ?? "0.00"}
+                {formatCurrency(order.total_amount)}
               </p>
                 </div>
                 <div>
@@ -883,7 +884,7 @@ export default function OrderDocumentPage() {
                   {order.taxable_value != null && (
                     <div className="flex justify-between max-w-xs text-sm">
                       <span className="text-muted-foreground">Taxable Value:</span>
-                      <span>₹ {order.taxable_value.toFixed(2)}</span>
+                      <span>{formatCurrency(order.taxable_value)}</span>
                     </div>
                   )}
                   {order.cd_enabled && order.cd_amount != null && (
@@ -891,19 +892,19 @@ export default function OrderDocumentPage() {
                       <span className="text-muted-foreground">
                         Cash Discount ({order.cd_percentage}%{order.cd_settlement_mode === 'credit_note' ? ' — CN' : ''}):
                       </span>
-                      <span className="text-blue-600">-₹ {order.cd_amount.toFixed(2)}</span>
+                      <span className="text-blue-600">-{formatCurrency(order.cd_amount)}</span>
                     </div>
                   )}
                   {order.total_extra_charges != null && order.total_extra_charges !== 0 && (
                     <div className="flex justify-between max-w-xs text-sm">
                       <span className="text-muted-foreground">Extra Charges:</span>
-                      <span className="text-orange-600">+₹ {order.total_extra_charges.toFixed(2)}</span>
+                      <span className="text-orange-600">+{formatCurrency(order.total_extra_charges)}</span>
                     </div>
                   )}
                   {order.round_off_amount != null && order.round_off_amount !== 0 && (
                     <div className="flex justify-between max-w-xs text-sm">
                       <span className="text-muted-foreground">Round Off:</span>
-                      <span>{order.round_off_amount >= 0 ? '+' : ''}₹ {order.round_off_amount.toFixed(2)}</span>
+                      <span>{order.round_off_amount >= 0 ? '+' : ''}{formatCurrency(order.round_off_amount)}</span>
                     </div>
                   )}
                 </div>
@@ -945,7 +946,7 @@ export default function OrderDocumentPage() {
                                 : format(new Date(payment.created_at), "MMM d, yyyy")}
                             </TableCell>
                             <TableCell>
-                              ₹ {parseFloat(payment.amount.toString()).toFixed(2)}
+                              {formatCurrency(payment.amount)}
                             </TableCell>
                             <TableCell>
                               {payment.payment_method
@@ -1004,7 +1005,7 @@ export default function OrderDocumentPage() {
                         <TableRow>
                           <TableCell className="font-medium">Amount</TableCell>
                           <TableCell>
-                            ₹ {parseFloat(creditPeriodData.amount?.toString() || "0").toFixed(2)}
+                            {formatCurrency(creditPeriodData.amount)}
                           </TableCell>
                         </TableRow>
                         <TableRow>
@@ -1198,7 +1199,7 @@ export default function OrderDocumentPage() {
                                 </Badge>
                               </TableCell>
                               <TableCell>
-                                ₹ {returnOrder.total_amount?.toFixed(2) || "0.00"}
+                                {formatCurrency(returnOrder.total_amount)}
                               </TableCell>
                               <TableCell>
                                 {format(
@@ -1379,7 +1380,7 @@ export default function OrderDocumentPage() {
                                 </Badge>
                               </TableCell>
                               <TableCell>
-                                ₹ {creditNote.total_amount?.toFixed(2) || "0.00"}
+                                {formatCurrency(creditNote.total_amount)}
                               </TableCell>
                               <TableCell>
                                 {format(

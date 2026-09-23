@@ -72,6 +72,7 @@ import {
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { leadsService, Lead, CreateLeadInput, UpdateLeadInput, LeadStage, LeadPriority, LeadSource } from '@/api/leads';
+import { formatCurrency } from '@/lib/utils';
 import {
   Form,
   FormControl,
@@ -558,7 +559,7 @@ export default function Leads() {
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">₹{stats.totalValue.toLocaleString()}</div>
+              <div className="text-2xl font-bold">{formatCurrency(stats.totalValue)}</div>
             </CardContent>
           </Card>
           <Card>
@@ -567,7 +568,7 @@ export default function Leads() {
               <CheckCircle2 className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">₹{stats.wonValue.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-green-600">{formatCurrency(stats.wonValue)}</div>
             </CardContent>
           </Card>
           <Card>

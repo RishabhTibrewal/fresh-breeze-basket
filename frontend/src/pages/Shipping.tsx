@@ -1,6 +1,7 @@
 import React from 'react';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
+import { formatCurrency } from '@/lib/utils';
 
 const Shipping = () => {
   return (
@@ -60,15 +61,15 @@ const Shipping = () => {
                   <div className="p-3 font-medium text-gray-700">Delivery Fee</div>
                 </div>
                 <div className="grid grid-cols-2 border-b border-gray-200">
-                  <div className="p-3 text-sm">Under ₹ 100</div>
-                  <div className="p-3 text-sm">₹ 15</div>
+                  <div className="p-3 text-sm">Under {formatCurrency(100)}</div>
+                  <div className="p-3 text-sm">{formatCurrency(15)}</div>
                 </div>
                 <div className="grid grid-cols-2 border-b border-gray-200">
-                  <div className="p-3 text-sm">₹ 100 - 200</div>
-                  <div className="p-3 text-sm">₹ 10</div>
+                  <div className="p-3 text-sm">{formatCurrency(100)} - {formatCurrency(200)}</div>
+                  <div className="p-3 text-sm">{formatCurrency(10)}</div>
                 </div>
                 <div className="grid grid-cols-2">
-                  <div className="p-3 text-sm">Above ₹ 200</div>
+                  <div className="p-3 text-sm">Above {formatCurrency(200)}</div>
                   <div className="p-3 text-sm font-medium text-green-600">FREE</div>
                 </div>
               </div>

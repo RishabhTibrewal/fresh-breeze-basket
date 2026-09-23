@@ -36,6 +36,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from 'sonner';
 import { ordersService, Order } from '@/api/orders';
 import apiClient from '@/lib/apiClient';
+import { formatCurrency } from '@/lib/utils';
 import { creditPeriodService } from '@/api/creditPeriod';
 import { customerService, CustomerDetails } from '@/api/customer';
 
@@ -349,10 +350,10 @@ export default function OrderUpdate() {
       if (projectedTotalCustomerCredit > customerCreditLimit) {
         toast.error(
           `Operation exceeds customer credit limit. 
-          Limit: ₹${customerCreditLimit.toFixed(2)}, 
-          Current (excl. this order's change): ₹${existingCreditWithoutThisOrder.toFixed(2)}, 
-          New for this order: ₹${newCreditAmountForThisOrder.toFixed(2)},
-          Projected Total: ₹${projectedTotalCustomerCredit.toFixed(2)}`
+          Limit: ${formatCurrency(customerCreditLimit)}, 
+          Current (excl. this order's change): ${formatCurrency(existingCreditWithoutThisOrder)}, 
+          New for this order: ${formatCurrency(newCreditAmountForThisOrder)},
+          Projected Total: ${formatCurrency(projectedTotalCustomerCredit)}`
         );
         return;
       }
@@ -769,7 +770,7 @@ export default function OrderUpdate() {
                   <h3 className="font-medium mb-2 text-sm sm:text-base">Credit Information</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm">
                     <div className="text-muted-foreground">Credit Amount:</div>
-                    <div className="break-words">₹{parseFloat(creditPeriod.amount.toString()).toFixed(2)}</div>
+                    <div className="break-words">{formatCurrency(parseFloat(creditPeriod.amount.toString()))}</div>
                     
                     <div className="text-muted-foreground">Credit Period:</div>
                     <div className="break-words">{creditPeriod.period} days</div>
@@ -797,9 +798,9 @@ export default function OrderUpdate() {
                   <h3 className="font-medium mb-2 text-sm sm:text-base">Customer Credit Details</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm">
                     <div className="text-muted-foreground">Credit Limit:</div>
-                    <div className="break-words">₹{(customer.credit_limit || 0).toFixed(2)}</div>
+                    <div className="break-words">{formatCurrency(customer.credit_limit || 0)}</div>
                     <div className="text-muted-foreground">Current Outstanding Credit:</div>
-                    <div className="break-words">₹{(customer.current_credit || 0).toFixed(2)}</div>
+                    <div className="break-words">{formatCurrency(customer.current_credit || 0)}</div>
                   </div>
                 </div>
               )}
@@ -812,7 +813,7 @@ export default function OrderUpdate() {
                   <div className="break-words">{new Date(order.created_at).toLocaleDateString()}</div>
                   
                   <div className="text-muted-foreground">Total Amount:</div>
-                  <div className="break-words">₹{parseFloat(order.total_amount.toString()).toFixed(2)}</div>
+                  <div className="break-words">{formatCurrency(parseFloat(order.total_amount.toString()))}</div>
                   
                   <div className="text-muted-foreground">Current Payment Method:</div>
                   <div className="break-words">{order.payment_method || 'Not specified'}</div>

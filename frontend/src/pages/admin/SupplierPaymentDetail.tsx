@@ -14,6 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { handleApiError } from '@/utils/errorHandler';
 import { StatusBadge } from '@/components/procurement/StatusBadge';
 import { StatusTransitionButton } from '@/components/procurement/StatusTransitionButton';
+import { formatCurrency } from '@/lib/utils';
 
 export default function SupplierPaymentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -113,7 +114,7 @@ export default function SupplierPaymentDetail() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Amount</p>
-              <p className="font-medium text-lg">₹{payment.amount.toFixed(2)}</p>
+              <p className="font-medium text-lg">{formatCurrency(payment.amount)}</p>
             </div>
             {payment.reference_number && (
               <div>

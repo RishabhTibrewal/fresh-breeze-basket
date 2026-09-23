@@ -30,6 +30,7 @@ import { Search, Plus, Eye, Edit, Calendar, DollarSign, User, CreditCard } from 
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import apiClient from '@/lib/apiClient';
+import { formatCurrency } from '@/lib/utils';
 
 export default function Orders() {
   const navigate = useNavigate();
@@ -278,7 +279,7 @@ export default function Orders() {
                           )}
                         </div>
                         <div className="text-base font-bold text-green-600 mb-2">
-                          ${parseFloat(order.total_amount).toFixed(2)}
+                          {formatCurrency(parseFloat(order.total_amount))}
                         </div>
                       </div>
                       <div className="flex flex-col gap-1.5 flex-shrink-0">
@@ -309,7 +310,7 @@ export default function Orders() {
                           <CreditCard className="h-3 w-3 flex-shrink-0" />
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-xs">
-                              ${order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount).toFixed(2)}
+                              {formatCurrency(parseFloat(order.credit_details.amount || 0))}
                             </div>
                             <div className="text-xs">
                               Due: {formatDate(order.credit_details.end_date || order.credit_details.due_date, 'MMM d, yyyy')}
@@ -397,7 +398,7 @@ export default function Orders() {
                       <TableCell className="px-2 py-2 text-sm">{order.customer?.name || 'N/A'}</TableCell>
                       <TableCell className="px-2 py-2 text-sm">{formatSalesExecutive(order)}</TableCell>
                       <TableCell className="px-2 py-2 text-sm">{formatDate(order.created_at)}</TableCell>
-                      <TableCell className="px-2 py-2 text-sm font-medium">₹{parseFloat(order.total_amount).toFixed(2)}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm font-medium">{formatCurrency(parseFloat(order.total_amount))}</TableCell>
                       <TableCell className="px-2 py-2">{getStatusBadge(order.status)}</TableCell>
                       <TableCell className="px-2 py-2">
                         <div className="space-y-1">
@@ -410,7 +411,7 @@ export default function Orders() {
                       <TableCell className="px-2 py-2">
                         {order.credit_details ? (
                           <div className="text-xs sm:text-sm">
-                            <div className="font-medium">₹{order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount).toFixed(2)}</div>
+                            <div className="font-medium">{formatCurrency(parseFloat(order.credit_details.amount || 0))}</div>
                             <div className="text-muted-foreground">
                               Due: {formatDate(order.credit_details.end_date || order.credit_details.due_date, 'MMM d, yyyy')}
                             </div>

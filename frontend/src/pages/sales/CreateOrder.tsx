@@ -78,7 +78,7 @@ import {
 } from "@/components/ui/command";
 import CustomerAddressForm from "./CustomerAddressForm";
 import WarehouseStockDisplay from "@/components/products/WarehouseStockDisplay";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency, getCurrencySymbol } from "@/lib/utils";
 
 // Enhanced schema for the order form with payment method options
 const orderFormSchema = z.object({
@@ -858,7 +858,7 @@ export default function CreateOrder() {
           type: 'credit',
           description: data.payment_status === 'full_credit' 
             ? `Credit for order - Full Credit` 
-            : `Credit for order - Partial Payment (Paid: ₹ ${partialPaymentAmount.toFixed(2)}, Credit: ₹ ${creditAmount.toFixed(2)})`
+            : `Credit for order - Partial Payment (Paid: ${formatCurrency(partialPaymentAmount)}, Credit: ${formatCurrency(creditAmount)})`
         };
       }
       
@@ -1119,10 +1119,10 @@ export default function CreateOrder() {
                             <span>Credit Period: {selectedCustomer.credit_period_days} days</span>
                           )}
                           {selectedCustomer.credit_limit && (
-                            <span className="ml-2">Credit Limit: ₹{selectedCustomer.credit_limit.toLocaleString()}</span>
+                            <span className="ml-2">Credit Limit: {formatCurrency(selectedCustomer.credit_limit)}</span>
                           )}
                           {selectedCustomer.current_credit !== undefined && (
-                            <span className="ml-2">Current Credit: ₹{selectedCustomer.current_credit.toLocaleString()}</span>
+                            <span className="ml-2">Current Credit: {formatCurrency(selectedCustomer.current_credit)}</span>
                           )}
                         </FormDescription>
                       )}
@@ -1280,7 +1280,7 @@ export default function CreateOrder() {
                                                         let variantInfo = '';
                                                         if (variantCount > 0) {
                                                           if (variantCount === 1) {
-                                                            variantInfo = ` - ${defaultVariant.name} (₹${defaultVariant.price?.sale_price || 0})`;
+                                                            variantInfo = ` - ${defaultVariant.name} (${formatCurrency(defaultVariant.price?.sale_price || 0)})`;
                                                           } else {
                                                             const prices = variants
                                                               .map((v: any) => v.price?.sale_price || 0)
@@ -1288,14 +1288,14 @@ export default function CreateOrder() {
                                                             const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
                                                             const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
                                                             if (minPrice === maxPrice) {
-                                                              variantInfo = ` - ${variantCount} variants (₹${minPrice})`;
+                                                              variantInfo = ` - ${variantCount} variants (${formatCurrency(minPrice)})`;
                                                             } else {
-                                                              variantInfo = ` - ${variantCount} variants (₹${minPrice}-₹${maxPrice})`;
+                                                              variantInfo = ` - ${variantCount} variants (${formatCurrency(minPrice)}-${formatCurrency(maxPrice)})`;
                                                             }
                                                           }
                                                         } else {
                                                           // Fallback to product-level price if no variants
-                                                          variantInfo = ` - ₹${product.sale_price || product.price || 0}`;
+                                                          variantInfo = ` - ${formatCurrency(product.sale_price || product.price || 0)}`;
                                                         }
                                                         
                                                         const displayText = `${product.name}${variantInfo}`;
@@ -1341,7 +1341,7 @@ export default function CreateOrder() {
                                         <SelectContent>
                                                 {(productVariants[item.product_id] || []).map((variant: any) => (
                                                   <SelectItem key={variant.id} value={variant.id}>
-                                                    {variant.name} {variant.is_default && '(Default)'} - ₹{variant.price?.sale_price || 0}
+                                                    {variant.name} {variant.is_default && '(Default)'} - {formatCurrency(variant.price?.sale_price || 0)}
                                             </SelectItem>
                                           ))}
                                         </SelectContent>
@@ -1437,7 +1437,7 @@ export default function CreateOrder() {
                                       )}
                                     </TableCell>
                                         <TableCell className="font-medium text-sm">
-                                          {item.product_id ? `₹${totalWithTax.toFixed(2)}` : '-'}
+                                          {item.product_id ? formatCurrency(totalWithTax) : '-'}
                                     </TableCell>
                                         <TableCell>
                                       <Button 
@@ -1464,17 +1464,17 @@ export default function CreateOrder() {
                             <div className="space-y-2 min-w-[300px]">
                               <div className="flex justify-between text-sm text-muted-foreground">
                                 <span>Items Total (Incl. Tax & Disc)</span>
-                                <span>₹{(orderTotals?.items?.reduce((sum: number, item: any) => sum + item.line_total, 0) || items.reduce((sum, item) => sum + item.line_total, 0)).toFixed(2)}</span>
+                                <span>{formatCurrency(orderTotals?.items?.reduce((sum: number, item: any) => sum + item.line_total, 0) || items.reduce((sum, item) => sum + item.line_total, 0))}</span>
                               </div>
                               <div className="flex justify-between text-sm py-1 border-b">
                                 <span>Extra Discount (%) - {extraDiscountPct || 0}%</span>
                                 <span className="text-red-500">
-                                  -₹{(orderTotals?.extra_discount_amount || 0).toFixed(2)}
+                                  -{formatCurrency(orderTotals?.extra_discount_amount || 0)}
                                 </span>
                               </div>
                               <div className="flex justify-between text-sm py-1 border-b">
                                 <span>Extra Discount (Fixed)</span>
-                                <span className="text-red-500">-₹{(extraDiscountAmt || 0).toFixed(2)}</span>
+                                <span className="text-red-500">-{formatCurrency(extraDiscountAmt || 0)}</span>
                               </div>
                               
                               <div className="grid grid-cols-2 gap-4 items-center pt-2">
@@ -1493,7 +1493,7 @@ export default function CreateOrder() {
                                   />
                                 </div>
                                 <div className="flex items-center gap-2 ml-auto">
-                                  <span className="text-xs font-medium">Extra Disc ₹:</span>
+                                  <span className="text-xs font-medium">Extra Disc ({getCurrencySymbol()}):</span>
                                   <Input
                                     type="number"
                                     value={extraDiscountAmt || ''}
@@ -1569,7 +1569,7 @@ export default function CreateOrder() {
                                       )}
                                       className="h-7 text-xs flex-1"
                                     />
-                                    <div className="flex bg-muted/30 rounded border pl-2 items-center text-xs">₹
+                                    <div className="flex bg-muted/30 rounded border pl-2 items-center text-xs">{getCurrencySymbol()}
                                       <Input
                                         type="number" min="0" step="0.01"
                                         placeholder="Amt"
@@ -1604,7 +1604,7 @@ export default function CreateOrder() {
                                 {extraCharges.length > 0 && (
                                   <div className="flex justify-between text-xs text-muted-foreground pt-1 border-t">
                                     <span>Total Extra Charges</span>
-                                    <span>+₹{extraCharges.reduce((s, c) => s + (c.amount + (c.amount * (c.tax_percent || 0) / 100)), 0).toFixed(2)}</span>
+                                    <span>+{formatCurrency(extraCharges.reduce((s, c) => s + (c.amount + (c.amount * (c.tax_percent || 0) / 100)), 0))}</span>
                                   </div>
                                 )}
                               </div>
@@ -1614,56 +1614,56 @@ export default function CreateOrder() {
                                 <div className="space-y-1 text-sm border-t pt-2 mt-2">
                                   <div className="flex justify-between text-muted-foreground">
                                     <span>Subtotal</span>
-                                    <span>₹{orderTotals.subtotal.toFixed(2)}</span>
+                                    <span>{formatCurrency(orderTotals.subtotal)}</span>
                                   </div>
                                   {orderTotals.total_discount > 0 && (
                                     <div className="flex justify-between text-muted-foreground">
                                       <span>Total Discount (Item Level)</span>
-                                      <span className="text-red-500">-₹{orderTotals.total_discount.toFixed(2)}</span>
+                                      <span className="text-red-500">-{formatCurrency(orderTotals.total_discount)}</span>
                                     </div>
                                   )}
                                   {orderTotals.extra_discount_amount > 0 && (
                                     <div className="flex justify-between text-muted-foreground">
                                       <span>Extra Discount</span>
-                                      <span className="text-red-500">-₹{orderTotals.extra_discount_amount.toFixed(2)}</span>
+                                      <span className="text-red-500">-{formatCurrency(orderTotals.extra_discount_amount)}</span>
                                     </div>
                                   )}
                                   <div className="flex justify-between text-muted-foreground">
                                     <span>Taxable Amount (After Ext Disc)</span>
-                                    <span>₹{orderTotals.taxable_value.toFixed(2)}</span>
+                                    <span>{formatCurrency(orderTotals.taxable_value)}</span>
                                   </div>
                                   <div className="flex justify-between text-muted-foreground">
                                     <span>Total Item Tax</span>
-                                    <span>₹{orderTotals.total_tax.toFixed(2)}</span>
+                                    <span>{formatCurrency(orderTotals.total_tax)}</span>
                                   </div>
                                   {cdEnabled && orderTotals.cd_amount > 0 && (
                                     <div className="flex justify-between text-blue-600">
                                       <span>Cash Discount Eligibility ({orderTotals.cd_percentage}% — via CN)</span>
-                                      <span>₹{orderTotals.cd_amount.toFixed(2)}</span>
+                                      <span>{formatCurrency(orderTotals.cd_amount)}</span>
                                     </div>
                                   )}
                                   {orderTotals.total_extra_charges > 0 && (
                                     <div className="flex justify-between text-orange-600">
                                       <span>Extra Charges</span>
-                                      <span>+₹{orderTotals.total_extra_charges.toFixed(2)}</span>
+                                      <span>+{formatCurrency(orderTotals.total_extra_charges)}</span>
                                     </div>
                                   )}
                                   {orderTotals.round_off_amount !== 0 && (
                                     <div className="flex justify-between text-muted-foreground">
                                       <span>Round Off</span>
-                                      <span>{orderTotals.round_off_amount > 0 ? '+' : ''}₹{orderTotals.round_off_amount.toFixed(2)}</span>
+                                      <span>{orderTotals.round_off_amount > 0 ? '+' : ''}{formatCurrency(orderTotals.round_off_amount)}</span>
                                     </div>
                                   )}
                                   <div className="flex justify-between font-medium border-t pt-1 bg-muted/30 px-1 rounded">
                                     <span>Total</span>
-                                    <span>₹{orderTotals.total_amount.toFixed(2)}</span>
+                                    <span>{formatCurrency(orderTotals.total_amount)}</span>
                                   </div>
                                 </div>
                               )}
 
                               <div className="flex justify-between font-bold text-lg border-t pt-2">
                                 <span>Grand Total:</span>
-                                <span>₹{totalAmount.toFixed(2)}</span>
+                                <span>{formatCurrency(totalAmount)}</span>
                               </div>
                             </div>
                           </div>
@@ -2144,7 +2144,7 @@ export default function CreateOrder() {
                                       />
                           </FormControl>
                                   <FormDescription className="text-xs sm:text-sm">
-                                      Enter the amount to be paid now. Remaining ₹ {(totalAmount - (field.value || 0)).toFixed(2)} will be on credit.
+                                      Enter the amount to be paid now. Remaining {formatCurrency(totalAmount - (field.value || 0))} will be on credit.
                                     </FormDescription>
                                   <FormMessage className="text-xs" />
                         </FormItem>
@@ -2216,18 +2216,18 @@ export default function CreateOrder() {
                               </div>
                               <div className="flex justify-between font-medium">
                                 <span>Total Amount:</span>
-                                <span>₹ {totalAmount.toFixed(2)}</span>
+                                <span>{formatCurrency(totalAmount)}</span>
                               </div>
                               
                               {paymentStatus === 'partial_payment' && (
                                 <>
                                   <div className="flex justify-between">
                                     <span>Paying Now:</span>
-                                    <span>₹ {form.getValues('partial_payment_amount')?.toFixed(2) || '0.00'}</span>
+                                    <span>{formatCurrency(form.getValues('partial_payment_amount') || 0)}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span>On Credit:</span>
-                                    <span>₹ {(totalAmount - (form.getValues('partial_payment_amount') || 0)).toFixed(2)}</span>
+                                    <span>{formatCurrency(totalAmount - (form.getValues('partial_payment_amount') || 0))}</span>
                                   </div>
                                 </>
                               )}
@@ -2240,7 +2240,7 @@ export default function CreateOrder() {
                               {paymentStatus === 'full_credit' && (
                                 <div className="flex justify-between">
                                   <span>On Credit:</span>
-                                  <span>₹ {totalAmount.toFixed(2)}</span>
+                                  <span>{formatCurrency(totalAmount)}</span>
                                 </div>
                               )}
                               

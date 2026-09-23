@@ -37,12 +37,21 @@ const loginSchema = z.object({
 });
 
 const registerSchema = z.object({
+  customerType: z.enum(['individual', 'business']).default('individual'),
   firstName: z.string().min(2, { message: 'First name must be at least 2 characters' }),
   lastName: z.string().min(2, { message: 'Last name must be at least 2 characters' }),
   email: z.string().email({ message: 'Please enter a valid email address' }),
   phone: z.string().optional(),
   password: z.string().min(6, { message: 'Password must be at least 6 characters' }),
   confirmPassword: z.string(),
+  legalBusinessName: z.string().optional(),
+  trnNumber: z.string().optional(),
+  taxId: z.string().optional(),
+  businessAddress: z.string().optional(),
+  businessCity: z.string().optional(),
+  businessState: z.string().optional(),
+  businessPostalCode: z.string().optional(),
+  businessCountry: z.string().optional(),
 }).refine((data) => data.password === data.confirmPassword, {
   message: 'Passwords do not match',
   path: ['confirmPassword'],
@@ -65,14 +74,25 @@ const Auth = () => {
   const registerForm = useForm<z.infer<typeof registerSchema>>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
+      customerType: 'individual',
       firstName: '',
       lastName: '',
       email: '',
       phone: '',
       password: '',
       confirmPassword: '',
+      legalBusinessName: '',
+      trnNumber: '',
+      taxId: '',
+      businessAddress: '',
+      businessCity: '',
+      businessState: '',
+      businessPostalCode: '',
+      businessCountry: 'India',
     },
   });
+
+  const selectedCustomerType = registerForm.watch('customerType');
 
   const onLoginSubmit = async (values: z.infer<typeof loginSchema>) => {
     setIsSubmitting(true);
@@ -90,7 +110,24 @@ const Auth = () => {
     setIsSubmitting(true);
     setAuthError(null);
     try {
-      await signUp(values.email, values.password, values.firstName, values.lastName, values.phone);
+      await signUp(
+        values.email,
+        values.password,
+        values.firstName,
+        values.lastName,
+        values.phone || '',
+        {
+          customer_type: values.customerType,
+          legal_business_name: values.legalBusinessName || undefined,
+          trn_number: values.trnNumber || undefined,
+          tax_id: values.taxId || undefined,
+          business_address: values.businessAddress || undefined,
+          business_city: values.businessCity || undefined,
+          business_state: values.businessState || undefined,
+          business_postal_code: values.businessPostalCode || undefined,
+          business_country: values.businessCountry || undefined,
+        }
+      );
       setActiveTab('login');
       registerForm.reset();
     } catch (error: any) {
@@ -178,7 +215,7 @@ const Auth = () => {
               <CardHeader>
                 <CardTitle>Create an account</CardTitle>
                 <CardDescription>
-                  Enter your information to create a new account
+                  Select your account type and enter your details
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -189,6 +226,42 @@ const Auth = () => {
                 )}
                 <Form {...registerForm}>
                   <form onSubmit={registerForm.handleSubmit(onRegisterSubmit)} className="space-y-4">
+                    
+                    {/* Account Type Selector */}
+                    <FormField
+                      control={registerForm.control}
+                      name="customerType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm font-semibold">Account Type</FormLabel>
+                          <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-lg">
+                            <button
+                              type="button"
+                              className={`py-2 px-3 text-xs font-semibold rounded-md transition-all ${
+                                field.value === 'individual'
+                                  ? 'bg-white shadow-sm text-primary'
+                                  : 'text-gray-500 hover:text-gray-900'
+                              }`}
+                              onClick={() => field.onChange('individual')}
+                            >
+                              👤 Individual Customer
+                            </button>
+                            <button
+                              type="button"
+                              className={`py-2 px-3 text-xs font-semibold rounded-md transition-all ${
+                                field.value === 'business'
+                                  ? 'bg-white shadow-sm text-primary'
+                                  : 'text-gray-500 hover:text-gray-900'
+                              }`}
+                              onClick={() => field.onChange('business')}
+                            >
+                              🏢 Business Account
+                            </button>
+                          </div>
+                        </FormItem>
+                      )}
+                    />
+
                     <div className="grid grid-cols-2 gap-4">
                       <FormField
                         control={registerForm.control}
@@ -217,6 +290,7 @@ const Auth = () => {
                         )}
                       />
                     </div>
+
                     <FormField
                       control={registerForm.control}
                       name="email"
@@ -230,6 +304,7 @@ const Auth = () => {
                         </FormItem>
                       )}
                     />
+
                     <FormField
                       control={registerForm.control}
                       name="phone"
@@ -243,6 +318,96 @@ const Auth = () => {
                         </FormItem>
                       )}
                     />
+
+                    {/* Conditional Business Profile Inputs (Optional) */}
+                    {selectedCustomerType === 'business' && (
+                      <div className="border border-blue-100 bg-blue-50/50 rounded-lg p-4 space-y-3 mt-2">
+                        <div className="text-xs font-bold text-blue-900 flex items-center gap-1.5 mb-1">
+                          🏢 Business Profile Details (Optional)
+                        </div>
+
+                        <FormField
+                          control={registerForm.control}
+                          name="legalBusinessName"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs">Legal Business Name</FormLabel>
+                              <FormControl>
+                                <Input placeholder="Acme Enterprises LLC" className="bg-white text-xs h-9" {...field} />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <FormField
+                            control={registerForm.control}
+                            name="trnNumber"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-xs">TRN Number</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="100XXXXXXXXX" className="bg-white text-xs h-9" {...field} />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={registerForm.control}
+                            name="taxId"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-xs">GST / VAT Number</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="09XXXXX1234X1Z5" className="bg-white text-xs h-9" {...field} />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <FormField
+                          control={registerForm.control}
+                          name="businessAddress"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs">Business Street Address</FormLabel>
+                              <FormControl>
+                                <Input placeholder="Suite 404, Tech Park" className="bg-white text-xs h-9" {...field} />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <FormField
+                            control={registerForm.control}
+                            name="businessCity"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-xs">City</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="Mumbai" className="bg-white text-xs h-9" {...field} />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={registerForm.control}
+                            name="businessState"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-xs">State / Province</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="Maharashtra" className="bg-white text-xs h-9" {...field} />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     <FormField
                       control={registerForm.control}
                       name="password"

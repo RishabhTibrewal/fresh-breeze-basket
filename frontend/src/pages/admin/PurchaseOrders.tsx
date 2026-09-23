@@ -43,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatCurrency } from "@/lib/utils";
 
 export default function PurchaseOrders() {
   const navigate = useNavigate();
@@ -255,7 +256,7 @@ export default function PurchaseOrders() {
                           {new Date(po.order_date || po.created_at).toLocaleDateString()}
                         </TableCell>
                         <TableCell className="font-medium">
-                          ₹{po.total_amount.toFixed(2)}
+                          {formatCurrency(po.total_amount)}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2 min-w-[120px]">

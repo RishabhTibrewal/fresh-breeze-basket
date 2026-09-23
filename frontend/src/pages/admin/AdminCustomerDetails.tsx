@@ -41,6 +41,7 @@ import { customerService } from '@/api/customer';
 import { ErrorMessage } from '@/components/ui/error-message';
 import { partiesService } from '@/api/parties';
 import { invoicesService } from '@/api/invoices';
+import { formatCurrency } from '@/lib/utils';
 
 export default function AdminCustomerDetails() {
   const { id: customerOrUserId } = useParams<{ id: string }>();
@@ -432,14 +433,14 @@ export default function AdminCustomerDetails() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <div className="min-w-0">
                       <p className="text-xs sm:text-sm text-muted-foreground">Credit Limit</p>
-                      <p className="font-medium text-sm sm:text-base">₹ {customer.credit_limit?.toFixed(2) || '0.00'}</p>
+                      <p className="font-medium text-sm sm:text-base">{formatCurrency(customer.credit_limit || 0)}</p>
                     </div>
                     <div className="min-w-0">
                       <p className="text-xs sm:text-sm text-muted-foreground">Current Credit</p>
                       <p className={`font-medium text-sm sm:text-base ${
                         customer.current_credit > 0 ? 'text-orange-600' : 'text-green-600'
                       }`}>
-                        ₹ {customer.current_credit?.toFixed(2) || '0.00'}
+                        {formatCurrency(customer.current_credit || 0)}
                       </p>
                     </div>
                   </div>
@@ -455,7 +456,7 @@ export default function AdminCustomerDetails() {
                       <p className={`font-medium text-sm sm:text-base ${
                         (customer.credit_limit - customer.current_credit) < 0 ? 'text-red-600' : 'text-green-600'
                       }`}>
-                        ₹ {Math.max(0, customer.credit_limit - customer.current_credit).toFixed(2)}
+                        {formatCurrency(Math.max(0, customer.credit_limit - customer.current_credit))}
                       </p>
                     </div>
                   )}
@@ -479,7 +480,7 @@ export default function AdminCustomerDetails() {
                   
                   <div className="min-w-0">
                     <p className="text-xs sm:text-sm text-muted-foreground">Total Spent</p>
-                    <p className="font-medium text-base sm:text-lg">₹ {customer.totalSpent?.toFixed(2) || '0.00'}</p>
+                    <p className="font-medium text-base sm:text-lg">{formatCurrency(customer.totalSpent || 0)}</p>
                   </div>
                   
                   {customer.lastOrder && (
@@ -588,7 +589,7 @@ export default function AdminCustomerDetails() {
                                 <div className={`text-base font-semibold mb-1 ${
                                   period.amount > 0 ? 'text-orange-600' : 'text-green-600'
                                 }`}>
-                                  ₹ {period.amount?.toFixed(2) || '0.00'}
+                                  {formatCurrency(period.amount || 0)}
                                 </div>
                               </div>
                             </div>
@@ -665,7 +666,7 @@ export default function AdminCustomerDetails() {
                                 <span className={`font-medium text-xs sm:text-sm ${
                                   period.amount > 0 ? 'text-orange-600' : 'text-green-600'
                                 }`}>
-                                  ₹ {period.amount?.toFixed(2) || '0.00'}
+                                  {formatCurrency(period.amount || 0)}
                                 </span>
                               </TableCell>
                               <TableCell className={`px-2 py-2 text-xs sm:text-sm ${isExpired ? 'text-red-700' : ''}`}>
@@ -733,7 +734,7 @@ export default function AdminCustomerDetails() {
                           <div className="flex items-start justify-between gap-2 min-w-0">
                             <div className="flex-1 min-w-0">
                               <div className="text-base font-bold text-green-600 mb-1">
-                                ₹ {payment.amount?.toFixed(2) || '0.00'}
+                                {formatCurrency(payment.amount || 0)}
                               </div>
                               <div className="text-xs text-muted-foreground mb-2">
                                 Payment ID: {payment.id.substring(0, 8)}...
@@ -807,7 +808,7 @@ export default function AdminCustomerDetails() {
                             </TableCell>
                             <TableCell className="px-2 py-2">
                               <span className="font-medium text-xs sm:text-sm">
-                                ₹ {payment.amount?.toFixed(2) || '0.00'}
+                                {formatCurrency(payment.amount || 0)}
                               </span>
                             </TableCell>
                             <TableCell className="px-2 py-2 text-xs sm:text-sm">
@@ -867,7 +868,7 @@ export default function AdminCustomerDetails() {
                           <div className="flex items-start justify-between gap-2 min-w-0">
                             <div className="flex-1 min-w-0">
                               <div className="text-base font-bold text-orange-600 mb-1">
-                                ₹ {cn.total_amount?.toFixed(2) || cn.amount?.toFixed(2) || '0.00'}
+                                {formatCurrency(cn.total_amount || cn.amount || 0)}
                               </div>
                               <div className="text-xs font-medium mb-1">
                                 {cn.cn_number}
@@ -919,7 +920,7 @@ export default function AdminCustomerDetails() {
                               {cn.reason?.replace(/_/g, ' ') || 'N/A'}
                             </TableCell>
                             <TableCell className="px-2 py-2 font-bold text-orange-600">
-                              ₹ {cn.total_amount?.toFixed(2) || cn.amount?.toFixed(2) || '0.00'}
+                              {formatCurrency(cn.total_amount || cn.amount || 0)}
                             </TableCell>
                             <TableCell className="px-2 py-2">
                               <Badge variant={
@@ -966,7 +967,7 @@ export default function AdminCustomerDetails() {
                                   Order #{order.id.split('-')[0]}
                                 </div>
                                 <div className="text-base font-bold text-green-600 mb-2">
-                                  ₹ {order.total_amount?.toFixed(2) || '0.00'}
+                                  {formatCurrency(order.total_amount || 0)}
                                 </div>
                               </div>
                               <div className="flex flex-col gap-1.5 flex-shrink-0">
@@ -1019,7 +1020,7 @@ export default function AdminCustomerDetails() {
                               </TableCell>
                               <TableCell className="px-2 py-2">
                                 <span className="font-medium text-xs sm:text-sm">
-                                  ₹ {order.total_amount?.toFixed(2) || '0.00'}
+                                  {formatCurrency(order.total_amount || 0)}
                                 </span>
                               </TableCell>
                               <TableCell className="px-2 py-2">
@@ -1130,11 +1131,11 @@ export default function AdminCustomerDetails() {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="rounded-lg border p-3">
                         <p className="text-xs text-muted-foreground">Total Receivable</p>
-                        <p className="text-base font-semibold text-orange-600">₹ {partyLedger.totals.totalReceivable.toFixed(2)}</p>
+                        <p className="text-base font-semibold text-orange-600">{formatCurrency(partyLedger.totals.totalReceivable)}</p>
                       </div>
                       <div className="rounded-lg border p-3">
                         <p className="text-xs text-muted-foreground">Total Payable</p>
-                        <p className="text-base font-semibold text-blue-600">₹ {partyLedger.totals.totalPayable.toFixed(2)}</p>
+                        <p className="text-base font-semibold text-blue-600">{formatCurrency(partyLedger.totals.totalPayable)}</p>
                       </div>
                       <div className="rounded-lg border p-3">
                         <p className="text-xs text-muted-foreground">Net Position</p>
@@ -1142,7 +1143,7 @@ export default function AdminCustomerDetails() {
                           partyLedger.totals.netPosition > 0 ? 'text-green-600' :
                           partyLedger.totals.netPosition < 0 ? 'text-red-600' : 'text-muted-foreground'
                         }`}>
-                          ₹ {partyLedger.totals.netPosition.toFixed(2)}
+                          {formatCurrency(partyLedger.totals.netPosition)}
                         </p>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {partyLedger.totals.netPosition > 0 ? 'They owe us' :
@@ -1187,7 +1188,7 @@ export default function AdminCustomerDetails() {
                                 <span className={`font-medium text-xs sm:text-sm ${
                                   entry.ledger_side === 'receivable' ? 'text-orange-600' : 'text-blue-600'
                                 }`}>
-                                  ₹ {Number(entry.amount).toFixed(2)}
+                                  {formatCurrency(Number(entry.amount))}
                                 </span>
                               </TableCell>
                               <TableCell className="px-2 py-2">

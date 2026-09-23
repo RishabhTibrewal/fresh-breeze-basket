@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import type { NavigateFunction } from 'react-router-dom';
 import { Doughnut } from 'react-chartjs-2';
 import {
   Download,
@@ -21,7 +22,7 @@ import type {
   CashierPerformanceRow,
   SalesReturnsRow,
 } from '@/api/reports';
-import type { NavigateFunction } from 'react-router-dom';
+import { formatCurrency } from '@/lib/utils';
 
 interface Props {
   hourlyHeatmapQuery: UseQueryResult<ReportResponse<HourlyHeatmapRow>, Error>;
@@ -39,7 +40,7 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const PIE_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
 
-const formatPrice = (p: number) => `₹${p.toFixed(2)}`;
+const formatPrice = (p: number) => formatCurrency(p);
 
 function formatHour(h: number) {
   const hr = h % 12 === 0 ? 12 : h % 12;

@@ -28,6 +28,7 @@ import { handleApiError } from '@/utils/errorHandler';
 import { StatusBadge } from '@/components/procurement/StatusBadge';
 import { ProcurementWorkflow } from '@/components/procurement/ProcurementWorkflow';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { formatCurrency } from '@/lib/utils';
 
 export default function PurchaseInvoiceDetail() {
   const { id } = useParams<{ id: string }>();
@@ -308,11 +309,11 @@ export default function PurchaseInvoiceDetail() {
                           <TableCell className="text-sm">{item.hsn_code || '-'}</TableCell>
                           <TableCell className="text-sm">{item.quantity}</TableCell>
                           <TableCell className="text-sm">{item.unit || '-'}</TableCell>
-                          <TableCell className="text-sm">₹{item.unit_price?.toFixed(2) || '0.00'}</TableCell>
+                          <TableCell className="text-sm">{formatCurrency(item.unit_price || 0)}</TableCell>
                           <TableCell className="text-sm">{item.tax_percentage ? `${item.tax_percentage}%` : '-'}</TableCell>
                           <TableCell className="text-sm">{item.discount_percentage ? `${item.discount_percentage}%` : '-'}</TableCell>
-                          <TableCell className="text-sm">₹{item.tax_amount?.toFixed(2) || '0.00'}</TableCell>
-                          <TableCell className="font-medium text-sm">₹{item.line_total?.toFixed(2) || '0.00'}</TableCell>
+                          <TableCell className="text-sm">{formatCurrency(item.tax_amount || 0)}</TableCell>
+                          <TableCell className="font-medium text-sm">{formatCurrency(item.line_total || 0)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -355,7 +356,7 @@ export default function PurchaseInvoiceDetail() {
                           {new Date(payment.payment_date).toLocaleDateString()}
                         </TableCell>
                         <TableCell>{payment.payment_method}</TableCell>
-                        <TableCell className="font-medium">₹{payment.amount.toFixed(2)}</TableCell>
+                        <TableCell className="font-medium">{formatCurrency(payment.amount)}</TableCell>
                         <TableCell>
                           <StatusBadge status={payment.status} />
                         </TableCell>
@@ -381,36 +382,36 @@ export default function PurchaseInvoiceDetail() {
             <CardContent className="space-y-3">
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">Subtotal:</span>
-                <span className="font-medium">₹{invoice.subtotal.toFixed(2)}</span>
+                <span className="font-medium">{formatCurrency(invoice.subtotal)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">Tax:</span>
-                <span className="font-medium">₹{invoice.total_tax.toFixed(2)}</span>
+                <span className="font-medium">{formatCurrency(invoice.total_tax)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">Item Discount:</span>
-                <span className="font-medium">₹{(invoice.total_discount - (invoice.extra_discount_amount || 0)).toFixed(2)}</span>
+                <span className="font-medium">{formatCurrency(invoice.total_discount - (invoice.extra_discount_amount || 0))}</span>
               </div>
               {(invoice.extra_discount_amount > 0 || invoice.extra_discount_percentage > 0) && (
                 <div className="flex justify-between text-green-600 italic">
                   <span className="text-sm">
                     Extra Discount {invoice.extra_discount_percentage > 0 ? `(${invoice.extra_discount_percentage}%)` : ''}:
                   </span>
-                  <span className="font-medium">-₹{invoice.extra_discount_amount?.toFixed(2) || '0.00'}</span>
+                  <span className="font-medium">-{formatCurrency(invoice.extra_discount_amount || 0)}</span>
                 </div>
               )}
               <div className="border-t pt-3 flex justify-between">
                 <span className="font-bold">Grand Total:</span>
-                <span className="font-bold text-lg">₹{invoice.total_amount.toFixed(2)}</span>
+                <span className="font-bold text-lg">{formatCurrency(invoice.total_amount)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">Paid Amount:</span>
-                <span className="font-medium text-green-600">₹{invoice.paid_amount.toFixed(2)}</span>
+                <span className="font-medium text-green-600">{formatCurrency(invoice.paid_amount)}</span>
               </div>
               <div className="border-t pt-3 flex justify-between">
                 <span className="font-bold">Balance:</span>
                 <span className={`font-bold text-lg ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                  ₹{balance.toFixed(2)}
+                  {formatCurrency(balance)}
                 </span>
               </div>
               <div className="pt-2">

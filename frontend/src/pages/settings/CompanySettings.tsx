@@ -38,6 +38,7 @@ const companySchema = z.object({
   state: z.string().optional().or(z.literal('')),
   postal_code: z.string().optional().or(z.literal('')),
   country: z.string().default('India'),
+  currency: z.string().default('INR'),
   bank_details: z.array(z.object({
     bank_name: z.string().min(1, 'Bank name is required'),
     account_holder_name: z.string().min(1, 'Account holder name is required'),
@@ -75,6 +76,7 @@ export default function CompanySettings() {
       state: '',
       postal_code: '',
       country: 'India',
+      currency: 'INR',
       bank_details: [],
       logo_url: '',
       payment_upi_id: '',
@@ -102,6 +104,7 @@ export default function CompanySettings() {
         state: company.state || '',
         postal_code: company.postal_code || '',
         country: company.country || 'India',
+        currency: company.currency || 'INR',
         bank_details: (company.bank_details as any) || [],
         logo_url: company.logo_url || '',
         payment_upi_id: company.payment_upi_id || '',
@@ -207,22 +210,48 @@ export default function CompanySettings() {
                   />
                 </div>
 
-                <FormField
-                  control={form.control}
-                  name="gstin"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>GSTIN / Tax ID</FormLabel>
-                      <FormControl>
-                        <div className="relative">
-                          <FileText className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                          <Input placeholder="09XXXXX1234X1Z5" className="pl-9" {...field} />
-                        </div>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="gstin"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>GSTIN / Tax ID</FormLabel>
+                        <FormControl>
+                          <div className="relative">
+                            <FileText className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input placeholder="09XXXXX1234X1Z5" className="pl-9" {...field} />
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="currency"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Operating Currency</FormLabel>
+                        <FormControl>
+                          <select
+                            {...field}
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <option value="INR">INR (₹) - Indian Rupee</option>
+                            <option value="AED">AED (AED) - UAE Dirham</option>
+                            <option value="USD">USD ($) - US Dollar</option>
+                            <option value="EUR">EUR (€) - Euro</option>
+                            <option value="GBP">GBP (£) - British Pound</option>
+                            <option value="SAR">SAR (SAR) - Saudi Riyal</option>
+                          </select>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
               </CardContent>
             </Card>
 

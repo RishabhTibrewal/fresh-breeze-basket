@@ -25,6 +25,7 @@ export interface Company {
   website_url?: string;
   website_qr_code_url?: string;
   invoice_custom_message?: string;
+  currency?: string;
 }
 
 export const companyService = {

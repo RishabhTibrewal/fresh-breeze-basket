@@ -40,6 +40,7 @@ import PosAnalyticsBatchAWidgets from './PosAnalyticsBatchAWidgets';
 import PosAnalyticsBatchBWidgets from './PosAnalyticsBatchBWidgets';
 import PosAnalyticsBatchCWidgets from './PosAnalyticsBatchCWidgets';
 import MenuManagement from './MenuManagement';
+import { formatCurrency, getCurrencySymbol } from '@/lib/utils';
 import { posMenusApi, type ActiveMenu } from '@/api/posMenus';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
@@ -97,7 +98,7 @@ interface SplitPayment {
 
 const genId = () => Math.random().toString(36).substring(2, 10);
 
-const formatPrice = (p: number) => `₹${p.toFixed(2)}`;
+const formatPrice = (p: number) => formatCurrency(p);
 const normalizePaymentStatus = (status?: string) => {
   switch ((status || '').toLowerCase()) {
     case 'paid':
@@ -3018,7 +3019,7 @@ export default function CreatePOSOrder() {
               <div>
                 <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 block">Opening Cash</label>
                 <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">₹</span>
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">{getCurrencySymbol()}</span>
                   <input
                     id="openingCash"
                     type="number"
@@ -3191,7 +3192,7 @@ export default function CreatePOSOrder() {
               </div>
             </div>
             <div className="relative mb-4">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">₹</span>
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">{getCurrencySymbol()}</span>
               <input
                 autoFocus
                 type="number"
@@ -3598,7 +3599,7 @@ export default function CreatePOSOrder() {
                       <div>
                         <label className="text-xs text-gray-400 mb-1.5 block">Cash Tendered</label>
                         <div className="relative">
-                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">₹</span>
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">{getCurrencySymbol()}</span>
                           <input
                             autoFocus
                             type="number"
@@ -3619,7 +3620,7 @@ export default function CreatePOSOrder() {
                                 onClick={() => setCashTendered(amt.toString())}
                                 className="py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-gray-300 font-medium transition-colors"
                               >
-                                ₹{amt}
+                                {formatCurrency(amt)}
                               </button>
                             ))}
                         </div>

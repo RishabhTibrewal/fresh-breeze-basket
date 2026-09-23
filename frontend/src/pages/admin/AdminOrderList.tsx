@@ -26,6 +26,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { Card, CardContent } from '@/components/ui/card';
+import { formatCurrency } from '@/lib/utils';
 
 export default function AdminOrderList() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -315,12 +316,7 @@ export default function AdminOrderList() {
                       {(order as any).order_source || 'ecommerce'}
                     </Badge>
                   </TableCell>
-                  <TableCell>
-                  ₹ {typeof order.total_amount === 'number' 
-                      ? order.total_amount.toFixed(2) 
-                      : '0.00'
-                    }
-                  </TableCell>
+                  <TableCell>{formatCurrency(order.total_amount || 0)}</TableCell>
                   <TableCell>{formatDate(order.created_at)}</TableCell>
                   <TableCell className="text-right">
                     <Link to={`/sales/orders/${order.id}`}>

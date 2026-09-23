@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatCurrency } from '@/lib/utils';
 
 export default function CreateSupplierPayment() {
   const navigate = useNavigate();
@@ -155,8 +156,8 @@ export default function CreateSupplierPayment() {
                     <SelectContent>
                       {invoices.map((invoice: any) => (
                         <SelectItem key={invoice.id} value={invoice.id}>
-                          {invoice.invoice_number} - ₹{invoice.total_amount.toFixed(2)} 
-                          {' '}(Balance: ₹{(invoice.total_amount - invoice.paid_amount).toFixed(2)})
+                          {invoice.invoice_number} - {formatCurrency(invoice.total_amount)} 
+                          {' '}(Balance: {formatCurrency(invoice.total_amount - invoice.paid_amount)})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -280,16 +281,16 @@ export default function CreateSupplierPayment() {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Total Amount</p>
-                    <p className="font-medium">₹{selectedInvoice.total_amount.toFixed(2)}</p>
+                    <p className="font-medium">{formatCurrency(selectedInvoice.total_amount)}</p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Paid Amount</p>
-                    <p className="font-medium">₹{selectedInvoice.paid_amount.toFixed(2)}</p>
+                    <p className="font-medium">{formatCurrency(selectedInvoice.paid_amount)}</p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Balance</p>
                     <p className="font-medium">
-                      ₹{(selectedInvoice.total_amount - selectedInvoice.paid_amount).toFixed(2)}
+                      {formatCurrency(selectedInvoice.total_amount - selectedInvoice.paid_amount)}
                     </p>
                   </div>
                 </CardContent>

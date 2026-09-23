@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import apiClient from '@/lib/apiClient';
 import { posMenusApi, type PosMenu, type UpsertMenuItemInput } from '@/api/posMenus';
 import { inventoryService, type PosPoolItem } from '@/api/inventory';
+import { formatCurrency } from '@/lib/utils';
 import type { Warehouse as WarehouseType } from '@/api/warehouses';
 
 interface Props {
@@ -876,11 +877,11 @@ export default function MenuManagement({ warehouses }: Props) {
                                     step="0.01"
                                     value={d.pos_price}
                                     onChange={e => setPosPrice(v.variant_id, e.target.value)}
-                                    placeholder={`₹${v.default_price.toFixed(2)}`}
+                                    placeholder={formatCurrency(v.default_price)}
                                     className="w-full text-right bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
                                   />
                                 ) : (
-                                  <span className="text-xs text-gray-500">₹{v.default_price.toFixed(2)}</span>
+                                  <span className="text-xs text-gray-500">{formatCurrency(v.default_price)}</span>
                                 )}
                               </div>
 

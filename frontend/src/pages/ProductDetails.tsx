@@ -364,7 +364,7 @@ const ProductDetails = () => {
                                 
                 <div className="mt-6 flex items-center text-gray-600">
                   <ShoppingCart className="h-5 w-5 mr-2" />
-                  Free delivery for orders over ₹ 100
+                  Free delivery for orders over {formatCurrency(100)}
                 </div>
               </div>
             </div>

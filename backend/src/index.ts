@@ -89,6 +89,8 @@ import modifiersRouter from './routes/modifiers';
 import collectionsRouter from './routes/collections';
 import reportsRouter from './routes/reports';
 import creditNotesRouter from './routes/creditNotes';
+import deliveryRouter from './routes/delivery';
+import pushNotificationsRouter from './routes/pushNotifications';
 import { initMVRefreshScheduler } from './utils/refreshMaterialisedViews';
 import { exportRateLimiter } from './middleware/exportRateLimiter';
 
@@ -253,6 +255,8 @@ app.use('/api/modifiers', modifiersRouter);
 app.use('/api/collections', collectionsRouter);
 app.use('/api/quotations', quotationRoutes);
 app.use('/api/credit-notes', creditNotesRouter);
+app.use('/api/delivery', deliveryRouter);
+app.use('/api/notifications', pushNotificationsRouter);
 // Reports — apply export rate limiter before the router
 app.use('/api/reports', exportRateLimiter, reportsRouter);
 

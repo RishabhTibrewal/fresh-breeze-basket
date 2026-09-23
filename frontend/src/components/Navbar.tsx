@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { useCart } from '@/contexts/CartContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCategory } from '@/contexts/CategoryContext';
+import { useCompanyCurrency } from '@/hooks/useCompanyCurrency';
 import CartDrawer from '@/components/cart/CartDrawer';
 import CategoryDrawer from '@/components/category/CategoryDrawer';
 import { UserNav } from './user/UserNav';
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const Navbar = () => {
+  useCompanyCurrency();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const { state, setIsCartOpen } = useCart();
   const { user } = useAuth();

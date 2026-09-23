@@ -42,6 +42,8 @@ export interface CreateOrderData {
   paymentIntentId?: string;
   customerId?: string | null;
   extraDiscountPercentage?: number;
+  deliverySlot?: string | null;
+  deliveryDate?: string | null;
 }
 
 /**
@@ -81,6 +83,8 @@ export class OrderService {
         totalAmount,
         notes,
         paymentIntentId,
+        deliverySlot,
+        deliveryDate,
       } = data;
 
       const {
@@ -222,6 +226,8 @@ export class OrderService {
           payment_method: paymentMethod,
           payment_status: paymentStatus,
           payment_intent_id: paymentIntentId || null,
+          delivery_slot: deliverySlot || null,
+          delivery_date: deliveryDate || null,
           status: status || (['cash_counter', 'pickup'].includes(fulfillmentType) ? 'delivered' : 'pending'),
           notes: notes || null,
           inventory_updated: orderSource === 'pos',

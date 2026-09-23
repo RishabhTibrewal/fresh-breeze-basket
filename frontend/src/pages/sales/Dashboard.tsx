@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { authService } from '@/api/auth';
 import { ordersService } from '@/api/orders';
+import { formatCurrency } from '@/lib/utils';
 import {
   Users,
   ShoppingCart,
@@ -102,7 +103,7 @@ const SalesDashboard = () => {
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹{data?.totalCredit?.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{formatCurrency(data?.totalCredit || 0)}</div>
           </CardContent>
         </Card>
 
@@ -136,7 +137,7 @@ const SalesDashboard = () => {
                   <div className="text-sm text-gray-500">Order #{order.id}</div>
                 </div>
                 <div className="text-right">
-                  <div className="font-medium">₹{order.amount}</div>
+                  <div className="font-medium">{formatCurrency(order.amount)}</div>
                   <div className={`text-sm ${
                     order.status === 'completed' ? 'text-green-600' :
                     order.status === 'processing' ? 'text-blue-600' :

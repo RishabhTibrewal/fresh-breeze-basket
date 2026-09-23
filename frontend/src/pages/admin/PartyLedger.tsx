@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ArrowLeft, DollarSign, Printer } from 'lucide-react';
 import { invoicesService } from '@/api/invoices';
+import { formatCurrency } from '@/lib/utils';
 
 export default function PartyLedger() {
   const { id } = useParams<{ id: string }>();
@@ -100,7 +101,7 @@ export default function PartyLedger() {
           </CardHeader>
           <CardContent>
             <div className="text-lg sm:text-xl font-semibold text-orange-600">
-              ₹{totals.totalReceivable.toFixed(2)}
+              {formatCurrency(totals.totalReceivable)}
             </div>
           </CardContent>
         </Card>
@@ -113,7 +114,7 @@ export default function PartyLedger() {
           </CardHeader>
           <CardContent>
             <div className="text-lg sm:text-xl font-semibold text-blue-600">
-              ₹{totals.totalPayable.toFixed(2)}
+              {formatCurrency(totals.totalPayable)}
             </div>
           </CardContent>
         </Card>
@@ -126,7 +127,7 @@ export default function PartyLedger() {
           </CardHeader>
           <CardContent>
             <div className="text-lg sm:text-xl font-semibold">
-              ₹{Math.abs(totals.netPosition).toFixed(2)}
+              {formatCurrency(Math.abs(totals.netPosition))}
             </div>
             <p className="text-xs sm:text-sm text-muted-foreground mt-1">
               {totals.netPosition > 0
@@ -208,10 +209,10 @@ export default function PartyLedger() {
                       </TableCell>
                       <TableCell className="capitalize">{entry.doc_type.replace(/_/g, ' ')}</TableCell>
                       <TableCell className="text-orange-600 font-medium">
-                        {isDebit ? `₹${amt.toFixed(2)}` : '-'}
+                        {isDebit ? formatCurrency(amt) : '-'}
                       </TableCell>
                       <TableCell className="text-blue-600 font-medium">
-                        {isCredit ? `₹${amt.toFixed(2)}` : '-'}
+                        {isCredit ? formatCurrency(amt) : '-'}
                       </TableCell>
                       <TableCell className="capitalize">{entry.status}</TableCell>
                     </TableRow>

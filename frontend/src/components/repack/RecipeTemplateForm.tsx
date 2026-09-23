@@ -21,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { repackService, CreateRecipeTemplatePayload } from '@/api/repackService';
 import { ProductVariantCombobox } from '@/components/products/ProductVariantCombobox';
+import { getCurrencySymbol } from '@/lib/utils';
 
 const recipeFormSchema = z.object({
   name: z.string().min(1, "Recipe name is required"),
@@ -335,7 +336,7 @@ export default function RecipeTemplateForm() {
                         name={`outputs.${index}.additional_cost_per_unit`}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-xs">Addl. Cost (₹)</FormLabel>
+                            <FormLabel className="text-xs">Addl. Cost ({getCurrencySymbol()})</FormLabel>
                             <FormControl>
                               <Input type="number" step="0.01" className="font-mono" {...field} />
                             </FormControl>

@@ -38,6 +38,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Progress } from "@/components/ui/progress";
 
 import { ordersService, Order } from "@/api/orders";
+import { formatCurrency } from "@/lib/utils";
 
 // Status badge components
 const StatusBadge = React.memo(({ status }: { status: Order['status'] }) => {
@@ -166,7 +167,7 @@ const OrderCard = React.memo(({
           </div>
           <div>
             <div className="text-sm font-medium mb-1">Total:</div>
-            <div className="text-sm">₹ {order.total_amount.toFixed(2)}</div>
+            <div className="text-sm">{formatCurrency(order.total_amount)}</div>
           </div>
           
           {canBeCancelled && (

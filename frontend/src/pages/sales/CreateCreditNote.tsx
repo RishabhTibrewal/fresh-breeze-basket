@@ -60,7 +60,7 @@ import {
 import apiClient from '@/lib/apiClient';
 import { creditNotesService } from '@/api/creditNotes';
 import { ordersService } from '@/api/orders';
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency, getCurrencySymbol } from "@/lib/utils";
 
 const cnFormSchema = z.object({
   customer_id: z.string().min(1, "Customer is required"),
@@ -295,7 +295,7 @@ export default function CreateCreditNote() {
                             <SelectItem value="none">None / Manual Only</SelectItem>
                             {customerOrders.map((order: any) => (
                               <SelectItem key={order.id} value={order.id}>
-                                {order.order_number} (₹{order.total_amount})
+                                {order.order_number} ({formatCurrency(order.total_amount)})
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -344,7 +344,7 @@ export default function CreateCreditNote() {
                         <FormLabel>Amount (Net)</FormLabel>
                         <FormControl>
                           <div className="relative">
-                            <span className="absolute left-3 top-2.5 text-muted-foreground">₹</span>
+                            <span className="absolute left-3 top-2.5 text-muted-foreground">{getCurrencySymbol()}</span>
                             <Input type="number" step="0.01" className="pl-7" placeholder="0.00" {...field} />
                           </div>
                         </FormControl>
@@ -361,7 +361,7 @@ export default function CreateCreditNote() {
                         <FormLabel>Tax Amount</FormLabel>
                         <FormControl>
                           <div className="relative">
-                            <span className="absolute left-3 top-2.5 text-muted-foreground">₹</span>
+                            <span className="absolute left-3 top-2.5 text-muted-foreground">{getCurrencySymbol()}</span>
                             <Input type="number" step="0.01" className="pl-7" placeholder="0.00" {...field} />
                           </div>
                         </FormControl>
@@ -379,7 +379,7 @@ export default function CreateCreditNote() {
                       <FormLabel>Total Credit Amount</FormLabel>
                       <FormControl>
                         <div className="relative">
-                          <span className="absolute left-3 top-2.5 text-muted-foreground font-bold">₹</span>
+                          <span className="absolute left-3 top-2.5 text-muted-foreground font-bold">{getCurrencySymbol()}</span>
                           <Input 
                             type="number" 
                             step="0.01" 

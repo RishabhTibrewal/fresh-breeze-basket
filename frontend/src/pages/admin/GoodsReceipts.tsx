@@ -27,6 +27,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { StatusBadge } from '@/components/procurement/StatusBadge';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { formatCurrency } from '@/lib/utils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -234,7 +235,7 @@ export default function GoodsReceipts() {
                         {new Date(grn.receipt_date).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="font-medium">
-                        ₹{grn.total_received_amount?.toFixed(2) || '0.00'}
+                        {formatCurrency(grn.total_received_amount || 0)}
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={grn.status} />

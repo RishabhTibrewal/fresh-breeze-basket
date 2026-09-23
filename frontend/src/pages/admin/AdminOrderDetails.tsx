@@ -9,6 +9,7 @@ import { productsService, Product } from '@/api/products';
 import { addressApi } from '@/api/addresses';
 import { warehousesService } from '@/api/warehouses';
 import { customerService } from '@/api/customer';
+import { formatCurrency } from '@/lib/utils';
 import { 
   Card,
   CardContent,
@@ -517,19 +518,19 @@ export default function AdminOrderDetails() {
                 <div className="space-y-4">
                   <div>
                     <p className="text-sm text-muted-foreground">Subtotal</p>
-                    <p className="font-medium">₹ {order.total_amount?.toFixed(2) || '0.00'}</p>
+                    <p className="font-medium">{formatCurrency(order.total_amount || 0)}</p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Shipping</p>
-                    <p className="font-medium">₹ 0.00</p>
+                    <p className="font-medium">{formatCurrency(0)}</p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Tax</p>
-                    <p className="font-medium">₹ 0.00</p>
+                    <p className="font-medium">{formatCurrency(0)}</p>
                   </div>
                   <div className="border-t pt-2">
                     <p className="text-sm text-muted-foreground">Total</p>
-                    <p className="font-medium text-lg">₹ {order.total_amount?.toFixed(2) || '0.00'}</p>
+                    <p className="font-medium text-lg">{formatCurrency(order.total_amount || 0)}</p>
                   </div>
                 </div>
               </CardContent>
@@ -574,7 +575,7 @@ export default function AdminOrderDetails() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <p className="text-sm text-muted-foreground">Credit Amount</p>
-                        <p className="font-medium">₹ {((order as any).credit_details.amount || 0).toFixed(2)}</p>
+                        <p className="font-medium">{formatCurrency((order as any).credit_details.amount || 0)}</p>
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Period</p>
@@ -695,7 +696,7 @@ export default function AdminOrderDetails() {
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell>₹ {item.unit_price?.toFixed(2) || '0.00'}</TableCell>
+                          <TableCell>{formatCurrency(item.unit_price || 0)}</TableCell>
                           <TableCell>{item.quantity}</TableCell>
                           <TableCell className="hidden md:table-cell">
                             {warehouse ? (
@@ -708,7 +709,7 @@ export default function AdminOrderDetails() {
                             )}
                           </TableCell>
                           <TableCell className="text-right">
-                            ₹ {((item.quantity || 0) * (item.unit_price || 0)).toFixed(2)}
+                            {formatCurrency((item.quantity || 0) * (item.unit_price || 0))}
                           </TableCell>
                         </TableRow>
                       );
@@ -727,7 +728,7 @@ export default function AdminOrderDetails() {
               <div className="text-right">
                 <p className="text-sm text-muted-foreground">Total amount</p>
                 <p className="text-xl font-bold">
-                  ₹ {order.total_amount?.toFixed(2) || '0.00'}
+                  {formatCurrency(order.total_amount || 0)}
                 </p>
               </div>
             </CardFooter>

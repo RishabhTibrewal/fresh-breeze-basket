@@ -1,6 +1,6 @@
 import React from 'react';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
+import { cn, formatCurrency } from '@/lib/utils';
 
 interface PriceDisplayProps {
   mrpPrice?: number | null;
@@ -45,10 +45,10 @@ export const PriceDisplay: React.FC<PriceDisplayProps> = ({
         {hasDiscount ? (
           <>
             <span className={cn('font-bold', sizeClasses[size])}>
-              ₹{safeSale.toFixed(2)}
+              {formatCurrency(safeSale)}
             </span>
             <span className={cn('text-muted-foreground line-through', priceSizeClasses[size])}>
-              ₹{safeMrp.toFixed(2)}
+              {formatCurrency(safeMrp)}
             </span>
             {showDiscount && (
               <Badge variant="destructive" className={cn('text-xs', size === 'sm' && 'text-[10px] px-1')}>
@@ -58,13 +58,13 @@ export const PriceDisplay: React.FC<PriceDisplayProps> = ({
           </>
         ) : (
           <span className={cn('font-bold', sizeClasses[size])}>
-            ₹{safeSale.toFixed(2)}
+            {formatCurrency(safeSale)}
           </span>
         )}
       </div>
       {!hasDiscount && safeMrp !== safeSale && (
         <div className={cn('text-muted-foreground', priceSizeClasses[size])}>
-          MRP: ₹{safeMrp.toFixed(2)}
+          MRP: {formatCurrency(safeMrp)}
         </div>
       )}
     </div>

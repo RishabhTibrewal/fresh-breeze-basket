@@ -5,6 +5,7 @@ import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { useCart } from '@/contexts/CartContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { formatCurrency } from '@/lib/utils';
 import { PriceDisplay } from '@/components/products/PriceDisplay';
 import { Badge } from '@/components/ui/badge';
 
@@ -110,7 +111,7 @@ const Cart = () => {
                               
                               <div className="flex items-end flex-col">
                                 <div className="font-bold">
-                                  ₹ {((item.sale_price || item.price) * item.quantity).toFixed(2)}
+                                  {formatCurrency((item.sale_price || item.price) * item.quantity)}
                                 </div>
                                 <button 
                                   onClick={() => removeFromCart(item.id, item.variant_id)}
@@ -147,7 +148,7 @@ const Cart = () => {
                   <div className="space-y-3 mb-6">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Subtotal</span>
-                      <span className="font-semibold">₹ {subtotal.toFixed(2)}</span>
+                      <span className="font-semibold">{formatCurrency(subtotal)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Shipping</span>
@@ -156,7 +157,7 @@ const Cart = () => {
                     <div className="pt-3 border-t border-gray-200">
                       <div className="flex justify-between text-lg font-bold">
                         <span>Total</span>
-                        <span>₹ {subtotal.toFixed(2)}</span>
+                        <span>{formatCurrency(subtotal)}</span>
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
                         (excluding shipping & taxes)
@@ -169,7 +170,7 @@ const Cart = () => {
                     <div className="flex items-start p-3 mb-6 bg-accent bg-opacity-10 text-sm rounded-md">
                       <AlertCircle className="h-5 w-5 text-accent mr-2 flex-shrink-0 mt-0.5" />
                       <div>
-                        <strong>Add ₹ {(100 - subtotal).toFixed(2)} more</strong> to qualify for free shipping!
+                        <strong>Add {formatCurrency(100 - subtotal)} more</strong> to qualify for free shipping!
                       </div>
                     </div>
                   )}

@@ -31,6 +31,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { formatCurrency } from '@/lib/utils';
+
 export default function SupplierPayments() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -109,7 +111,7 @@ export default function SupplierPayments() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹{totalAmount.toFixed(2)}</div>
+            <div className="text-2xl font-bold">{formatCurrency(totalAmount)}</div>
             <p className="text-xs text-muted-foreground">{payments.length} payments</p>
           </CardContent>
         </Card>
@@ -119,7 +121,7 @@ export default function SupplierPayments() {
             <CheckCircle className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">₹{completedAmount.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-green-600">{formatCurrency(completedAmount)}</div>
             <p className="text-xs text-muted-foreground">
               {payments.filter((p: any) => p.status === 'completed').length} payments
             </p>
@@ -131,7 +133,7 @@ export default function SupplierPayments() {
             <Clock className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">₹{pendingAmount.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-yellow-600">{formatCurrency(pendingAmount)}</div>
             <p className="text-xs text-muted-foreground">
               {payments.filter((p: any) => p.status === 'pending' || p.status === 'processing').length} payments
             </p>
@@ -143,7 +145,7 @@ export default function SupplierPayments() {
             <XCircle className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">₹{failedAmount.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-red-600">{formatCurrency(failedAmount)}</div>
             <p className="text-xs text-muted-foreground">
               {payments.filter((p: any) => p.status === 'failed' || p.status === 'cancelled').length} payments
             </p>
@@ -260,7 +262,7 @@ export default function SupplierPayments() {
                         {payment.payment_method?.replace('_', ' ') || 'N/A'}
                       </TableCell>
                       <TableCell className="font-medium">
-                        ₹{payment.amount.toFixed(2)}
+                        {formatCurrency(payment.amount)}
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={payment.status} />

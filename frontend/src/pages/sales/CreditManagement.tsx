@@ -27,6 +27,7 @@ import { Search, ArrowUpDown, User, DollarSign, Calendar, AlertTriangle } from "
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import apiClient from '@/lib/apiClient';
+import { formatCurrency } from '@/lib/utils';
 
 interface CustomerCredit {
   id: string;
@@ -139,11 +140,11 @@ export default function CreditManagement() {
                   <div className="grid grid-cols-2 gap-2 pt-2 border-t">
                     <div>
                       <p className="text-xs text-muted-foreground">Credit Amount</p>
-                      <p className="font-medium text-sm">₹{customer.current_credit?.toFixed(2) || '0.00'}</p>
+                      <p className="font-medium text-sm">{formatCurrency(customer.current_credit || 0)}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Credit Limit</p>
-                      <p className="font-medium text-sm">₹{customer.credit_limit?.toFixed(2) || '0.00'}</p>
+                      <p className="font-medium text-sm">{formatCurrency(customer.credit_limit || 0)}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Credit Period</p>
@@ -152,7 +153,7 @@ export default function CreditManagement() {
                     {customer.overdue_credit ? (
                       <div>
                         <p className="text-xs text-muted-foreground">Overdue</p>
-                        <p className="font-medium text-sm text-red-600">₹{customer.overdue_credit.amount.toFixed(2)}</p>
+                        <p className="font-medium text-sm text-red-600">{formatCurrency(customer.overdue_credit.amount || 0)}</p>
                       </div>
                     ) : (
                       <div>
@@ -229,12 +230,12 @@ export default function CreditManagement() {
                     </TableCell>
                     <TableCell className="px-2 py-2">
                       <div className="font-medium text-xs sm:text-sm">
-                      ₹{customer.current_credit?.toFixed(2) || '0.00'}
+                      {formatCurrency(customer.current_credit || 0)}
                       </div>
                     </TableCell>
                     <TableCell className="px-2 py-2">
                       <div className="font-medium text-xs sm:text-sm">
-                      ₹{customer.credit_limit?.toFixed(2) || '0.00'}
+                      {formatCurrency(customer.credit_limit || 0)}
                       </div>
                     </TableCell>
                     <TableCell className="px-2 py-2 text-xs sm:text-sm">
@@ -244,7 +245,7 @@ export default function CreditManagement() {
                       {customer.overdue_credit ? (
                         <div className="text-xs sm:text-sm">
                           <div className="font-medium text-red-600">
-                            ${customer.overdue_credit.amount.toFixed(2)}
+                            {formatCurrency(customer.overdue_credit.amount || 0)}
                           </div>
                           <div className="text-muted-foreground">
                             {customer.overdue_credit.period} days

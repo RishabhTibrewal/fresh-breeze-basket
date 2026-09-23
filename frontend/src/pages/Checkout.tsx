@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -23,6 +24,7 @@ import AddressForm from "./account/AddressForm";
 import { API_BASE_URL } from "@/config";
 import { paymentsService } from '@/api/payments';
 import apiClient from '@/lib/apiClient';
+import { formatCurrency, getCompanyCurrency } from '@/lib/utils';
 
 export default function CheckoutPage() {
   const navigate = useNavigate();
@@ -36,6 +38,17 @@ export default function CheckoutPage() {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
   const [isInitializingPayment, setIsInitializingPayment] = useState(false);
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [deliveryDate, setDeliveryDate] = useState<string>(todayStr);
+  const [selectedSlot, setSelectedSlot] = useState<string>('Morning (07:00 AM - 10:00 AM)');
+
+  const TIME_SLOTS = [
+    { id: 'slot-1', title: 'Morning', time: '07:00 AM - 10:00 AM', icon: '🌅', full: 'Morning (07:00 AM - 10:00 AM)' },
+    { id: 'slot-2', title: 'Midday', time: '10:00 AM - 01:00 PM', icon: '☀️', full: 'Midday (10:00 AM - 01:00 PM)' },
+    { id: 'slot-3', title: 'Afternoon', time: '02:00 PM - 05:00 PM', icon: '🌤️', full: 'Afternoon (02:00 PM - 05:00 PM)' },
+    { id: 'slot-4', title: 'Evening', time: '06:00 PM - 09:00 PM', icon: '🌙', full: 'Evening (06:00 PM - 09:00 PM)' },
+  ];
 
   // Fetch user's addresses
   const { 
@@ -85,6 +98,11 @@ export default function CheckoutPage() {
       return;
     }
 
+    if (!selectedSlot) {
+      toast.error("Please select a delivery time slot");
+      return;
+    }
+
     if (cartState.items.length === 0) {
       toast.error("Your cart is empty");
       return;
@@ -129,14 +147,17 @@ export default function CheckoutPage() {
         tax_amount: taxAmount,
         tax_rate: taxRate,
         status: 'pending',
-        payment_status: 'pending'
+        payment_status: 'pending',
+        delivery_slot: selectedSlot,
+        delivery_date: deliveryDate
       };
 
       console.log('Preparing order data for payment:', orderDataToSave);
       
       // Create payment intent first
       const { data } = await apiClient.post('/payments/create-payment-intent', {
-        amount: totalAmount
+        amount: totalAmount,
+        currency: getCompanyCurrency().toLowerCase()
       });
       setClientSecret(data.clientSecret);
       setPaymentIntentId(data.paymentIntentId);
@@ -304,17 +325,17 @@ export default function CheckoutPage() {
                             <div className="text-sm text-gray-500">
                               {item.quantity} x {item.sale_price ? (
                                 <>
-                                  <span className="text-red-500">₹ {item.sale_price.toFixed(2)}</span>
-                                  <span className="line-through ml-1 text-gray-400">₹ {item.price.toFixed(2)}</span>
+                                  <span className="text-red-500">{formatCurrency(item.sale_price)}</span>
+                                  <span className="line-through ml-1 text-gray-400">{formatCurrency(item.price)}</span>
                                 </>
                               ) : (
-                                <span>₹ {item.price.toFixed(2)}</span>
+                                <span>{formatCurrency(item.price)}</span>
                               )}
                               <span className="ml-1">/{item.unit} {item.unit_type}</span>
                             </div>
                           </div>
                           <div className="text-right font-medium">
-                            ₹ {((item.sale_price || item.price) * item.quantity).toFixed(2)}
+                            {formatCurrency((item.sale_price || item.price) * item.quantity)}
                           </div>
                         </div>
                       ))}
@@ -325,22 +346,22 @@ export default function CheckoutPage() {
                     <div className="space-y-2">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Subtotal</span>
-                        <span className="font-medium">₹ {subtotal.toFixed(2)}</span>
+                        <span className="font-medium">{formatCurrency(subtotal)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Shipping</span>
                         <span className="font-medium">
-                          {shippingCost === 0 ? "Free" : `₹ ${shippingCost.toFixed(2)}`}
+                          {shippingCost === 0 ? "Free" : formatCurrency(shippingCost)}
                         </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Tax (5%)</span>
-                        <span className="font-medium">₹ {taxAmount.toFixed(2)}</span>
+                        <span className="font-medium">{formatCurrency(taxAmount)}</span>
                       </div>
                       <Separator />
                       <div className="flex justify-between text-lg font-bold">
                         <span>Total</span>
-                        <span>₹ {totalAmount.toFixed(2)}</span>
+                        <span>{formatCurrency(totalAmount)}</span>
                       </div>
                     </div>
 
@@ -452,6 +473,62 @@ export default function CheckoutPage() {
                 )}
               </div>
 
+              {/* Delivery Schedule & Time Slot Selection */}
+              <div className="bg-white rounded-lg shadow-md p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-xl font-semibold">Delivery Schedule & Time Slot</h2>
+                    <p className="text-sm text-gray-500">Choose your preferred delivery date and 3-hour time slot</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-sm font-medium mb-1.5 block">Delivery Date</Label>
+                    <Input 
+                      type="date" 
+                      min={todayStr}
+                      value={deliveryDate} 
+                      onChange={(e) => setDeliveryDate(e.target.value)}
+                      className="max-w-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-sm font-medium mb-2 block">Select Time Slot</Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {TIME_SLOTS.map((slot) => {
+                        const isSelected = selectedSlot === slot.full;
+                        return (
+                          <div
+                            key={slot.id}
+                            onClick={() => setSelectedSlot(slot.full)}
+                            className={`p-3.5 border rounded-lg cursor-pointer transition-all flex items-center justify-between ${
+                              isSelected
+                                ? 'border-orange-600 bg-orange-50/60 ring-2 ring-orange-600/20'
+                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            <div className="flex items-center space-x-3">
+                              <span className="text-2xl">{slot.icon}</span>
+                              <div>
+                                <div className="font-semibold text-sm text-gray-900">{slot.title}</div>
+                                <div className="text-xs text-gray-500">{slot.time}</div>
+                              </div>
+                            </div>
+                            <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                              isSelected ? 'border-orange-600 bg-orange-600' : 'border-gray-300'
+                            }`}>
+                              {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-white rounded-lg shadow-md p-6">
                 <h2 className="text-xl font-semibold mb-6">Payment Method</h2>
                 <RadioGroup defaultValue="card" className="grid gap-4">
@@ -484,17 +561,17 @@ export default function CheckoutPage() {
                           <div className="text-sm text-gray-500">
                             {item.quantity} x {item.sale_price ? (
                               <>
-                                <span className="text-red-500">₹ {item.sale_price.toFixed(2)}</span>
-                                <span className="line-through ml-1 text-gray-400">₹ {item.price.toFixed(2)}</span>
+                                <span className="text-red-500">{formatCurrency(item.sale_price)}</span>
+                                <span className="line-through ml-1 text-gray-400">{formatCurrency(item.price)}</span>
                               </>
                             ) : (
-                              <span>₹ {item.price.toFixed(2)}</span>
+                              <span>{formatCurrency(item.price)}</span>
                             )}
                             <span className="ml-1">/{item.unit} {item.unit_type}</span>
                           </div>
                         </div>
                         <div className="text-right font-medium">
-                          ₹ {((item.sale_price || item.price) * item.quantity).toFixed(2)}
+                          {formatCurrency((item.sale_price || item.price) * item.quantity)}
                         </div>
                       </div>
                     ))}
@@ -505,22 +582,22 @@ export default function CheckoutPage() {
                   <div className="space-y-2">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Subtotal</span>
-                      <span className="font-medium">₹ {subtotal.toFixed(2)}</span>
+                      <span className="font-medium">{formatCurrency(subtotal)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Shipping</span>
                       <span className="font-medium">
-                        {shippingCost === 0 ? "Free" : `₹ ${shippingCost.toFixed(2)}`}
+                        {shippingCost === 0 ? "Free" : formatCurrency(shippingCost)}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Tax (5%)</span>
-                      <span className="font-medium">₹ {taxAmount.toFixed(2)}</span>
+                      <span className="font-medium">{formatCurrency(taxAmount)}</span>
                     </div>
                     <Separator />
                     <div className="flex justify-between text-lg font-bold">
                       <span>Total</span>
-                      <span>₹ {totalAmount.toFixed(2)}</span>
+                      <span>{formatCurrency(totalAmount)}</span>
                     </div>
                   </div>
 

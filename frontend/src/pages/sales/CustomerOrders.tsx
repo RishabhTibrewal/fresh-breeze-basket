@@ -31,6 +31,7 @@ import { Search, ArrowLeft, Plus, Eye, Edit, Calendar, DollarSign, CreditCard } 
 import { format } from 'date-fns';
 import { customerService, CustomerOrder } from '@/api/customer';
 import { toast } from 'sonner';
+import { formatCurrency } from '@/lib/utils';
 
 export default function CustomerOrders() {
   const { customerId } = useParams<{ customerId: string }>();
@@ -287,7 +288,7 @@ export default function CustomerOrders() {
                           Order #{order.order_number}
                         </div>
                         <div className="text-base font-bold text-green-600 mb-2">
-                          ${parseFloat(order.total_amount.toString()).toFixed(2)}
+                          {formatCurrency(parseFloat(order.total_amount.toString()))}
                         </div>
                       </div>
                       <div className="flex flex-col gap-1.5 flex-shrink-0">
@@ -311,7 +312,7 @@ export default function CustomerOrders() {
                           <CreditCard className="h-3 w-3 flex-shrink-0" />
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-xs">
-                              ${order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount.toString()).toFixed(2)}
+                              {formatCurrency(order.credit_details.amount || parseFloat(order.credit_details.amount.toString()))}
                             </div>
                             <div className="text-xs">
                               Due: {formatDate(order.credit_details.end_date || (order.credit_details as any).due_date, 'MMM d, yyyy')}
@@ -395,7 +396,7 @@ export default function CustomerOrders() {
                     <TableRow key={order.id}>
                       <TableCell className="px-2 py-2 font-medium text-sm">{order.order_number}</TableCell>
                       <TableCell className="px-2 py-2 text-sm">{formatDate(order.created_at)}</TableCell>
-                      <TableCell className="px-2 py-2 text-sm font-medium">₹{parseFloat(order.total_amount.toString()).toFixed(2)}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm font-medium">{formatCurrency(parseFloat(order.total_amount.toString()))}</TableCell>
                       <TableCell className="px-2 py-2">{getStatusBadge(order.status)}</TableCell>
                       <TableCell className="px-2 py-2">
                         <div className="space-y-1">
@@ -413,7 +414,7 @@ export default function CustomerOrders() {
                             
                             return (
                               <div className="text-xs sm:text-sm">
-                                <div className="font-medium">₹{order.credit_details.amount?.toFixed(2) || parseFloat(order.credit_details.amount.toString()).toFixed(2)}</div>
+                                <div className="font-medium">{formatCurrency(order.credit_details.amount || parseFloat(order.credit_details.amount.toString()))}</div>
                                 <div className="text-muted-foreground">
                                   Due: {formatDate(order.credit_details.end_date || (order.credit_details as any).due_date, 'MMM d, yyyy')}
                                 </div>
@@ -472,8 +473,8 @@ export default function CustomerOrders() {
             </div>
             <div className="min-w-0">
               <p className="text-xs sm:text-sm font-medium mb-1">Credit Information</p>
-              <p className="text-xs sm:text-sm">Credit Limit: ${(customer.credit_limit || 0).toFixed(2)}</p>
-              <p className="text-xs sm:text-sm">Current Credit: ${(customer.current_credit || 0).toFixed(2)}</p>
+              <p className="text-xs sm:text-sm">Credit Limit: {formatCurrency(customer.credit_limit || 0)}</p>
+              <p className="text-xs sm:text-sm">Current Credit: {formatCurrency(customer.current_credit || 0)}</p>
               <p className="text-xs sm:text-sm">Allowed Credit Period: {customer.credit_period_days || 0} days</p>
             </div>
           </CardFooter>

@@ -35,6 +35,7 @@ import { productsService } from '@/api/products';
 import { ordersService } from '@/api/orders';
 import { calculateOrderTotals, ExtraCharge } from '@/lib/orderCalculations';
 import apiClient from '@/lib/apiClient';
+import { formatCurrency, getCurrencySymbol } from '@/lib/utils';
 
 export default function CreateQuotation() {
   const navigate = useNavigate();
@@ -314,10 +315,10 @@ export default function CreateQuotation() {
                     <TableHead>Product</TableHead>
                     <TableHead>Variant</TableHead>
                     <TableHead className="text-right">Quantity</TableHead>
-                    <TableHead className="text-right">Unit Price (₹)</TableHead>
+                    <TableHead className="text-right">Unit Price ({getCurrencySymbol()})</TableHead>
                     <TableHead className="text-right">Tax %</TableHead>
                     <TableHead className="text-right">Disc %</TableHead>
-                    <TableHead className="text-right">Total (₹)</TableHead>
+                    <TableHead className="text-right">Total ({getCurrencySymbol()})</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -384,7 +385,7 @@ export default function CreateQuotation() {
                           <Input type="number" min="0" value={item.discount_percentage || 0} onChange={(e) => updateItem(item.ui_id, 'discount_percentage', Number(e.target.value))} />
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          ₹ {orderTotals.items.find(t => t.id === item.ui_id.toString())?.line_total.toFixed(2) || '0.00'}
+                          {formatCurrency(orderTotals.items.find(t => t.id === item.ui_id.toString())?.line_total || 0)}
                         </TableCell>
                         <TableCell>
                           <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(item.ui_id)} className="text-red-500 hover:text-red-700">
@@ -399,7 +400,7 @@ export default function CreateQuotation() {
                       <TableRow className="border-t-2 bg-muted/30">
                         <TableCell colSpan={6} className="text-right font-medium">Subtotal (Without Item Discount)</TableCell>
                         <TableCell colSpan={2} className="text-right font-medium text-muted-foreground">
-                          ₹ {orderTotals.subtotal.toFixed(2)}
+                          {formatCurrency(orderTotals.subtotal)}
                         </TableCell>
                       </TableRow>
                       
@@ -407,7 +408,7 @@ export default function CreateQuotation() {
                          <TableRow>
                           <TableCell colSpan={6} className="text-right text-muted-foreground">Total Item Discount</TableCell>
                           <TableCell colSpan={2} className="text-right text-red-500 font-medium">
-                            -₹ {orderTotals.total_discount.toFixed(2)}
+                            -{formatCurrency(orderTotals.total_discount)}
                           </TableCell>
                          </TableRow>
                       )}
@@ -417,7 +418,7 @@ export default function CreateQuotation() {
                           Extra Discount (%)
                           {extraDiscountPct > 0 && (
                             <span className="ml-2 text-xs text-red-500 font-normal">
-                              (-₹ {orderTotals.extra_discount_amount.toFixed(2)})
+                              (-{formatCurrency(orderTotals.extra_discount_amount)})
                             </span>
                           )}
                         </TableCell>
@@ -439,7 +440,7 @@ export default function CreateQuotation() {
                       </TableRow>
 
                       <TableRow>
-                        <TableCell colSpan={6} className="text-right text-muted-foreground">Extra Discount (Fixed ₹)</TableCell>
+                        <TableCell colSpan={6} className="text-right text-muted-foreground">Extra Discount (Fixed {getCurrencySymbol()})</TableCell>
                         <TableCell colSpan={2} className="text-right">
                           <Input 
                             type="number" 
@@ -459,7 +460,7 @@ export default function CreateQuotation() {
                       <TableRow>
                         <TableCell colSpan={6} className="text-right text-muted-foreground">Total Tax</TableCell>
                         <TableCell colSpan={2} className="text-right text-muted-foreground font-medium">
-                          ₹ {orderTotals.total_tax.toFixed(2)}
+                          {formatCurrency(orderTotals.total_tax)}
                         </TableCell>
                       </TableRow>
 
@@ -516,7 +517,7 @@ export default function CreateQuotation() {
                                       className="w-20 text-right"
                                     />
                                     <div className="w-24 text-right text-sm">
-                                      ₹ {(charge.amount + ((charge.amount * (charge.tax_percent || 0)) / 100)).toFixed(2)}
+                                      {formatCurrency(charge.amount + ((charge.amount * (charge.tax_percent || 0)) / 100))}
                                     </div>
                                     <Button 
                                       type="button" 
@@ -534,7 +535,7 @@ export default function CreateQuotation() {
                                   </div>
                                 ))}
                                 <div className="text-right text-sm font-medium pt-2">
-                                  Total Extra Charges: <span className="ml-2">₹ {orderTotals.total_extra_charges.toFixed(2)}</span>
+                                  Total Extra Charges: <span className="ml-2">{formatCurrency(orderTotals.total_extra_charges)}</span>
                                 </div>
                               </div>
                             )}
@@ -554,7 +555,7 @@ export default function CreateQuotation() {
                       <TableRow className="bg-muted/50 border-t-2">
                         <TableCell colSpan={6} className="text-right font-bold text-lg">Grand Total</TableCell>
                         <TableCell colSpan={2} className="text-right font-bold text-xl text-green-600">
-                          ₹ {orderTotals.total_amount.toFixed(2)}
+                          {formatCurrency(orderTotals.total_amount)}
                         </TableCell>
                       </TableRow>
                     </>

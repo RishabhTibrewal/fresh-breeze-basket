@@ -25,6 +25,7 @@ import { warehousesService } from '@/api/warehouses';
 import { productsService } from '@/api/products';
 import { invoicesService } from '@/api/invoices';
 import WarehouseStockDisplay from "@/components/products/WarehouseStockDisplay";
+import { formatCurrency } from '@/lib/utils';
 import {
   Select,
   SelectContent,
@@ -265,7 +266,7 @@ export default function CreatePOSOrder() {
                           {product.name}
                         </h3>
                         <p className="text-xs font-bold text-primary">
-                          ₹{product.sale_price || product.price}
+                          {formatCurrency(product.sale_price || product.price)}
                         </p>
                         <div className="mt-2">
                           <WarehouseStockDisplay
@@ -378,9 +379,9 @@ export default function CreatePOSOrder() {
                               </Button>
                             </div>
                           </TableCell>
-                          <TableCell className="text-sm">₹{item.unit_price.toFixed(2)}</TableCell>
+                          <TableCell className="text-sm">{formatCurrency(item.unit_price)}</TableCell>
                           <TableCell className="text-sm font-medium">
-                            ₹{item.subtotal.toFixed(2)}
+                            {formatCurrency(item.subtotal)}
                           </TableCell>
                           <TableCell>
                             <Button
@@ -404,15 +405,15 @@ export default function CreatePOSOrder() {
                 <div className="border-t pt-4 space-y-2">
                   <div className="flex justify-between text-sm">
                     <span>Subtotal:</span>
-                    <span>₹{totalAmount.toFixed(2)}</span>
+                    <span>{formatCurrency(totalAmount)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span>Tax (5%):</span>
-                    <span>₹{tax.toFixed(2)}</span>
+                    <span>{formatCurrency(tax)}</span>
                   </div>
                   <div className="flex justify-between font-bold text-lg border-t pt-2">
                     <span>Total:</span>
-                    <span>₹{finalTotal.toFixed(2)}</span>
+                    <span>{formatCurrency(finalTotal)}</span>
                   </div>
                 </div>
               )}

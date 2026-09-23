@@ -48,7 +48,7 @@ import {
 } from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency, getCurrencySymbol } from "@/lib/utils";
 
 interface OrderItem {
   id: string; // Unique ID for each row
@@ -682,7 +682,7 @@ export default function CreatePurchaseOrder() {
                                           let variantInfo = '';
                                           if (variantCount > 0) {
                                             if (variantCount === 1) {
-                                              variantInfo = ` - ${defaultVariant.name} (₹${defaultVariant.price?.sale_price || 0})`;
+                                              variantInfo = ` - ${defaultVariant.name} (${formatCurrency(defaultVariant.price?.sale_price || 0)})`;
                                             } else {
                                               const prices = variants
                                                 .map((v: any) => v.price?.sale_price || 0)
@@ -690,14 +690,14 @@ export default function CreatePurchaseOrder() {
                                               const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
                                               const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
                                               if (minPrice === maxPrice) {
-                                                variantInfo = ` - ${variantCount} variants (₹${minPrice})`;
+                                                variantInfo = ` - ${variantCount} variants (${formatCurrency(minPrice)})`;
                                               } else {
-                                                variantInfo = ` - ${variantCount} variants (₹${minPrice}-₹${maxPrice})`;
+                                                variantInfo = ` - ${variantCount} variants (${formatCurrency(minPrice)}-${formatCurrency(maxPrice)})`;
                                               }
                                             }
                                           } else {
                                             // Fallback to product-level price if no variants
-                                            variantInfo = ` - ₹${product.sale_price || product.price || 0}`;
+                                            variantInfo = ` - ${formatCurrency(product.sale_price || product.price || 0)}`;
                                           }
                                           
                                           const displayText = `${product.name}${variantInfo}`;
@@ -743,7 +743,7 @@ export default function CreatePurchaseOrder() {
                                 <SelectContent>
                                   {(productVariants[item.product_id] || []).map((variant: any) => (
                                     <SelectItem key={variant.id} value={variant.id}>
-                                      {variant.name} {variant.is_default && '(Default)'} - ₹{variant.price?.sale_price || 0}
+                                      {variant.name} {variant.is_default && '(Default)'} - {formatCurrency(variant.price?.sale_price || 0)}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -825,7 +825,7 @@ export default function CreatePurchaseOrder() {
                             />
                           </TableCell>
                           <TableCell className="font-medium text-sm">
-                            {item.product_id ? `₹${totalWithTax.toFixed(2)}` : '-'}
+                            {item.product_id ? formatCurrency(totalWithTax) : '-'}
                           </TableCell>
                           <TableCell>
                             <Button
@@ -851,19 +851,19 @@ export default function CreatePurchaseOrder() {
                 <div className="flex flex-col items-end gap-1 min-w-[200px]">
                   <div className="flex justify-between w-full text-sm text-muted-foreground">
                     <span>Subtotal:</span>
-                    <span>₹{calculateItemsSubtotal().toFixed(2)}</span>
+                    <span>{formatCurrency(calculateItemsSubtotal())}</span>
                   </div>
                   <div className="flex justify-between w-full text-sm text-muted-foreground font-medium">
                     <span>Tax:</span>
-                    <span className="text-red-500">+₹{calculateTotalTax().toFixed(2)}</span>
+                    <span className="text-red-500">+{formatCurrency(calculateTotalTax())}</span>
                   </div>
                   <div className="flex justify-between w-full text-sm text-muted-foreground font-medium">
                     <span>Item Discount:</span>
-                    <span className="text-green-600">-₹{calculateTotalDiscount().toFixed(2)}</span>
+                    <span className="text-green-600">-{formatCurrency(calculateTotalDiscount())}</span>
                   </div>
                   <div className="flex justify-between w-full font-bold text-lg pt-2 border-t mt-1">
                     <span>Items Total:</span>
-                    <span>₹{calculateItemsLineTotalSum().toFixed(2)}</span>
+                    <span>{formatCurrency(calculateItemsLineTotalSum())}</span>
                   </div>
                 </div>
               </div>
@@ -896,7 +896,7 @@ export default function CreatePurchaseOrder() {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Extra Discount (Fixed)</Label>
+                    <Label className="text-xs">Extra Discount ({getCurrencySymbol()})</Label>
                     <Input 
                       type="number" 
                       placeholder="0"
@@ -913,7 +913,7 @@ export default function CreatePurchaseOrder() {
                 <div className="space-y-2 pt-4 border-t">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Items Total:</span>
-                    <span>₹{calculateItemsLineTotalSum().toFixed(2)}</span>
+                    <span>{formatCurrency(calculateItemsLineTotalSum())}</span>
                   </div>
                   {(extraDiscountPct > 0 || extraDiscount > 0) && (
                     <div className="flex justify-between text-sm text-green-600 font-medium font-serif italic border-b pb-1">
@@ -922,15 +922,15 @@ export default function CreatePurchaseOrder() {
                         {extraDiscountPct > 0 ? ` (${extraDiscountPct}%)` : ''}:
                       </span>
                       <span>
-                        -₹{extraDiscountPct > 0 
-                          ? ((calculateItemsLineTotalSum() * extraDiscountPct) / 100).toFixed(2)
-                          : extraDiscount.toFixed(2)}
+                        -{formatCurrency(extraDiscountPct > 0 
+                          ? ((calculateItemsLineTotalSum() * extraDiscountPct) / 100)
+                          : extraDiscount)}
                       </span>
                     </div>
                   )}
                   <div className="flex justify-between font-bold text-xl pt-2 text-primary">
                     <span>Grand Total:</span>
-                    <span>₹{finalTotalAmount.toFixed(2)}</span>
+                    <span>{formatCurrency(finalTotalAmount)}</span>
                   </div>
                 </div>
               </div>

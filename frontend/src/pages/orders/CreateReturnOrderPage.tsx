@@ -13,6 +13,7 @@ import ReturnItemsTable, {
   ReturnItemInput,
   ReturnQuantityMap,
 } from "@/components/documents/ReturnItemsTable";
+import { formatCurrency } from "@/lib/utils";
 
 type RouteParams = {
   id?: string;
@@ -223,7 +224,7 @@ export default function CreateReturnOrderPage() {
         metadata={[
           {
             label: "Original Total",
-            value: `₹ ${originalOrder.total_amount?.toFixed(2) ?? "0.00"}`,
+            value: formatCurrency(originalOrder.total_amount ?? 0),
           },
           {
             label: "Payment Status",

@@ -44,6 +44,7 @@ import { supplierPaymentsService } from '@/api/supplierPayments';
 import { partiesService } from '@/api/parties';
 import { invoicesService } from '@/api/invoices';
 import { ErrorMessage } from '@/components/ui/error-message';
+import { formatCurrency } from '@/lib/utils';
 
 export default function SupplierDetails() {
   const { id } = useParams<{ id: string }>();
@@ -300,11 +301,11 @@ export default function SupplierDetails() {
                 <div className="grid grid-cols-2 gap-4 pt-2 border-t">
                   <div>
                     <span className="text-xs text-muted-foreground">Opening Balance</span>
-                    <p className="font-medium text-sm">₹ {supplier.opening_balance?.toFixed(2) || '0.00'}</p>
+                    <p className="font-medium text-sm">{formatCurrency(supplier.opening_balance || 0)}</p>
                   </div>
                   <div>
                     <span className="text-xs text-muted-foreground">Closing Balance</span>
-                    <p className="font-medium text-sm">₹ {supplier.closing_balance?.toFixed(2) || '0.00'}</p>
+                    <p className="font-medium text-sm">{formatCurrency(supplier.closing_balance || 0)}</p>
                   </div>
                 </div>
               </CardContent>
@@ -409,7 +410,7 @@ export default function SupplierDetails() {
                           <TableCell className="capitalize">
                             <Badge variant={po.status === 'received' ? 'default' : 'outline'}>{po.status}</Badge>
                           </TableCell>
-                          <TableCell className="text-right font-medium">₹ {po.total_amount?.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-medium">{formatCurrency(po.total_amount || 0)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -451,7 +452,7 @@ export default function SupplierDetails() {
                           <TableCell className="capitalize">
                             <Badge variant={inv.status === 'paid' ? 'default' : 'outline'}>{inv.status}</Badge>
                           </TableCell>
-                          <TableCell className="text-right font-medium">₹ {inv.total_amount?.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-medium">{formatCurrency(inv.total_amount || 0)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -493,7 +494,7 @@ export default function SupplierDetails() {
                           <TableCell className="capitalize">
                             <Badge variant={p.status === 'completed' ? 'default' : 'outline'}>{p.status}</Badge>
                           </TableCell>
-                          <TableCell className="text-right font-medium text-green-600">₹ {p.amount?.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-medium text-green-600">{formatCurrency(p.amount || 0)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -561,11 +562,11 @@ export default function SupplierDetails() {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="rounded-lg border p-3">
                         <p className="text-xs text-muted-foreground">Total Receivable (Sales)</p>
-                        <p className="text-base font-semibold text-orange-600">₹ {partyLedger.totals.totalReceivable.toFixed(2)}</p>
+                        <p className="text-base font-semibold text-orange-600">{formatCurrency(partyLedger.totals.totalReceivable)}</p>
                       </div>
                       <div className="rounded-lg border p-3">
                         <p className="text-xs text-muted-foreground">Total Payable (Purchases)</p>
-                        <p className="text-base font-semibold text-blue-600">₹ {partyLedger.totals.totalPayable.toFixed(2)}</p>
+                        <p className="text-base font-semibold text-blue-600">{formatCurrency(partyLedger.totals.totalPayable)}</p>
                       </div>
                       <div className="rounded-lg border p-3">
                         <p className="text-xs text-muted-foreground">Net Position</p>
@@ -573,7 +574,7 @@ export default function SupplierDetails() {
                           partyLedger.totals.netPosition > 0 ? 'text-orange-600' :
                           partyLedger.totals.netPosition < 0 ? 'text-blue-600' : 'text-muted-foreground'
                         }`}>
-                          ₹ {Math.abs(partyLedger.totals.netPosition).toFixed(2)} {partyLedger.totals.netPosition > 0 ? 'Dr (They owe)' : partyLedger.totals.netPosition < 0 ? 'Cr (We owe)' : ''}
+                          {formatCurrency(Math.abs(partyLedger.totals.netPosition))} {partyLedger.totals.netPosition > 0 ? 'Dr (They owe)' : partyLedger.totals.netPosition < 0 ? 'Cr (We owe)' : ''}
                         </p>
                       </div>
                     </div>
@@ -616,10 +617,10 @@ export default function SupplierDetails() {
                                   </TableCell>
                                   <TableCell className="capitalize">{entry.doc_type.replace(/_/g, ' ')}</TableCell>
                                   <TableCell className="text-orange-600 font-medium">
-                                    {isDebit ? `₹ ${amt.toFixed(2)}` : '-'}
+                                    {isDebit ? formatCurrency(amt) : '-'}
                                   </TableCell>
                                   <TableCell className="text-blue-600 font-medium">
-                                    {isCredit ? `₹ ${amt.toFixed(2)}` : '-'}
+                                    {isCredit ? formatCurrency(amt) : '-'}
                                   </TableCell>
                                   <TableCell>
                                     <Badge variant="outline" className="text-xs capitalize">{entry.status}</Badge>

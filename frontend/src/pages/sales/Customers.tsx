@@ -42,6 +42,7 @@ import * as z from "zod";
 import { toast } from "sonner";
 import apiClient from '@/lib/apiClient';
 import { customerService, CustomerFormValues as ImportedCustomerFormValues } from '@/api/customer';
+import { formatCurrency } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 
 interface Customer {
@@ -535,7 +536,7 @@ export default function Customers() {
                       </div>
                       <div className="min-w-0">
                         <span className="text-muted-foreground">Spent: </span>
-                        <span className="font-medium">₹{(customer.totalSpent || 0).toFixed(2)}</span>
+                        <span className="font-medium">{formatCurrency(customer.totalSpent || 0)}</span>
                       </div>
                       <div className="min-w-0 col-span-2">
                         <span className="text-muted-foreground">Last Order: </span>
@@ -859,7 +860,7 @@ export default function Customers() {
                         )}
                       </TableCell>
                       <TableCell className="px-2 py-2 text-sm">{customer.totalOrders || 0}</TableCell>
-                      <TableCell className="px-2 py-2 text-sm font-medium">₹{(customer.totalSpent || 0).toFixed(2)}</TableCell>
+                      <TableCell className="px-2 py-2 text-sm font-medium">{formatCurrency(customer.totalSpent || 0)}</TableCell>
                       <TableCell className="px-2 py-2 text-sm min-w-0">
                         <div className="truncate" title={customer.lastOrder || 'Never'}>{customer.lastOrder || 'Never'}</div>
                       </TableCell>

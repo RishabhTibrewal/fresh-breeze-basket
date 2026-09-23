@@ -225,7 +225,7 @@ export const getCompanyBySlug = async (req: Request, res: Response) => {
     const client = supabaseAdmin || supabase;
     const { data: company, error } = await client
       .from('companies')
-      .select('id, name, slug, is_active')
+      .select('id, name, slug, is_active, currency')
       .eq('slug', slug)
       .eq('is_active', true)
       .single();
@@ -242,7 +242,8 @@ export const getCompanyBySlug = async (req: Request, res: Response) => {
       data: {
         id: company.id,
         name: company.name,
-        slug: company.slug
+        slug: company.slug,
+        currency: company.currency || 'INR'
       }
     });
   } catch (error) {
@@ -318,7 +319,8 @@ export const updateMyCompany = async (req: Request, res: Response) => {
       payment_qr_code_url,
       website_url,
       website_qr_code_url,
-      invoice_custom_message
+      invoice_custom_message,
+      currency
     } = req.body;
 
     const updateData: any = {
@@ -341,6 +343,7 @@ export const updateMyCompany = async (req: Request, res: Response) => {
     if (website_url !== undefined) updateData.website_url = website_url;
     if (website_qr_code_url !== undefined) updateData.website_qr_code_url = website_qr_code_url;
     if (invoice_custom_message !== undefined) updateData.invoice_custom_message = invoice_custom_message;
+    if (currency !== undefined) updateData.currency = currency;
 
     const { data: updatedCompany, error } = await (supabaseAdmin || supabase)
       .from('companies')

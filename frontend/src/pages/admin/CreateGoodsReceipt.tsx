@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { formatCurrency } from "@/lib/utils";
 
 export default function CreateGoodsReceipt() {
   const { id } = useParams<{ id: string }>();
@@ -448,10 +449,10 @@ export default function CreateGoodsReceipt() {
                             max={item.quantity_received}
                           />
                         </TableCell>
-                        <TableCell className="text-sm">₹{item.unit_price.toFixed(2)}</TableCell>
+                        <TableCell className="text-sm">{formatCurrency(item.unit_price)}</TableCell>
                         <TableCell className="text-sm">{item.tax_percentage}%</TableCell>
                         <TableCell className="font-medium text-sm">
-                          ₹{((item.quantity_accepted * item.unit_price) * (1 + (item.tax_percentage || 0) / 100)).toFixed(2)}
+                          {formatCurrency((item.quantity_accepted * item.unit_price) * (1 + (item.tax_percentage || 0) / 100))}
                         </TableCell>
                         <TableCell>
                           <Input
@@ -479,15 +480,15 @@ export default function CreateGoodsReceipt() {
               <div className="mt-4 flex flex-col items-end gap-1 border-t pt-4">
                 <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
                   <span>Subtotal:</span>
-                  <span>₹{items.reduce((sum, item) => sum + (item.quantity_accepted * item.unit_price), 0).toFixed(2)}</span>
+                  <span>{formatCurrency(items.reduce((sum, item) => sum + (item.quantity_accepted * item.unit_price), 0))}</span>
                 </div>
                 <div className="flex justify-between w-full max-w-[250px] text-sm text-muted-foreground">
                   <span>Tax:</span>
-                  <span>₹{items.reduce((sum, item) => sum + (item.quantity_accepted * item.unit_price * (item.tax_percentage || 0) / 100), 0).toFixed(2)}</span>
+                  <span>{formatCurrency(items.reduce((sum, item) => sum + (item.quantity_accepted * item.unit_price * (item.tax_percentage || 0) / 100), 0))}</span>
                 </div>
                 <div className="flex justify-between w-full max-w-[250px] font-bold text-lg pt-2 border-t mt-1">
                   <span>Total Amount:</span>
-                  <span>₹{items.reduce((sum, item) => sum + (item.quantity_accepted * item.unit_price * (1 + (item.tax_percentage || 0) / 100)), 0).toFixed(2)}</span>
+                  <span>{formatCurrency(items.reduce((sum, item) => sum + (item.quantity_accepted * item.unit_price * (1 + (item.tax_percentage || 0) / 100)), 0))}</span>
                 </div>
               </div>
             )}
@@ -514,7 +515,7 @@ export default function CreateGoodsReceipt() {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Total Amount</p>
-                  <p className="font-medium">₹{selectedPO.total_amount.toFixed(2)}</p>
+                  <p className="font-medium">{formatCurrency(selectedPO.total_amount)}</p>
                 </div>
               </CardContent>
             </Card>

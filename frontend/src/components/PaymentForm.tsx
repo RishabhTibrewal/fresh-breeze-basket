@@ -3,6 +3,7 @@ import { PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { Button } from './ui/button';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
+import { formatCurrency } from '@/lib/utils';
 
 interface PaymentFormProps {
   amount: number;
@@ -189,7 +190,7 @@ export const PaymentForm = ({ amount, clientSecret, onSuccess, onFailure }: Paym
             Processing...
           </>
         ) : (
-          `Pay ₹ ${amount.toFixed(2)}`
+          `Pay ${formatCurrency(amount)}`
         )}
       </Button>
       

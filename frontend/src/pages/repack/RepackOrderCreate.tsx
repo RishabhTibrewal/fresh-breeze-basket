@@ -23,6 +23,7 @@ import { repackService, CreateRepackOrderPayload } from '@/api/repackService';
 import { warehousesService } from '@/api/warehouses';
 import { ProductVariantCombobox } from '@/components/products/ProductVariantCombobox';
 import { WarehouseCombobox } from '@/components/warehouses/WarehouseCombobox';
+import { getCurrencySymbol } from '@/lib/utils';
 
 const repackOrderSchema = z.object({
   warehouse_id: z.string().min(1, "Warehouse is required"),
@@ -384,7 +385,7 @@ export default function RepackOrderCreate() {
                         name={`outputs.${index}.additional_cost_per_unit`}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-xs">Addl. Labor/Pkg Cost (₹)</FormLabel>
+                            <FormLabel className="text-xs">Addl. Labor/Pkg Cost ({getCurrencySymbol()})</FormLabel>
                             <FormControl>
                               <Input type="number" step="0.01" className="font-mono" {...field} />
                             </FormControl>

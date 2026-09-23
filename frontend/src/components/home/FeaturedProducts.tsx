@@ -19,7 +19,8 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ limit = 8 }) => {
     queryKey: ['products', 'featured'],
     queryFn: async () => {
       const allProducts = await productsService.getAll();
-      return allProducts.filter(product => product.is_featured);
+      const featured = allProducts.filter(product => product.is_featured);
+      return featured.length > 0 ? featured : allProducts;
     }
   });
 

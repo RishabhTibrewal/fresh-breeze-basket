@@ -36,6 +36,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { quotationsService, Quotation } from '@/api/quotations';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '@/lib/apiClient';
+import { formatCurrency } from '@/lib/utils';
 
 
 export default function Quotations() {
@@ -206,7 +207,7 @@ export default function Quotations() {
                       <TableCell>
                         {quotation.customers?.name || quotation.leads?.company_name || quotation.leads?.contact_name || 'N/A'}
                       </TableCell>
-                      <TableCell>₹ {quotation.total_amount?.toFixed(2)}</TableCell>
+                      <TableCell>{formatCurrency(quotation.total_amount || 0)}</TableCell>
                       <TableCell>
                         <Badge variant={getStatusBadgeVariant(quotation.status) as any}>
                           {quotation.status.charAt(0).toUpperCase() + quotation.status.slice(1)}
@@ -318,32 +319,32 @@ export default function Quotations() {
                             {item.variant?.name && <span className="text-muted-foreground text-xs block">{item.variant.name}</span>}
                           </TableCell>
                           <TableCell className="text-right">{item.quantity}</TableCell>
-                          <TableCell className="text-right">₹ {item.unit_price?.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(item.unit_price || 0)}</TableCell>
                           <TableCell className="text-right">{item.tax_percentage || 0}%</TableCell>
                           <TableCell className="text-right">{item.discount_percentage || 0}%</TableCell>
                           <TableCell className="text-right font-medium">
-                            ₹ {(item.line_total || ((item.quantity * item.unit_price) + (item.tax_amount || 0) - (item.discount_amount || 0))).toFixed(2)}
+                            {formatCurrency(item.line_total || ((item.quantity * item.unit_price) + (item.tax_amount || 0) - (item.discount_amount || 0)))}
                           </TableCell>
                         </TableRow>
                       ))}
                       <TableRow className="border-t-2">
                         <TableCell colSpan={5} className="text-right font-medium">Subtotal (Sum of Items)</TableCell>
-                        <TableCell className="text-right font-medium">₹ {(selectedQuotation.subtotal || 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-medium">{formatCurrency(selectedQuotation.subtotal || 0)}</TableCell>
                       </TableRow>
                       <TableRow>
                         <TableCell colSpan={5} className="text-right text-muted-foreground">Total Item Tax</TableCell>
-                        <TableCell className="text-right text-muted-foreground">₹ {(selectedQuotation.total_tax || 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">{formatCurrency(selectedQuotation.total_tax || 0)}</TableCell>
                       </TableRow>
                       <TableRow>
                         <TableCell colSpan={5} className="text-right text-muted-foreground">Total Discount (Incl. Extra)</TableCell>
-                        <TableCell className="text-right text-muted-foreground text-red-500">-₹ {(selectedQuotation.total_discount || 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right text-muted-foreground text-red-500">-{formatCurrency(selectedQuotation.total_discount || 0)}</TableCell>
                       </TableRow>
                       {(selectedQuotation.extra_discount_percentage > 0 || selectedQuotation.extra_discount_amount > 0) && (
                         <TableRow>
                           <TableCell colSpan={5} className="text-right text-xs text-muted-foreground italic">
                             Extra Discount {selectedQuotation.extra_discount_percentage > 0 ? `(${selectedQuotation.extra_discount_percentage}%)` : ''}
                           </TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground italic">-₹ {(selectedQuotation.extra_discount_amount || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground italic">-{formatCurrency(selectedQuotation.extra_discount_amount || 0)}</TableCell>
                         </TableRow>
                       )}
                       {/* Extra Charges */}
@@ -357,13 +358,13 @@ export default function Quotations() {
                                 <TableCell colSpan={5} className="text-right text-blue-600 text-sm">
                                   {charge.name}{taxPct > 0 ? ` (incl. ${taxPct}% tax)` : ''}
                                 </TableCell>
-                                <TableCell className="text-right text-blue-600 font-medium">₹ {total.toFixed(2)}</TableCell>
+                                <TableCell className="text-right text-blue-600 font-medium">{formatCurrency(total)}</TableCell>
                               </TableRow>
                             );
                           })}
                           <TableRow>
                             <TableCell colSpan={5} className="text-right text-muted-foreground text-xs">Total Extra Charges</TableCell>
-                            <TableCell className="text-right text-muted-foreground font-medium">₹ {(selectedQuotation.total_extra_charges || 0).toFixed(2)}</TableCell>
+                            <TableCell className="text-right text-muted-foreground font-medium">{formatCurrency(selectedQuotation.total_extra_charges || 0)}</TableCell>
                           </TableRow>
                         </>
                       )}
@@ -378,7 +379,7 @@ export default function Quotations() {
                       )}
                       <TableRow className="font-bold text-lg">
                         <TableCell colSpan={5} className="text-right">Grand Total</TableCell>
-                        <TableCell className="text-right text-green-600">₹ {selectedQuotation.total_amount?.toFixed(2)}</TableCell>
+                        <TableCell className="text-right text-green-600">{formatCurrency(selectedQuotation.total_amount || 0)}</TableCell>
                       </TableRow>
                     </TableBody>
                   </Table>

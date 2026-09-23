@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/table';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
+import { cn, formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 
 const statusBadge = (status: string) => {
@@ -134,8 +134,8 @@ export default function RepackOrders() {
                                 {out.product?.name} ({out.variant?.name})
                               </div>
                               <span className="text-[10px] text-muted-foreground ml-1 flex gap-2">
-                                <span>Unit Base Cost: ₹{out.unit_cost?.toFixed(2)}</span>
-                                {out.additional_cost_per_unit > 0 && <span>+ Addl: ₹{out.additional_cost_per_unit?.toFixed(2)}</span>}
+                                <span>Unit Base Cost: {formatCurrency(out.unit_cost || 0)}</span>
+                                {out.additional_cost_per_unit > 0 && <span>+ Addl: {formatCurrency(out.additional_cost_per_unit || 0)}</span>}
                               </span>
                             </li>
                           ))}

@@ -23,6 +23,7 @@ import { purchaseInvoicesService } from '@/api/purchaseInvoices';
 import { suppliersService } from '@/api/suppliers';
 import { useAuth } from '@/contexts/AuthContext';
 import { StatusBadge } from '@/components/procurement/StatusBadge';
+import { formatCurrency } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -213,21 +214,21 @@ export default function PurchaseInvoices() {
                             </div>
                           </TableCell>
                           <TableCell className="font-medium">
-                            ₹{invoice.total_amount.toFixed(2)}
+                            {formatCurrency(invoice.total_amount)}
                           </TableCell>
                           <TableCell>
                             <div className="space-y-1">
                               <div className="flex items-center justify-between text-sm">
                                 <span className="text-muted-foreground">Paid:</span>
                                 <span className="font-medium text-green-600">
-                                  ₹{invoice.paid_amount.toFixed(2)}
+                                  {formatCurrency(invoice.paid_amount)}
                                 </span>
                               </div>
                               {balance > 0 && (
                                 <div className="flex items-center justify-between text-sm">
                                   <span className="text-muted-foreground">Balance:</span>
                                   <span className="font-medium text-red-600">
-                                    ₹{balance.toFixed(2)}
+                                    {formatCurrency(balance)}
                                   </span>
                                 </div>
                               )}

@@ -506,7 +506,9 @@ export const createOrder = async (req: Request, res: Response) => {
       total_amount,
       credit_period,
       partial_payment_amount,
-      payment_intent_id
+      payment_intent_id,
+      delivery_slot,
+      delivery_date
     } = req.body;
     if (!req.user) {
       throw new ApiError(401, 'Authentication required');
@@ -666,7 +668,9 @@ export const createOrder = async (req: Request, res: Response) => {
         paymentStatus: finalPaymentStatus,
         totalAmount: total_amount,
         paymentIntentId: payment_intent_id || undefined,
-        customerId: customerData?.id || null
+        customerId: customerData?.id || null,
+        deliverySlot: delivery_slot || null,
+        deliveryDate: delivery_date || null
       },
       {
         userId,

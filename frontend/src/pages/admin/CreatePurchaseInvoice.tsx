@@ -19,6 +19,7 @@ import { handleApiError } from '@/utils/errorHandler';
 import { useAuth } from '@/contexts/AuthContext';
 import { StatusBadge } from '@/components/procurement/StatusBadge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { formatCurrency } from '@/lib/utils';
 import {
   Table,
   TableBody,
@@ -583,8 +584,8 @@ export default function CreatePurchaseInvoice() {
                                 step="0.01"
                               />
                             </TableCell>
-                            <TableCell className="text-sm">₹{item.tax_amount.toFixed(2)}</TableCell>
-                            <TableCell className="font-medium text-sm">₹{item.line_total.toFixed(2)}</TableCell>
+                            <TableCell className="text-sm">{formatCurrency(item.tax_amount)}</TableCell>
+                            <TableCell className="font-medium text-sm">{formatCurrency(item.line_total)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -636,15 +637,15 @@ export default function CreatePurchaseInvoice() {
               <div className="space-y-2 pt-4 border-t">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Items Subtotal:</span>
-                  <span>₹{subtotal.toFixed(2)}</span>
+                  <span>{formatCurrency(subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Tax:</span>
-                  <span className="text-red-500">+₹{taxAmount.toFixed(2)}</span>
+                  <span className="text-red-500">+{formatCurrency(taxAmount)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Item Discount:</span>
-                  <span className="text-green-600">-₹{discountAmount.toFixed(2)}</span>
+                  <span className="text-green-600">-{formatCurrency(discountAmount)}</span>
                 </div>
                 {(extraDiscountPct > 0 || extraDiscount > 0) && (
                   <div className="flex justify-between text-sm text-green-600 font-medium italic border-b pb-1">
@@ -653,15 +654,15 @@ export default function CreatePurchaseInvoice() {
                       {extraDiscountPct > 0 ? ` (${extraDiscountPct}%)` : ''}:
                     </span>
                     <span>
-                      -₹{extraDiscountPct > 0 
-                        ? (( (subtotal - discountAmount) * extraDiscountPct) / 100).toFixed(2)
-                        : extraDiscount.toFixed(2)}
+                      -{formatCurrency(extraDiscountPct > 0 
+                        ? (((subtotal - discountAmount) * extraDiscountPct) / 100)
+                        : extraDiscount)}
                     </span>
                   </div>
                 )}
                 <div className="flex justify-between font-bold text-xl pt-2 border-t mt-2 text-primary">
                   <span>Grand Total:</span>
-                  <span>₹{totalAmount.toFixed(2)}</span>
+                  <span>{formatCurrency(totalAmount)}</span>
                 </div>
               </div>
             </CardContent>
@@ -702,7 +703,7 @@ export default function CreatePurchaseInvoice() {
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Total Received</p>
-                      <p className="font-medium">₹{selectedGRN.total_received_amount?.toFixed(2) || '0.00'}</p>
+                      <p className="font-medium">{formatCurrency(selectedGRN.total_received_amount || 0)}</p>
                     </div>
                     {selectedGRN.receipt_date && (
                       <div>

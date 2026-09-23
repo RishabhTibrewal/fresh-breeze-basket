@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { PriceDisplay } from '@/components/products/PriceDisplay';
 import { Badge } from '@/components/ui/badge';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { cn } from '@/lib/utils';
+import { cn, formatCurrency } from '@/lib/utils';
 
 const CartDrawer = () => {
   const { state, removeFromCart, updateQuantity, isCartOpen, setIsCartOpen, isSyncing, syncCartWithBackend } = useCart();
@@ -138,7 +138,7 @@ const CartDrawer = () => {
               <div className="space-y-2 mb-4">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Subtotal</span>
-                  <span className="font-semibold">₹ {state.subtotal.toFixed(2)}</span>
+                  <span className="font-semibold">{formatCurrency(state.subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm text-gray-500">
                   <span>Shipping</span>
