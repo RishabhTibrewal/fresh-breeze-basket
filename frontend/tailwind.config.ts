@@ -1,5 +1,6 @@
 
 import type { Config } from "tailwindcss";
+import tailwindcssAnimate from "tailwindcss-animate";
 
 export default {
 	darkMode: ["class"],
@@ -93,9 +94,10 @@ export default {
 			fontFamily: {
 				montserrat: ['Montserrat', 'sans-serif'],
 				opensans: ['Open Sans', 'sans-serif'],
-				playfair: ['Playfair Display', 'serif']
+				playfair: ['Playfair Display', 'serif'],
+				blackbones: ["'Black Bones'", "'Caveat'", "'Kaushan Script'", 'cursive']
 			}
 		}
 	},
-	plugins: [require("tailwindcss-animate")],
+	plugins: [tailwindcssAnimate],
 } satisfies Config;

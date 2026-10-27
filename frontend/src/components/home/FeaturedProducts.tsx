@@ -1,18 +1,15 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import ProductCard from '@/components/products/ProductCard';
 import { productsService } from '@/api/products';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorMessage } from '@/components/ui/error-message';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowRight, Leaf } from 'lucide-react';
 
 interface FeaturedProductsProps {
   limit?: number;
 }
-
-const CARD_WIDTH = 240; // Reduced card width to fit 4 per row
-const VISIBLE_CARDS = 4;
 
 const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ limit = 8 }) => {
   const { data: products, isLoading, error } = useQuery({
@@ -25,49 +22,31 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ limit = 8 }) => {
   });
 
   const displayProducts = products && limit ? products.slice(0, limit) : products;
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  const scroll = (dir: 'left' | 'right') => {
-    if (scrollRef.current) {
-      const amount = CARD_WIDTH * Math.min(VISIBLE_CARDS, 2); // Scroll 2 cards at a time
-      scrollRef.current.scrollBy({
-        left: dir === 'left' ? -amount : amount,
-        behavior: 'smooth',
-      });
-    }
-  };
 
   if (isLoading) {
     return (
-      <section className="py-12 md:py-16 bg-gray-50">
-        <div className="container mx-auto px-4">
-          <div className="flex justify-between items-center mb-8">
-            <h2 className="section-title mb-0">Featured Products</h2>
-            <Link to="/products" className="text-primary font-medium hover:underline">
-              View All Products
-            </Link>
+      <section className="py-16 md:py-20 bg-white border-b border-gray-100">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-10">
+            <div>
+              <div className="inline-flex items-center gap-2 text-[#276B3C] font-semibold text-sm mb-2">
+                <Leaf className="w-4 h-4" />
+                <span>Our Bestsellers</span>
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-extrabold text-[#1E502B] font-serif">
+                Fresh Picks for a Healthier You
+              </h2>
+            </div>
           </div>
-          <div className="relative">
-            {/* Mobile view - scrollable */}
-            <div className="flex space-x-4 overflow-x-auto scrollbar-hide sm:hidden">
-              {Array(2).fill(0).map((_, index) => (
-                <div key={index} className="flex flex-col space-y-2 min-w-[160px]">
-                  <Skeleton className="h-40 w-full rounded-lg" />
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-4 w-1/2" />
-                </div>
-              ))}
-            </div>
-            {/* Desktop view - grid */}
-            <div className="hidden sm:grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-              {Array(VISIBLE_CARDS).fill(0).map((_, index) => (
-                <div key={index} className="flex flex-col space-y-2">
-                  <Skeleton className="h-48 w-full rounded-lg" />
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-4 w-1/2" />
-                </div>
-              ))}
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {Array(4).fill(0).map((_, index) => (
+              <div key={index} className="flex flex-col space-y-3">
+                <Skeleton className="h-56 w-full rounded-2xl" />
+                <Skeleton className="h-5 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
+                <Skeleton className="h-10 w-full rounded-xl" />
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -76,8 +55,8 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ limit = 8 }) => {
 
   if (error) {
     return (
-      <section className="py-12 md:py-16 bg-gray-50">
-        <div className="container mx-auto px-4">
+      <section className="py-16 md:py-20 bg-white border-b border-gray-100">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <ErrorMessage 
             title="Error" 
             message="Failed to load featured products" 
@@ -91,62 +70,49 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ limit = 8 }) => {
     return null;
   }
 
-  const showArrows = displayProducts.length > VISIBLE_CARDS;
-
   return (
-    <section className="py-12 md:py-16 bg-gray-50">
-      <div className="container mx-auto px-4">
-        <div className="flex justify-between items-center mb-8">
-          <h2 className="section-title mb-0">Featured Products</h2>
-          <Link to="/products" className="text-primary font-medium hover:underline">
-            View All Products
+    <section className="py-16 md:py-20 bg-white border-b border-gray-100 relative">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+        
+        {/* Header Row */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-10 gap-4">
+          <div>
+            <div className="inline-flex items-center gap-2 text-[#276B3C] font-semibold text-sm mb-2">
+              <Leaf className="w-4 h-4 fill-[#276B3C]" />
+              <span>Our Bestsellers</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-[#1E502B] font-serif mb-2">
+              Fresh Picks for a Healthier You
+            </h2>
+            <p className="text-gray-600 text-base sm:text-lg">
+              Handpicked favorites, loved by our customers.
+            </p>
+          </div>
+
+          <Link 
+            to="/products" 
+            className="inline-flex items-center gap-2 text-[#276B3C] hover:text-[#1E502B] font-bold text-sm sm:text-base group transition-colors"
+          >
+            <span>View All</span>
+            <div className="w-7 h-7 rounded-full bg-[#E8F5E9] text-[#276B3C] flex items-center justify-center group-hover:bg-[#276B3C] group-hover:text-white transition-colors">
+              <ArrowRight className="w-4 h-4" />
+            </div>
           </Link>
         </div>
         
-        {/* Mobile view - scrollable */}
-        <div className="relative block sm:hidden">
-          {showArrows && (
-            <>
-              <button
-                className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white rounded-full shadow p-1.5 hover:bg-gray-100"
-                onClick={() => scroll('left')}
-                aria-label="Scroll left"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white rounded-full shadow p-1.5 hover:bg-gray-100"
-                onClick={() => scroll('right')}
-                aria-label="Scroll right"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </>
-          )}
-          <div
-            ref={scrollRef}
-            className="grid grid-cols-2 gap-3 overflow-x-auto scrollbar-hide px-1"
-            style={{ scrollBehavior: 'smooth', gridAutoFlow: 'column' }}
-          >
-            {displayProducts.map((product) => (
-              <div key={product.id} className="min-w-[160px] max-w-[160px]">
-                <ProductCard product={product} />
-              </div>
-            ))}
-          </div>
-        </div>
-        
-        {/* Desktop view - grid */}
-        <div className="hidden sm:grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+        {/* Products Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {displayProducts.map((product) => (
-            <div key={product.id}>
+            <div key={product.id} className="h-full">
               <ProductCard product={product} />
             </div>
           ))}
         </div>
+
       </div>
     </section>
   );
 };
 
 export default FeaturedProducts;
+

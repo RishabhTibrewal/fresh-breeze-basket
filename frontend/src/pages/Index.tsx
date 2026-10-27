@@ -50,11 +50,8 @@ const Index = () => {
 
       <main className="flex-grow">
         <Hero />
-        <ValueProps />
         <FeaturedCategories />
         <FeaturedProducts />
-        <SpecialsCarousel />
-        <HowItWorks />
         <Testimonials />
       </main>
       <Footer />

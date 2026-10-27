@@ -76,17 +76,6 @@ const CategoryDrawer = () => {
               </ul>
             )}
           </div>
-          
-          {/* Footer */}
-          <div className="border-t p-4">
-            <Link 
-              to="/categories"
-              onClick={() => setIsCategoryDrawerOpen(false)}
-              className="block w-full bg-primary text-white py-3 text-center rounded-md hover:bg-opacity-90 transition-colors"
-            >
-              View All Categories
-            </Link>
-          </div>
         </div>
       </div>
     </>

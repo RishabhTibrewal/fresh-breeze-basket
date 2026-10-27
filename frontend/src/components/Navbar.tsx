@@ -32,9 +32,7 @@ const Navbar = () => {
   const navLinks = [
     { name: 'Home', path: '/', icon: <Home className="h-4 w-4 mr-2" /> },
     { name: 'Products', path: '/products', icon: <Package className="h-4 w-4 mr-2" /> },
-    { name: 'Categories', path: '/categories', icon: <LayoutGrid className="h-4 w-4 mr-2" /> },
     { name: 'About Us', path: '/about', icon: <Info className="h-4 w-4 mr-2" /> },
-    { name: 'Contact', path: '/contact', icon: <Mail className="h-4 w-4 mr-2" /> },
   ];
 
   return (
