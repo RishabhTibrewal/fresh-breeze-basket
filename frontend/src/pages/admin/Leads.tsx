@@ -46,7 +46,6 @@ import {
   Phone,
   Mail,
   Building2,
-  DollarSign,
   Calendar,
   MapPin,
   Globe,
@@ -64,6 +63,7 @@ import {
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { adminService, AdminLead, GetLeadsParams, CreateLeadData, UpdateLeadData } from '@/api/admin';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import {
   Form,
   FormControl,
@@ -639,7 +639,7 @@ export default function AdminLeads() {
                         </Badge>
                         {lead.estimated_value > 0 && (
                           <div className="flex items-center gap-1 text-xs font-medium">
-                            <DollarSign className="h-3 w-3 text-green-600" />
+                            <CurrencyIcon className="h-3 w-3 text-green-600" />
                             {formatCurrency(lead.estimated_value)}
                           </div>
                         )}
@@ -745,7 +745,7 @@ export default function AdminLeads() {
                         <TableCell className="px-2 py-2">
                           {lead.estimated_value > 0 ? (
                             <div className="flex items-center gap-1 text-sm">
-                              <DollarSign className="h-4 w-4 text-green-600 flex-shrink-0" />
+                              <CurrencyIcon className="h-4 w-4 text-green-600 flex-shrink-0" />
                               <span className="truncate">{formatCurrency(lead.estimated_value)}</span>
                             </div>
                           ) : (

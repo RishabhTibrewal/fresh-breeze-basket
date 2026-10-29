@@ -1,5 +1,6 @@
 import React from 'react';
-import { Truck, DollarSign, CheckCircle } from 'lucide-react';
+import { Truck, CheckCircle } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -58,7 +59,7 @@ export default function GrnReport() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <KpiCard title="Total GRNs"       value={(summary.total_grns as number ?? 0).toLocaleString()}             icon={<Truck />}       iconColor="bg-blue-50 text-blue-600"       isLoading={isLoading} />
-        <KpiCard title="Total Value"      value={formatCurrency(Number(summary.total_value ?? 0))}                 icon={<DollarSign />}  iconColor="bg-emerald-50 text-emerald-600"  isLoading={isLoading} />
+        <KpiCard title="Total Value"      value={formatCurrency(Number(summary.total_value ?? 0))}                 icon={<CurrencyIcon className="h-5 w-5" />}  iconColor="bg-emerald-50 text-emerald-600"  isLoading={isLoading} />
         <KpiCard title="Completed GRNs"   value={(summary.completed_grns as number ?? 0).toLocaleString()}         icon={<CheckCircle />} iconColor="bg-green-50 text-green-600"     isLoading={isLoading} />
       </div>
 

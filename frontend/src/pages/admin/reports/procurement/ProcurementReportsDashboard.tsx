@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
-  ShoppingCart, DollarSign, TrendingUp, FileText,
+  ShoppingCart, TrendingUp, FileText,
   Truck, ChevronRight, AlertCircle,
 } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { Card, CardContent } from '@/components/ui/card';
 import { KpiCard } from '@/components/reports/KpiCard';
 import { ReportFilters } from '@/components/reports/ReportFilters';
@@ -29,7 +30,7 @@ const REPORT_LINKS = [
   { label: 'Invoice Register',       path: '/reports/procurement/invoice-register', icon: FileText,    color: 'text-blue-600 bg-blue-50' },
   { label: 'GRN Report',             path: '/reports/procurement/grn-report',       icon: Truck,       color: 'text-emerald-600 bg-emerald-50' },
   { label: 'Vendor-wise Purchase',   path: '/reports/procurement/vendor-wise',      icon: ShoppingCart,color: 'text-violet-600 bg-violet-50' },
-  { label: 'Supplier Payment Register', path: '/reports/procurement/payment-register', icon: DollarSign, color: 'text-amber-600 bg-amber-50' },
+  { label: 'Supplier Payment Register', path: '/reports/procurement/payment-register', icon: CurrencyIcon, color: 'text-amber-600 bg-amber-50' },
 ];
 
 export default function ProcurementReportsDashboard() {
@@ -64,7 +65,7 @@ export default function ProcurementReportsDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <KpiCard title="Total Invoices"      value={(kpis?.total_invoices ?? 0).toLocaleString()}           icon={<FileText />}     iconColor="bg-blue-50 text-blue-600"      isLoading={isLoading} />
         <KpiCard title="Purchase Value"      value={formatCurrency(kpis?.total_purchase_value ?? 0)}        icon={<TrendingUp />}   iconColor="bg-emerald-50 text-emerald-600" isLoading={isLoading} />
-        <KpiCard title="Total Paid"          value={formatCurrency(kpis?.total_paid ?? 0)}                  icon={<DollarSign />}   iconColor="bg-green-50 text-green-600"     isLoading={isLoading} />
+        <KpiCard title="Total Paid"          value={formatCurrency(kpis?.total_paid ?? 0)}                  icon={<CurrencyIcon className="h-5 w-5" />}   iconColor="bg-green-50 text-green-600"     isLoading={isLoading} />
         <KpiCard title="Outstanding"         value={formatCurrency(kpis?.total_outstanding ?? 0)}           icon={<AlertCircle />}  iconColor="bg-red-50 text-red-600"        isLoading={isLoading} />
         <KpiCard title="GRNs Received"       value={(kpis?.total_grns ?? 0).toLocaleString()}               icon={<Truck />}        iconColor="bg-violet-50 text-violet-600"  isLoading={isLoading} />
         <KpiCard title="Payments Made"       value={(kpis?.total_payments ?? 0).toLocaleString()}           icon={<ShoppingCart />} iconColor="bg-amber-50 text-amber-600"    isLoading={isLoading} />

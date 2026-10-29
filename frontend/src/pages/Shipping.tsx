@@ -1,9 +1,10 @@
 import React from 'react';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
-import { formatCurrency } from '@/lib/utils';
+import { useCompanyCurrency } from '@/hooks/useCompanyCurrency';
 
 const Shipping = () => {
+  const { formatCurrency } = useCompanyCurrency();
   return (
     <>
       <Navbar />

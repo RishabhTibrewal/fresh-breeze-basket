@@ -9,7 +9,8 @@ import {
   Tooltip as ChartTooltip,
   Legend as ChartLegend,
 } from 'chart.js';
-import { ShoppingBasket, Boxes, Sparkles, DollarSign } from 'lucide-react';
+import { ShoppingBasket, Boxes, Sparkles } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -76,7 +77,7 @@ export default function AverageBasketMetrics() {
         <KpiCard
           title="Avg Basket"
           value={formatCurrency(Number(summary.avg_basket_value ?? 0))}
-          icon={<DollarSign />}
+          icon={<CurrencyIcon className="h-5 w-5" />}
           iconColor="bg-indigo-50 text-indigo-600"
           isLoading={isLoading}
         />

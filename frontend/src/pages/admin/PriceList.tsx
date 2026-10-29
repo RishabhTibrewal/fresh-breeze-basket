@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { Search, Plus, Edit, Trash2, DollarSign } from 'lucide-react';
+import { Search, Plus, Edit, Trash2 } from 'lucide-react';
 import { pricesService, ProductPrice } from '@/api/prices';
 import { productsService, Product } from '@/api/products';
 import { variantsService, ProductVariant } from '@/api/variants';
@@ -29,7 +29,7 @@ export default function PriceList() {
 
   const { data: products = [] } = useQuery<Product[]>({
     queryKey: ['products'],
-    queryFn: productsService.getAll,
+    queryFn: () => productsService.getAll(),
   });
 
   const { data: variants = [] } = useQuery<ProductVariant[]>({

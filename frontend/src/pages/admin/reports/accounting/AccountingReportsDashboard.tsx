@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
-  TrendingUp, DollarSign, CreditCard,
+  TrendingUp, CreditCard,
   FileText, ArrowUpDown, ChevronRight,
 } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { Card, CardContent } from '@/components/ui/card';
 import { KpiCard } from '@/components/reports/KpiCard';
 import { ReportFilters } from '@/components/reports/ReportFilters';
@@ -63,7 +64,7 @@ export default function AccountingReportsDashboard() {
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <KpiCard title="Total Revenue"      value={formatCurrency(kpis?.total_revenue ?? 0)}        icon={<TrendingUp />}  iconColor="bg-emerald-50 text-emerald-600" isLoading={isLoading} />
-        <KpiCard title="Purchase Cost"      value={formatCurrency(kpis?.total_purchase_cost ?? 0)}  icon={<DollarSign />}  iconColor="bg-red-50 text-red-600"         isLoading={isLoading} />
+        <KpiCard title="Purchase Cost"      value={formatCurrency(kpis?.total_purchase_cost ?? 0)}  icon={<CurrencyIcon className="h-5 w-5" />}  iconColor="bg-red-50 text-red-600"         isLoading={isLoading} />
         <KpiCard title="Gross Profit"       value={formatCurrency(kpis?.gross_profit ?? 0)}         icon={<TrendingUp />}  iconColor="bg-blue-50 text-blue-600"       isLoading={isLoading} />
         <KpiCard title="Amount Collected"   value={formatCurrency(kpis?.total_collected ?? 0)}      icon={<CreditCard />}  iconColor="bg-violet-50 text-violet-600"   isLoading={isLoading} />
         <KpiCard title="Tax Collected"      value={formatCurrency(kpis?.total_tax_collected ?? 0)}  icon={<FileText />}    iconColor="bg-amber-50 text-amber-600"     isLoading={isLoading} />

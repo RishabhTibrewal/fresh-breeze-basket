@@ -223,14 +223,42 @@ export const getCompanyBySlug = async (req: Request, res: Response) => {
     }
 
     const client = supabaseAdmin || supabase;
-    const { data: company, error } = await client
-      .from('companies')
-      .select('id, name, slug, is_active, currency')
-      .eq('slug', slug)
-      .eq('is_active', true)
-      .single();
+    let company: any = null;
 
-    if (error || !company) {
+    if (slug !== 'default') {
+      const { data } = await client
+        .from('companies')
+        .select('id, name, slug, is_active, currency')
+        .eq('slug', slug)
+        .eq('is_active', true)
+        .maybeSingle();
+      company = data;
+    }
+
+    // Fallback if slug is 'default' or not found by exact slug
+    if (!company) {
+      if (req.companyId) {
+        const { data } = await client
+          .from('companies')
+          .select('id, name, slug, is_active, currency')
+          .eq('id', req.companyId)
+          .eq('is_active', true)
+          .maybeSingle();
+        company = data;
+      }
+      if (!company) {
+        const { data } = await client
+          .from('companies')
+          .select('id, name, slug, is_active, currency')
+          .eq('is_active', true)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        company = data;
+      }
+    }
+
+    if (!company) {
       return res.status(404).json({
         success: false,
         message: 'Company not found'

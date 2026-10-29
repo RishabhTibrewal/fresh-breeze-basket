@@ -76,7 +76,7 @@ export default function StockMovements() {
 
   const { data: products = [] } = useQuery<Product[]>({
     queryKey: ['products'],
-    queryFn: productsService.getAll,
+    queryFn: () => productsService.getAll(),
   });
 
   const selectedProductId = filters.product_id;

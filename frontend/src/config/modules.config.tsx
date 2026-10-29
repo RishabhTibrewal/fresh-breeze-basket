@@ -1,11 +1,12 @@
+import React from 'react';
 import { LucideIcon } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import {
   ShoppingBag,
   ShoppingCart,
   Package,
   FileText,
-  DollarSign,
   BarChart3,
   Store,
   Settings,
@@ -62,7 +63,7 @@ export interface ModuleCTA {
 export interface SidebarItem {
   label: string;
   route: string;
-  icon: LucideIcon;
+  icon: LucideIcon | React.ComponentType<{ className?: string }>;
   permission?: string;
   roles?: string[];
   badge?: string;
@@ -74,7 +75,7 @@ export interface ModuleConfig {
   label: string;
   description: string;
   route: string;
-  icon: LucideIcon;
+  icon: LucideIcon | React.ComponentType<{ className?: string }>;
   iconColor?: string;
   permissions: string[];
   showOnDashboard: boolean;
@@ -281,7 +282,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
     label: 'Accounting',
     description: 'Financial management & ledgers',
     route: '/accounting',
-    icon: DollarSign,
+    icon: CurrencyIcon,
     iconColor: 'text-red-600',
     permissions: ['accounting.read'],
     showOnDashboard: true,
@@ -303,7 +304,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
       {
         label: 'Reports',
         route: '/reports/accounting',
-        icon: DollarSign,
+        icon: CurrencyIcon,
         permission: 'reports.read',
         children: [
           { label: 'Dashboard',             route: '/reports/accounting',                        icon: BarChart3,  permission: 'reports.read' },
@@ -374,7 +375,7 @@ export const modulesConfig: Record<string, ModuleConfig> = {
       {
         label: 'Accounting Reports',
         route: '/reports/accounting',
-        icon: DollarSign,
+        icon: CurrencyIcon,
         permission: 'reports.read',
         children: [
           { label: 'Dashboard',             route: '/reports/accounting',                        icon: BarChart3,  permission: 'reports.read' },

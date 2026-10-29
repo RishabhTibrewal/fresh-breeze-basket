@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, ArrowUpDown, User, DollarSign, Calendar, AlertTriangle } from "lucide-react";
+import { Search, ArrowUpDown, User, Calendar, AlertTriangle } from "lucide-react";
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';

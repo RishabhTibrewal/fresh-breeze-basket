@@ -1,6 +1,7 @@
 import React from 'react';
 import { Badge } from '@/components/ui/badge';
-import { cn, formatCurrency } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { useCompanyCurrency } from '@/hooks/useCompanyCurrency';
 
 interface PriceDisplayProps {
   mrpPrice?: number | null;
@@ -17,6 +18,7 @@ export const PriceDisplay: React.FC<PriceDisplayProps> = ({
   size = 'md',
   className,
 }) => {
+  const { formatCurrency } = useCompanyCurrency();
   // Safely coerce nullish values to numbers so .toFixed() never throws
   const safeMrp = Number(mrpPrice) || 0;
   const safeSale = salePrice != null ? Number(salePrice) : safeMrp;

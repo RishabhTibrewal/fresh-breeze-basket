@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ShoppingCart, Heart, Minus, Plus, ChevronDown } from 'lucide-react';
 import { Product, ProductVariant } from '@/api/products';
 import { cn } from '@/lib/utils';
+import { useCompanyCurrency } from '@/hooks/useCompanyCurrency';
 import { useCart } from '@/contexts/CartContext';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -25,6 +26,7 @@ interface ProductCardProps {
 
 const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const { state: cartState, addToCart, updateQuantity, removeFromCart } = useCart();
+  const { formatCurrency } = useCompanyCurrency();
   const isMobile = useIsMobile();
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   const [showVariantSelector, setShowVariantSelector] = useState(false);
@@ -162,11 +164,11 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             {variantPrice ? (
               <>
                 <span className="font-extrabold text-[#1E502B] text-sm sm:text-base">
-                  ₹{variantPrice.sale_price || variantPrice.mrp_price}
+                  {formatCurrency(variantPrice.sale_price || variantPrice.mrp_price)}
                 </span>
                 {variantPrice.sale_price < variantPrice.mrp_price && (
                   <span className="text-xs text-gray-400 line-through">
-                    ₹{variantPrice.mrp_price}
+                    {formatCurrency(variantPrice.mrp_price)}
                   </span>
                 )}
               </>
@@ -208,7 +210,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
                     )}
                   >
                     <span>{variant.name}</span>
-                    <span className="font-bold">₹{variant.price?.sale_price || variant.price?.mrp_price}</span>
+                    <span className="font-bold">{formatCurrency(variant.price?.sale_price || variant.price?.mrp_price)}</span>
                   </button>
                 ))}
               </div>

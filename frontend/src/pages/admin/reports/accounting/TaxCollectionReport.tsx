@@ -1,5 +1,6 @@
 import React from 'react';
-import { FileText, DollarSign } from 'lucide-react';
+import { FileText } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -44,7 +45,7 @@ export default function TaxCollectionReport() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <KpiCard title="Total Taxable Value" value={formatCurrency(Number(summary.total_taxable_value ?? 0))} icon={<FileText />}   iconColor="bg-blue-50 text-blue-600"      isLoading={isLoading} />
-        <KpiCard title="Total Tax Collected" value={formatCurrency(Number(summary.total_tax_collected ?? 0))} icon={<DollarSign />} iconColor="bg-amber-50 text-amber-600"    isLoading={isLoading} />
+        <KpiCard title="Total Tax Collected" value={formatCurrency(Number(summary.total_tax_collected ?? 0))} icon={<CurrencyIcon className="h-5 w-5" />} iconColor="bg-amber-50 text-amber-600"    isLoading={isLoading} />
       </div>
 
       <div className="flex flex-wrap gap-2 p-3 bg-muted/30 border rounded-lg">

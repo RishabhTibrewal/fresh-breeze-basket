@@ -18,7 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Eye, DollarSign, CheckCircle, Clock, XCircle, Edit, Calendar, User } from "lucide-react";
+import { Plus, Search, Eye, CheckCircle, Clock, XCircle, Edit, Calendar, User } from "lucide-react";
+import CurrencyIcon from "@/components/CurrencyIcon";
 import { paymentsService, Payment } from '@/api/payments';
 import { useCanAccess } from '@/hooks/usePermissions';
 import {
@@ -121,7 +122,7 @@ export default function Payments() {
   const updatePaymentMutation = useMutation({
     mutationFn: (data: { id: string; status?: string; amount?: number; payment_method?: string; transaction_id?: string | null; cheque_no?: string | null; payment_date?: string }) => {
       const { id, ...paymentData } = data;
-      return paymentsService.update(id, paymentData);
+      return paymentsService.update(id, paymentData as any);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payments'] });
@@ -191,7 +192,7 @@ export default function Payments() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Payments</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CurrencyIcon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(totalAmount)}</div>

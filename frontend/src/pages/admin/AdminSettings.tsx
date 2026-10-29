@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Search, Shield, User, UserCheck, Loader2, DollarSign } from 'lucide-react';
+import { Search, Shield, User, UserCheck, Loader2 } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import {
   Card,
   CardContent,
@@ -36,7 +37,7 @@ const ROLE_ICONS = {
   user: User,
   admin: Shield,
   sales: UserCheck,
-  accounts: DollarSign,
+  accounts: CurrencyIcon,
 };
 
 export default function AdminSettings() {
@@ -360,7 +361,7 @@ export default function AdminSettings() {
             </div>
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <DollarSign className="h-5 w-5 text-green-600" />
+                <CurrencyIcon className="h-5 w-5 text-green-600" />
                 <span className="font-semibold">Accounts</span>
               </div>
               <p className="text-sm text-muted-foreground ml-7">

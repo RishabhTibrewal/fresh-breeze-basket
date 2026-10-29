@@ -6,12 +6,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { PriceDisplay } from '@/components/products/PriceDisplay';
 import { Badge } from '@/components/ui/badge';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { cn, formatCurrency } from '@/lib/utils';
+import { useCompanyCurrency } from '@/hooks/useCompanyCurrency';
+import { cn } from '@/lib/utils';
 
 const CartDrawer = () => {
   const { state, removeFromCart, updateQuantity, isCartOpen, setIsCartOpen, isSyncing, syncCartWithBackend } = useCart();
   const { user } = useAuth();
   const isMobile = useIsMobile();
+  const { formatCurrency } = useCompanyCurrency();
 
   return (
     <>

@@ -1,5 +1,6 @@
 import React from 'react';
-import { FileText, DollarSign, Clock, AlertCircle } from 'lucide-react';
+import { FileText, Clock, AlertCircle } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -84,7 +85,7 @@ export default function InvoiceRegister() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard title="Total Invoices"   value={(summary.total_invoices as number ?? 0).toLocaleString()}      icon={<FileText />}    iconColor="bg-blue-50 text-blue-600"       isLoading={isLoading} />
-        <KpiCard title="Total Amount"     value={formatCurrency(Number(summary.total_amount ?? 0))}             icon={<DollarSign />}  iconColor="bg-emerald-50 text-emerald-600"  isLoading={isLoading} />
+        <KpiCard title="Total Amount"     value={formatCurrency(Number(summary.total_amount ?? 0))}             icon={<CurrencyIcon className="h-5 w-5" />}  iconColor="bg-emerald-50 text-emerald-600"  isLoading={isLoading} />
         <KpiCard title="Total Paid"       value={formatCurrency(Number(summary.total_paid ?? 0))}               icon={<Clock />}       iconColor="bg-green-50 text-green-600"     isLoading={isLoading} />
         <KpiCard title="Outstanding"      value={formatCurrency(Number(summary.total_outstanding ?? 0))}        icon={<AlertCircle />} iconColor="bg-red-50 text-red-600"         isLoading={isLoading} />
       </div>

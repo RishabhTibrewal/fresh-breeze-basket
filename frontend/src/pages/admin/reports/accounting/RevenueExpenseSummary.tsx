@@ -1,5 +1,6 @@
 import React from 'react';
-import { TrendingUp, TrendingDown, DollarSign, BarChart3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -62,7 +63,7 @@ export default function RevenueExpenseSummary() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard title="Total Revenue"   value={formatCurrency(Number(summary.total_revenue ?? 0))}        icon={<TrendingUp />}  iconColor="bg-emerald-50 text-emerald-600" isLoading={isLoading} />
         <KpiCard title="Purchase Cost"   value={formatCurrency(Number(summary.total_cost ?? 0))}           icon={<TrendingDown />} iconColor="bg-red-50 text-red-600"        isLoading={isLoading} />
-        <KpiCard title="Gross Profit"    value={formatCurrency(Number(summary.gross_profit ?? 0))}         icon={<DollarSign />}  iconColor="bg-blue-50 text-blue-600"       isLoading={isLoading} />
+        <KpiCard title="Gross Profit"    value={formatCurrency(Number(summary.gross_profit ?? 0))}         icon={<CurrencyIcon className="h-5 w-5" />}  iconColor="bg-blue-50 text-blue-600"       isLoading={isLoading} />
         <KpiCard title="Gross Margin"    value={`${Number(summary.gross_margin_pct ?? 0).toFixed(1)}%`}   icon={<BarChart3 />}   iconColor="bg-violet-50 text-violet-600"   isLoading={isLoading} />
       </div>
 

@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from '@/components/ui/badge';
-import { Search, ArrowLeft, Plus, Eye, Edit, Calendar, DollarSign, CreditCard } from "lucide-react";
+import { Search, ArrowLeft, Plus, Eye, Edit, Calendar, CreditCard } from "lucide-react";
 import { format } from 'date-fns';
 import { customerService, CustomerOrder } from '@/api/customer';
 import { toast } from 'sonner';

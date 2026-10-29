@@ -81,7 +81,7 @@ export default function PriceForm() {
 
   const { data: products = [] } = useQuery<Product[]>({
     queryKey: ['products'],
-    queryFn: productsService.getAll,
+    queryFn: () => productsService.getAll(),
   });
 
   const selectedVariantId = form.watch('variant_id');
@@ -152,7 +152,7 @@ export default function PriceForm() {
         valid_from: data.valid_from,
         valid_until: data.valid_until || null,
       };
-      return pricesService.create(createData);
+      return pricesService.create(data.variant_id!, createData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['prices'] });

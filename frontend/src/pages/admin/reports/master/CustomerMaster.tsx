@@ -1,5 +1,6 @@
 import React from 'react';
-import { Users, DollarSign, AlertCircle } from 'lucide-react';
+import { Users, AlertCircle } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -60,7 +61,7 @@ export default function CustomerMaster() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <KpiCard title="Total Customers"  value={(summary.total_customers as number ?? 0).toLocaleString()}     icon={<Users />}       iconColor="bg-emerald-50 text-emerald-600" isLoading={isLoading} />
-        <KpiCard title="Total Credit"     value={formatCurrency(Number(summary.total_credit_limit ?? 0))}       icon={<DollarSign />}  iconColor="bg-blue-50 text-blue-600"       isLoading={isLoading} />
+        <KpiCard title="Total Credit"     value={formatCurrency(Number(summary.total_credit_limit ?? 0))}       icon={<CurrencyIcon className="h-5 w-5" />}  iconColor="bg-blue-50 text-blue-600"       isLoading={isLoading} />
         <KpiCard title="Total Outstanding"value={formatCurrency(Number(summary.total_outstanding ?? 0))}        icon={<AlertCircle />} iconColor="bg-red-50 text-red-600"         isLoading={isLoading} />
       </div>
 

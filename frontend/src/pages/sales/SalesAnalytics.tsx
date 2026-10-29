@@ -20,7 +20,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  DollarSign,
   ShoppingCart,
   TrendingUp,
   TrendingDown,
@@ -30,6 +29,7 @@ import {
   BarChart3,
   Calendar
 } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ordersService } from '@/api/orders';
 import { formatCurrency } from '@/lib/utils';
 
@@ -174,7 +174,7 @@ export default function SalesAnalytics() {
         <Card className="w-full min-w-0 max-w-full overflow-x-hidden">
           <CardHeader className="flex flex-row items-center justify-between pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
             <CardTitle className="text-xs sm:text-sm font-medium">Total Revenue</CardTitle>
-            <DollarSign className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0" />
+            <CurrencyIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0" />
           </CardHeader>
           <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
             <div className="text-lg sm:text-xl lg:text-2xl font-bold break-words">{formatCurrency(revenue.total)}</div>

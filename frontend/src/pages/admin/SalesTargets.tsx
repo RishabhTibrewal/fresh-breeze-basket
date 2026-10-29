@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Target, Calendar, DollarSign } from 'lucide-react';
+import { Plus, Edit, Trash2, Target, Calendar } from 'lucide-react';
 import {
   Card,
   CardContent,

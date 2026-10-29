@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
-  DollarSign, ShoppingCart, TrendingUp, TrendingDown, RotateCcw,
+  ShoppingCart, TrendingUp, TrendingDown, RotateCcw,
   BarChart3, Users, Package, Target, Clock, ChevronRight,
   CreditCard, Truck, Tag, UserCheck,
   Layers, Boxes, PlusSquare, CalendarClock, Trophy,
 } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { KpiCard } from '@/components/reports/KpiCard';
@@ -101,7 +102,7 @@ export default function SalesReportsDashboard() {
           value={isLoading ? '…' : formatCurrency(kpis?.revenue_this_period ?? 0)}
           trend={kpis?.revenue_growth_pct}
           subtitle="vs prev period"
-          icon={<DollarSign />}
+          icon={<CurrencyIcon className="h-5 w-5" />}
           iconColor="bg-blue-50 text-blue-600"
           isLoading={isLoading}
         />

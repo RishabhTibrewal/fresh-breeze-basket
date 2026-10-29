@@ -137,7 +137,7 @@ export default function CreatePayment() {
   }, [selectedOrder, remainingBalance, form]);
 
   const createPaymentMutation = useMutation({
-    mutationFn: (data: PaymentFormValues) => paymentsService.create(data),
+    mutationFn: (data: PaymentFormValues) => paymentsService.create(data as any),
     onSuccess: () => {
       toast.success('Payment created successfully');
       queryClient.invalidateQueries({ queryKey: ['payments'] });

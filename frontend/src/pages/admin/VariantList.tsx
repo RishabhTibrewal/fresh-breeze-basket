@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Edit, Trash2, Package, DollarSign } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Package } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { variantsService } from '@/api/variants';
 import { productsService, ProductVariant } from '@/api/products';

@@ -26,7 +26,6 @@ import {
   Phone,
   FileText,
   Calendar,
-  DollarSign,
   CreditCard,
   ArrowLeft,
   Clock,
@@ -45,6 +44,7 @@ import { partiesService } from '@/api/parties';
 import { invoicesService } from '@/api/invoices';
 import { ErrorMessage } from '@/components/ui/error-message';
 import { formatCurrency } from '@/lib/utils';
+import CurrencyIcon from '@/components/CurrencyIcon';
 
 export default function SupplierDetails() {
   const { id } = useParams<{ id: string }>();
@@ -281,7 +281,7 @@ export default function SupplierDetails() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                  <DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <CurrencyIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                   Tax & Identifiers
                 </CardTitle>
               </CardHeader>

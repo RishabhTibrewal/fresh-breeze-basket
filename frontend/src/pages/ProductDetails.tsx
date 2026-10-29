@@ -31,6 +31,7 @@ import { toast } from 'sonner';
 import { VariantSelector } from '@/components/products/VariantSelector';
 import { StockDisplay } from '@/components/inventory/StockDisplay';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useCompanyCurrency } from '@/hooks/useCompanyCurrency';
 import { cn, formatCurrency } from '@/lib/utils';
 
 // Store-level highlights shown under the short description
@@ -39,13 +40,6 @@ const HIGHLIGHTS = [
   { icon: FlaskConical, title: 'Chemical Free', subtitle: 'Safe for your family' },
   { icon: ShieldCheck, title: 'Farm Fresh', subtitle: 'Direct from farmers' },
   { icon: HeartHandshake, title: 'Healthy Choice', subtitle: 'For a better you' },
-];
-
-// Trust badges shown under the action buttons
-const TRUST_ITEMS = [
-  { icon: Truck, title: 'Free Shipping', subtitle: `on orders above ${formatCurrency(100)}` },
-  { icon: ShieldCheck, title: 'Secure Payments', subtitle: '100% secure checkout' },
-  { icon: RotateCcw, title: 'Easy Returns', subtitle: 'within 7 days' },
 ];
 
 const WHY_LOVE_IT = [
@@ -88,6 +82,7 @@ const parseNutrition = (info: string | null): { label: string; value: string }[]
 
 const ProductDetails = () => {
   const { id } = useParams<{ id: string }>();
+  const { formatCurrency } = useCompanyCurrency();
   const [quantity, setQuantity] = useState(1);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
@@ -568,7 +563,11 @@ const ProductDetails = () => {
 
               {/* Trust row */}
               <div className="grid grid-cols-3 gap-2">
-                {TRUST_ITEMS.map(({ icon: Icon, title, subtitle }, idx) => (
+                {[
+                  { icon: Truck, title: 'Free Shipping', subtitle: `on orders above ${formatCurrency(100)}` },
+                  { icon: ShieldCheck, title: 'Secure Payments', subtitle: '100% secure checkout' },
+                  { icon: RotateCcw, title: 'Easy Returns', subtitle: 'within 7 days' },
+                ].map(({ icon: Icon, title, subtitle }, idx) => (
                   <div
                     key={title}
                     className={cn(

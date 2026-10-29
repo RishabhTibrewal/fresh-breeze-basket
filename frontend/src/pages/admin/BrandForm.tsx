@@ -78,7 +78,7 @@ export default function BrandForm() {
   }, [brand, form]);
 
   const createMutation = useMutation({
-    mutationFn: (data: BrandFormValues) => brandsService.create(data),
+    mutationFn: (data: BrandFormValues) => brandsService.create(data as any),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['brands'] });
       toast.success('Brand created successfully');

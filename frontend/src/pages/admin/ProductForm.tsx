@@ -120,7 +120,7 @@ export default function ProductForm() {
 
   const { data: products } = useQuery<Product[]>({
     queryKey: ["products"],
-    queryFn: productsService.getAll,
+    queryFn: () => productsService.getAll(),
   });
 
   const availableVariants = useMemo(() => {

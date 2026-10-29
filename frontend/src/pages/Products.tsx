@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Product, productsService } from '@/api/products';
 import { categoriesService } from '@/api/categories';
+import { useCompanyCurrency } from '@/hooks/useCompanyCurrency';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import ProductCard from '@/components/products/ProductCard';
@@ -49,6 +50,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 
 
 export default function Products() {
+  const { formatCurrency } = useCompanyCurrency();
   const [searchParams, setSearchParams] = useSearchParams();
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 1000]);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -422,7 +424,7 @@ export default function Products() {
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-[#1E502B] font-bold text-sm">Price Range</span>
                     <span className="text-xs font-semibold text-[#276B3C] bg-white px-2.5 py-0.5 rounded-md border border-green-200/60 shadow-2xs">
-                      ₹{priceRange[0]} - ₹{priceRange[1]}
+                      {formatCurrency(priceRange[0])} - {formatCurrency(priceRange[1])}
                     </span>
                   </div>
 
@@ -436,8 +438,8 @@ export default function Products() {
                   />
 
                   <div className="flex items-center justify-between text-[11px] text-gray-500">
-                    <span>Min: ₹0</span>
-                    <span>Max: ₹{maxPrice}</span>
+                    <span>Min: {formatCurrency(0)}</span>
+                    <span>Max: {formatCurrency(maxPrice)}</span>
                   </div>
                 </div>
 

@@ -26,7 +26,6 @@ import {
   Phone,
   FileText,
   Calendar,
-  DollarSign,
   CreditCard,
   ArrowLeft,
   Clock,
@@ -42,6 +41,7 @@ import { ErrorMessage } from '@/components/ui/error-message';
 import { partiesService } from '@/api/parties';
 import { invoicesService } from '@/api/invoices';
 import { formatCurrency } from '@/lib/utils';
+import CurrencyIcon from '@/components/CurrencyIcon';
 
 export default function AdminCustomerDetails() {
   const { id: customerOrUserId } = useParams<{ id: string }>();
@@ -424,7 +424,7 @@ export default function AdminCustomerDetails() {
             <Card className="w-full min-w-0 overflow-hidden">
               <CardHeader className="px-3 sm:px-6 pb-2 sm:pb-4">
                 <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                  <DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <CurrencyIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                   Credit Information
                 </CardTitle>
               </CardHeader>

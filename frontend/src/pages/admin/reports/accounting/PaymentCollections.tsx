@@ -1,5 +1,6 @@
 import React from 'react';
-import { CreditCard, CheckCircle, Clock, DollarSign } from 'lucide-react';
+import { CreditCard, CheckCircle, Clock } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -71,7 +72,7 @@ export default function PaymentCollections() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard title="Total Payments"  value={(summary.total_payments as number ?? 0).toLocaleString()}      icon={<CreditCard />}  iconColor="bg-blue-50 text-blue-600"       isLoading={isLoading} />
-        <KpiCard title="Total Amount"    value={formatCurrency(Number(summary.total_amount ?? 0))}             icon={<DollarSign />}  iconColor="bg-emerald-50 text-emerald-600"  isLoading={isLoading} />
+        <KpiCard title="Total Amount"    value={formatCurrency(Number(summary.total_amount ?? 0))}             icon={<CurrencyIcon className="h-5 w-5" />}  iconColor="bg-emerald-50 text-emerald-600"  isLoading={isLoading} />
         <KpiCard title="Collected"       value={formatCurrency(Number(summary.total_collected ?? 0))}          icon={<CheckCircle />} iconColor="bg-green-50 text-green-600"     isLoading={isLoading} />
         <KpiCard title="Pending"         value={formatCurrency(Number(summary.total_pending ?? 0))}            icon={<Clock />}       iconColor="bg-amber-50 text-amber-600"     isLoading={isLoading} />
       </div>

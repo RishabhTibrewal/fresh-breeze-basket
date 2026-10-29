@@ -47,7 +47,6 @@ import {
   Phone,
   Mail,
   Building2,
-  DollarSign,
   Calendar,
   MapPin,
   Globe,
@@ -73,6 +72,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { leadsService, Lead, CreateLeadInput, UpdateLeadInput, LeadStage, LeadPriority, LeadSource } from '@/api/leads';
 import { formatCurrency } from '@/lib/utils';
+import CurrencyIcon from "@/components/CurrencyIcon";
 import {
   Form,
   FormControl,
@@ -556,7 +556,7 @@ export default function Leads() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
+              <CurrencyIcon className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{formatCurrency(stats.totalValue)}</div>
@@ -738,7 +738,7 @@ export default function Leads() {
                         <div>
                           <p className="text-xs text-muted-foreground">Value</p>
                           <div className="flex items-center gap-1">
-                            <DollarSign className="h-3 w-3 text-muted-foreground" />
+                            <CurrencyIcon className="h-3 w-3 text-muted-foreground" />
                             <span className="font-medium text-sm">{lead.estimated_value.toLocaleString()}</span>
                           </div>
                         </div>
@@ -921,7 +921,7 @@ export default function Leads() {
                         </TableCell>
                         <TableCell className="px-2 py-3">
                           <div className="flex items-center gap-1 font-medium text-sm">
-                            <DollarSign className="h-4 w-4 text-muted-foreground" />
+                            <CurrencyIcon className="h-4 w-4 text-muted-foreground" />
                             {lead.estimated_value.toLocaleString()}
                           </div>
                         </TableCell>

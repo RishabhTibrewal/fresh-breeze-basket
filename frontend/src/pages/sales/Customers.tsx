@@ -34,7 +34,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { Plus, Search, Eye, Edit, ShoppingCart, ClipboardList, Mail, Phone, Calendar, DollarSign, Link as LinkIcon } from "lucide-react";
+import { Plus, Search, Eye, Edit, ShoppingCart, ClipboardList, Mail, Phone, Calendar, Link as LinkIcon } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";

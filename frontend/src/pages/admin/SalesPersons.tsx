@@ -6,7 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Spinner } from '@/components/ui/spinner';
-import { Users, Mail, Phone, Calendar, DollarSign, Target, TrendingUp } from 'lucide-react';
+import { Users, Mail, Phone, Calendar, Target, TrendingUp } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { format } from 'date-fns';
 import { formatCurrency } from '@/lib/utils';
 
@@ -268,7 +269,7 @@ export default function SalesPersons() {
                     </div>
                     <div className="p-4 border rounded-lg">
                       <div className="flex items-center gap-2 mb-2">
-                        <DollarSign className="h-4 w-4 text-muted-foreground" />
+                        <CurrencyIcon className="h-4 w-4 text-muted-foreground" />
                         <p className="text-sm text-muted-foreground">Total Achieved</p>
                       </div>
                       <p className="text-2xl font-bold text-emerald-600">

@@ -17,7 +17,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Upload, FileText, ExternalLink, DollarSign, AlertTriangle, Pencil } from "lucide-react";
+import { ArrowLeft, Upload, FileText, ExternalLink, AlertTriangle, Pencil } from "lucide-react";
+import CurrencyIcon from "@/components/CurrencyIcon";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { purchaseInvoicesService } from '@/api/purchaseInvoices';
@@ -375,7 +376,7 @@ export default function PurchaseInvoiceDetail() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <DollarSign className="h-5 w-5" />
+                <CurrencyIcon className="h-5 w-5" />
                 Payment Summary
               </CardTitle>
             </CardHeader>
@@ -442,7 +443,7 @@ export default function PurchaseInvoiceDetail() {
                   onClick={() => navigate(`${moduleBase}/supplier-payments/new?invoice=${id}`)}
                   disabled={balance === 0}
                 >
-                  <DollarSign className="h-4 w-4 mr-2" />
+                  <CurrencyIcon className="h-4 w-4 mr-2" />
                   Record Payment
                 </Button>
               )}

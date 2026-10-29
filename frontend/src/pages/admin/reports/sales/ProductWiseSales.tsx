@@ -1,5 +1,6 @@
 import React from 'react';
-import { Package, DollarSign, BarChart3 } from 'lucide-react';
+import { Package, BarChart3 } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -61,7 +62,7 @@ export default function ProductWiseSales() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <KpiCard title="Unique Products" value={(summary.total_products as number ?? 0).toLocaleString()} icon={<Package />}   iconColor="bg-amber-50 text-amber-600"    isLoading={isLoading} />
         <KpiCard title="Total Qty Sold"  value={(summary.total_qty_sold as number ?? 0).toLocaleString()} icon={<BarChart3 />} iconColor="bg-blue-50 text-blue-600"      isLoading={isLoading} />
-        <KpiCard title="Total Revenue"   value={formatCurrency(Number(summary.total_revenue ?? 0))}       icon={<DollarSign />} iconColor="bg-emerald-50 text-emerald-600" isLoading={isLoading} />
+        <KpiCard title="Total Revenue"   value={formatCurrency(Number(summary.total_revenue ?? 0))}       icon={<CurrencyIcon className="h-5 w-5" />} iconColor="bg-emerald-50 text-emerald-600" isLoading={isLoading} />
       </div>
 
       <div className="flex flex-wrap gap-2 p-3 bg-muted/30 border rounded-lg">

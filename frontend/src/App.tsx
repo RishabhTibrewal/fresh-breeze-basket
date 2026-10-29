@@ -12,6 +12,7 @@ import SalesProtectedRoute from "./components/auth/SalesProtectedRoute";
 import AccountLayout from "./layouts/AccountLayout";
 import SalesLayout from "./layouts/SalesLayout";
 import ModuleLayout from "./layouts/ModuleLayout";
+import { useCompanyCurrency } from "@/hooks/useCompanyCurrency";
 
 // Public routes - lazy loaded
 const Index = lazy(() => import("./pages/Index"));
@@ -197,9 +198,15 @@ const queryClient = new QueryClient({
   },
 });
 
+const CurrencySync: React.FC = () => {
+  useCompanyCurrency();
+  return null;
+};
+
 const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
+      <CurrencySync />
       <TooltipProvider>
         <BrowserRouter>
           <AuthProvider>

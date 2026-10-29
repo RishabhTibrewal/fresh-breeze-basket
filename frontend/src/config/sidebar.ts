@@ -1,4 +1,6 @@
+import React from 'react';
 import { LucideIcon } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import {
   LayoutDashboard,
   Package,
@@ -22,7 +24,6 @@ import {
   Building2,
   FileSearch,
   BarChart3,
-  DollarSign,
   Calendar,
   Hash,
   Shield,
@@ -44,7 +45,7 @@ import {
 export interface SidebarMenuItem {
   id: string;
   label: string;
-  icon: LucideIcon;
+  icon: LucideIcon | React.ComponentType<{ className?: string }>;
   path?: string;
   roles?: string[]; // Required roles (admin has access to all)
   children?: SidebarMenuItem[];
@@ -302,7 +303,7 @@ const salesGroup: SidebarGroup = {
         {
           id: 'outstanding-receivables',
           label: 'Outstanding Receivables',
-          icon: DollarSign,
+          icon: CurrencyIcon,
           path: '/admin/sales/reports/receivables',
           roles: ['admin', 'sales']
         },
@@ -383,7 +384,7 @@ const procurementGroup: SidebarGroup = {
         {
           id: 'supplier-outstanding',
           label: 'Supplier Outstanding',
-          icon: DollarSign,
+          icon: CurrencyIcon,
           path: '/admin/procurement/reports/supplier-outstanding',
           roles: ['admin', 'procurement', 'warehouse_manager', 'accounts']
         }
@@ -636,7 +637,7 @@ const reportsGroup: SidebarGroup = {
     {
       id: 'reports-accounting',
       label: 'Accounting Reports',
-      icon: DollarSign,
+      icon: CurrencyIcon,
       path: '/reports/accounting',
       roles: ['admin', 'accounts'],
       children: [

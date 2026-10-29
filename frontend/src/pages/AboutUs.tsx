@@ -89,10 +89,29 @@ const AboutUs = () => {
         {/* 1. Hero / Story Section */}
         <section className="relative overflow-hidden pt-6 pb-10 lg:py-12">
           {/* Decorative Left Floating Leaves */}
-          <div className="hidden lg:block absolute top-4 left-2 pointer-events-none opacity-80">
-            <Leaf className="w-10 h-10 text-[#4C8C2B] fill-[#68A83E]/80 transform -rotate-45 mb-3" />
-            <Leaf className="w-12 h-12 text-[#3B7A23] fill-[#4C8C2B]/85 transform rotate-12 ml-2 mb-6" />
-            <Leaf className="w-9 h-9 text-[#68A83E] fill-[#8BC34A]/70 transform -rotate-12" />
+          <div className="hidden lg:block absolute -top-2 left-4 pointer-events-none opacity-90 z-10">
+            <svg
+              className="w-24 h-28 text-[#4C8C2B]"
+              viewBox="0 0 100 120"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M10 0C15 25 35 45 60 50C40 60 15 50 10 0Z"
+                fill="#4C8C2B"
+                fillOpacity="0.85"
+              />
+              <path
+                d="M5 25C20 45 45 65 75 65C50 78 20 65 5 25Z"
+                fill="#3B7A23"
+                fillOpacity="0.9"
+              />
+              <path
+                d="M0 60C18 75 35 95 55 105C35 110 15 95 0 60Z"
+                fill="#68A83E"
+                fillOpacity="0.75"
+              />
+            </svg>
           </div>
 
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
@@ -104,13 +123,13 @@ const AboutUs = () => {
                   <span>About Us</span>
                 </div>
 
-                <h1 className="text-3xl sm:text-4xl lg:text-[42px] font-extrabold text-[#1E502B] leading-[1.15] mb-5 tracking-tight">
+                <h1 className="text-3xl sm:text-4xl lg:text-[44px] font-extrabold text-[#1E502B] leading-[1.15] mb-5 tracking-tight">
                   Bringing Nature’s
                   <br />
                   Goodness to Your Home
                 </h1>
 
-                <div className="space-y-3 text-gray-600 text-sm sm:text-[15px] leading-relaxed">
+                <div className="space-y-3.5 text-gray-600 text-sm sm:text-[15px] leading-relaxed">
                   <p>
                     Founded in 2020, FreshBasket began with a simple idea: to make fresh, organic
                     produce accessible to everyone. What started as a small farmers’ market stand has
@@ -149,13 +168,13 @@ const AboutUs = () => {
 
               {/* Right Curved Farmer Image */}
               <div className="lg:col-span-6">
-                <div className="relative h-[300px] sm:h-[380px] lg:h-[420px] w-full overflow-hidden rounded-3xl lg:rounded-l-[140px] lg:rounded-r-2xl shadow-md">
+                <div className="relative h-[320px] sm:h-[400px] lg:h-[450px] w-full overflow-hidden rounded-3xl lg:rounded-l-[150px] lg:rounded-tr-[40px] lg:rounded-br-2xl shadow-lg border border-[#e1ece0]">
                   <img
-                    src="https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=80"
-                    alt="Green farm field at sunrise"
+                    src="https://images.unsplash.com/photo-1592982537447-7440770cbfc9?auto=format&fit=crop&w=1200&q=80"
+                    alt="Farmer looking over lush agricultural field"
                     className="w-full h-full object-cover object-center"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-tr from-[#1E502B]/15 via-transparent to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-tr from-[#1E502B]/10 via-transparent to-transparent pointer-events-none" />
                 </div>
               </div>
             </div>

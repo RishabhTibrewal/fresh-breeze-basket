@@ -18,7 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Eye, DollarSign, CheckCircle, Clock, XCircle } from "lucide-react";
+import { Plus, Search, Eye, CheckCircle, Clock, XCircle } from "lucide-react";
+import CurrencyIcon from "@/components/CurrencyIcon";
 import { supplierPaymentsService } from '@/api/supplierPayments';
 import { suppliersService } from '@/api/suppliers';
 import { useAuth } from '@/contexts/AuthContext';
@@ -108,7 +109,7 @@ export default function SupplierPayments() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Payments</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CurrencyIcon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(totalAmount)}</div>

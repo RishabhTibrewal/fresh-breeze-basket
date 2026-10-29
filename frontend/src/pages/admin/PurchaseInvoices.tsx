@@ -18,7 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Eye, DollarSign, MoreHorizontal, AlertTriangle, Pencil } from "lucide-react";
+import { Plus, Search, Eye, MoreHorizontal, AlertTriangle, Pencil } from "lucide-react";
+import CurrencyIcon from "@/components/CurrencyIcon";
 import { purchaseInvoicesService } from '@/api/purchaseInvoices';
 import { suppliersService } from '@/api/suppliers';
 import { useAuth } from '@/contexts/AuthContext';
@@ -269,7 +270,7 @@ export default function PurchaseInvoices() {
                                   <DropdownMenuItem 
                                     onClick={() => navigate(`${moduleBase}/supplier-payments/new?invoice=${invoice.id}`)}
                                   >
-                                    <DollarSign className="h-4 w-4 mr-2" />
+                                    <CurrencyIcon className="h-4 w-4 mr-2" />
                                     Record Payment
                                   </DropdownMenuItem>
                                 )}

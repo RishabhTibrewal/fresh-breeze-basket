@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Edit, Package, DollarSign, Image as ImageIcon, Warehouse } from 'lucide-react';
+import { ArrowLeft, Edit, Package, Image as ImageIcon, Warehouse } from 'lucide-react';
 import { variantsService } from '@/api/variants';
 import { ProductVariant, ProductPrice } from '@/api/products';
 import { pricesService } from '@/api/prices';

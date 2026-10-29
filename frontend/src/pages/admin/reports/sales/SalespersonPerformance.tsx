@@ -1,5 +1,6 @@
 import React from 'react';
-import { Users, DollarSign, Target, TrendingUp } from 'lucide-react';
+import { Users, Target, TrendingUp } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -65,7 +66,7 @@ export default function SalespersonPerformance() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard title="Active Salespeople"  value={(summary.total_executives as number ?? 0)} icon={<Users />}      iconColor="bg-violet-50 text-violet-600"  isLoading={isLoading} />
-        <KpiCard title="Total Revenue"       value={formatCurrency(Number(summary.total_revenue ?? 0))} icon={<DollarSign />} iconColor="bg-emerald-50 text-emerald-600" isLoading={isLoading} />
+        <KpiCard title="Total Revenue"       value={formatCurrency(Number(summary.total_revenue ?? 0))} icon={<CurrencyIcon className="h-5 w-5" />} iconColor="bg-emerald-50 text-emerald-600" isLoading={isLoading} />
         <KpiCard title="Avg Achievement"     value={`${Number(summary.avg_achievement_pct ?? 0).toFixed(1)}%`} icon={<Target />}    iconColor="bg-amber-50 text-amber-600"    isLoading={isLoading} />
         <KpiCard title="On Target"           value={data.filter(r => r.achievement_pct >= 100).length} icon={<TrendingUp />} iconColor="bg-blue-50 text-blue-600"      isLoading={isLoading} />
       </div>

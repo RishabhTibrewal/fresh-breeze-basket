@@ -8,7 +8,8 @@ import {
   Tooltip as ChartTooltip,
   Legend as ChartLegend,
 } from 'chart.js';
-import { Tag, Award, DollarSign, Percent } from 'lucide-react';
+import { Tag, Award, Percent } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -101,7 +102,7 @@ export default function CategoryBrandSales() {
           title="Revenue"
           value={formatCurrency(Number(summary.total_revenue ?? 0))}
           subtitle={`${Number(summary.total_qty ?? 0).toLocaleString()} units`}
-          icon={<DollarSign />}
+          icon={<CurrencyIcon className="h-5 w-5" />}
           iconColor="bg-emerald-50 text-emerald-600"
           isLoading={isLoading}
         />

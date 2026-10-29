@@ -112,11 +112,25 @@ export const resolveTenant = async (req: Request, res: Response, next: NextFunct
 
     // Use admin client to bypass RLS on companies table for tenant resolution
     const client = supabaseAdmin || supabase;
-    const { data: company, error } = await client
+    let { data: company, error } = await client
       .from('companies')
       .select('id, slug, is_active')
       .eq('slug', subdomain)
       .single();
+
+    if ((error || !company || !company.is_active) && subdomain === DEFAULT_COMPANY_SLUG) {
+      const fallback = await client
+        .from('companies')
+        .select('id, slug, is_active')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (fallback.data) {
+        company = fallback.data;
+        error = null;
+      }
+    }
 
     if (error || !company || !company.is_active) {
       console.error(`[Tenant] Company not found for subdomain: ${subdomain}`, error);

@@ -3,7 +3,6 @@ import {
   Package, 
   ShoppingCart, 
   Users, 
-  DollarSign, 
   TrendingUp, 
   Clock,
   AlertTriangle
@@ -12,10 +11,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { adminService, DashboardStats } from '@/api/admin';
 import { warehousesService } from '@/api/warehouses';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatCurrency } from '@/lib/utils';
+import { useCompanyCurrency } from '@/hooks/useCompanyCurrency';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { useQuery } from '@tanstack/react-query';
 
 const AdminHome = () => {
+  const { formatCurrency } = useCompanyCurrency();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -130,7 +131,7 @@ const AdminHome = () => {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Sales</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CurrencyIcon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             {loading ? (

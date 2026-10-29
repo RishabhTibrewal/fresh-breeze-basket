@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from 'sonner';
 import { companyService, Company } from '@/api/company';
+import { setCompanyCurrency } from '@/lib/utils';
 import { Building2, Plus, Trash2, Landmark, Globe, MapPin, Phone, Mail, FileText } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { uploadsService } from '@/api/uploads';
@@ -94,6 +95,9 @@ export default function CompanySettings() {
 
   useEffect(() => {
     if (company) {
+      if (company.currency) {
+        setCompanyCurrency(company.currency);
+      }
       form.reset({
         name: company.name || '',
         email: company.email || '',
@@ -118,9 +122,13 @@ export default function CompanySettings() {
 
   const updateMutation = useMutation({
     mutationFn: (data: Partial<Company>) => companyService.updateMyCompany(data),
-    onSuccess: () => {
+    onSuccess: (data) => {
       toast.success('Company profile updated successfully');
+      if (data?.currency) {
+        setCompanyCurrency(data.currency);
+      }
       queryClient.invalidateQueries({ queryKey: ['company', 'me'] });
+      queryClient.invalidateQueries({ queryKey: ['company', 'currency-info'] });
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Failed to update company profile');
@@ -128,6 +136,9 @@ export default function CompanySettings() {
   });
 
   function onSubmit(values: CompanyFormValues) {
+    if (values.currency) {
+      setCompanyCurrency(values.currency);
+    }
     updateMutation.mutate(values as any);
   }
 

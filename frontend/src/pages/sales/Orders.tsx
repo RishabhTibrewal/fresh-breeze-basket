@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from '@/components/ui/badge';
-import { Search, Plus, Eye, Edit, Calendar, DollarSign, User, CreditCard } from "lucide-react";
+import { Search, Plus, Eye, Edit, Calendar, User, CreditCard } from "lucide-react";
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import apiClient from '@/lib/apiClient';

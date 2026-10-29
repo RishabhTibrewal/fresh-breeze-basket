@@ -1,5 +1,6 @@
 import React from 'react';
-import { Users, DollarSign, TrendingUp } from 'lucide-react';
+import { Users, TrendingUp } from 'lucide-react';
+import CurrencyIcon from '@/components/CurrencyIcon';
 import { ReportTable, type ReportColumn } from '@/components/reports/ReportTable';
 import { ReportFilters } from '@/components/reports/ReportFilters';
 import { ExportBar } from '@/components/reports/ExportBar';
@@ -52,7 +53,7 @@ export default function CustomerWiseSales() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <KpiCard title="Total Customers"        value={(summary.total_customers as number ?? 0).toLocaleString()}    icon={<Users />}      iconColor="bg-blue-50 text-blue-600"      isLoading={isLoading} />
-        <KpiCard title="Total Revenue"          value={formatCurrency(Number(summary.total_revenue ?? 0))}           icon={<DollarSign />} iconColor="bg-emerald-50 text-emerald-600" isLoading={isLoading} />
+        <KpiCard title="Total Revenue"          value={formatCurrency(Number(summary.total_revenue ?? 0))}           icon={<CurrencyIcon className="h-5 w-5" />} iconColor="bg-emerald-50 text-emerald-600" isLoading={isLoading} />
         <KpiCard title="Avg Revenue / Customer" value={formatCurrency(Number(summary.avg_revenue_per_customer ?? 0))} icon={<TrendingUp />} iconColor="bg-amber-50 text-amber-600"    isLoading={isLoading} />
       </div>
 

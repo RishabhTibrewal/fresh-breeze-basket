@@ -3,9 +3,10 @@ import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { Disclosure } from '@headlessui/react';
 import { ChevronDown } from 'lucide-react';
-import { formatCurrency } from '@/lib/utils';
+import { useCompanyCurrency } from '@/hooks/useCompanyCurrency';
 
 const FAQ = () => {
+  const { formatCurrency } = useCompanyCurrency();
   const faqs = [
     {
       question: "How does Fresh Breeze Basket delivery work?",
