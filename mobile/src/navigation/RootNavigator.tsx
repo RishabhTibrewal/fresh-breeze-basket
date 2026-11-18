@@ -4,9 +4,12 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { HomeScreen } from '../screens/HomeScreen';
+import { ProductDetailsScreen } from '../screens/ProductDetailsScreen';
 import { CartScreen } from '../screens/CartScreen';
 import { CheckoutScreen } from '../screens/CheckoutScreen';
 import { OrderTrackingScreen } from '../screens/OrderTrackingScreen';
+import { ProfileScreen } from '../screens/ProfileScreen';
+import { LoginScreen } from '../screens/LoginScreen';
 import { COLORS } from '../theme/theme';
 import { Home as HomeIcon, ShoppingBag, Truck, User } from 'lucide-react-native';
 
@@ -19,14 +22,24 @@ function MainTabNavigator() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: COLORS.bgCardDark,
-          borderTopColor: COLORS.borderDark,
-          height: 60,
+          backgroundColor: COLORS.bgWhite,
+          borderTopColor: COLORS.border,
+          borderTopWidth: 1,
+          height: 62,
           paddingBottom: 8,
           paddingTop: 8,
+          elevation: 8,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.05,
+          shadowRadius: 6,
         },
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textDarkSecondary,
+        tabBarActiveTintColor: COLORS.primaryDark,
+        tabBarInactiveTintColor: COLORS.textMuted,
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '700',
+        },
       }}
     >
       <Tab.Screen
@@ -53,6 +66,14 @@ function MainTabNavigator() {
           tabBarIcon: ({ color, size }: { color: string; size: number }) => <Truck color={color} size={size} />,
         }}
       />
+      <Tab.Screen
+        name="ProfileTab"
+        component={ProfileScreen}
+        options={{
+          tabBarLabel: 'Account',
+          tabBarIcon: ({ color, size }: { color: string; size: number }) => <User color={color} size={size} />,
+        }}
+      />
     </Tab.Navigator>
   );
 }
@@ -63,9 +84,12 @@ export function RootNavigator() {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="MainTabs" component={MainTabNavigator} />
         <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="ProductDetails" component={ProductDetailsScreen} />
         <Stack.Screen name="Cart" component={CartScreen} />
         <Stack.Screen name="Checkout" component={CheckoutScreen} />
         <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
+        <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen name="Login" component={LoginScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

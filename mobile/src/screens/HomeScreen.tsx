@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,214 +7,746 @@ import {
   TouchableOpacity,
   Image,
   TextInput,
-  FlatList,
   SafeAreaView,
   StatusBar,
+  Dimensions,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
-import { COLORS, SPACING, RADIUS } from '../theme/theme';
-import { useStore } from '../store/useStore';
-import { Search, MapPin, ShoppingBag, Plus, Minus, Truck } from 'lucide-react-native';
+import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
+import { useStore, MobileProduct, ProductVariantItem } from '../store/useStore';
+import {
+  Search,
+  MapPin,
+  ShoppingBag,
+  Plus,
+  Minus,
+  Truck,
+  Heart,
+  Star,
+  Leaf,
+  ChevronDown,
+  X,
+  Sparkles,
+  User,
+} from 'lucide-react-native';
 import { formatCurrency, fetchCompanyCurrency } from '../utils/currency';
+import { apiClient } from '../api/client';
 
-const DEMO_CATEGORIES = [
-  { id: '1', name: 'Fresh Fruits', icon: '🍎' },
-  { id: '2', name: 'Vegetables', icon: '🥦' },
-  { id: '3', name: 'Beverages', icon: '🥤' },
-  { id: '4', name: 'Bakery', icon: '🍞' },
-  { id: '5', name: 'Dairy & Eggs', icon: '🧀' },
+const { width } = Dimensions.get('window');
+const CARD_WIDTH = (width - SPACING.md * 2 - SPACING.sm) / 2;
+
+export const CATEGORIES = [
+  { id: 'all', name: 'All', icon: '🧺' },
+  { id: 'fruits', name: 'Fruits', icon: '🍎' },
+  { id: 'vegetables', name: 'Veggies', icon: '🥦' },
+  { id: 'dairy', name: 'Dairy & Eggs', icon: '🥛' },
+  { id: 'bakery', name: 'Bakery', icon: '🍞' },
+  { id: 'beverages', name: 'Drinks', icon: '🧃' },
 ];
 
-const DEMO_PRODUCTS = [
+export const getCategoryEmoji = (name: string): string => {
+  const n = (name || '').toLowerCase();
+  if (n.includes('all')) return '🧺';
+  if (n.includes('fruit')) return '🍎';
+  if (n.includes('vegi') || n.includes('vegetable')) return '🥦';
+  if (n.includes('rice') || n.includes('basmati')) return '🌾';
+  if (n.includes('spice') || n.includes('masala')) return '🌶️';
+  if (n.includes('seed')) return '🌻';
+  if (n.includes('millet')) return '🌾';
+  if (n.includes('dry fruit') || n.includes('nut')) return '🥜';
+  if (n.includes('oil') || n.includes('ghee')) return '🧈';
+  if (n.includes('milk') || n.includes('dairy') || n.includes('egg')) return '🥛';
+  if (n.includes('bakery') || n.includes('bread')) return '🍞';
+  if (n.includes('drink') || n.includes('beverage') || n.includes('juice')) return '🧃';
+  if (n.includes('pulse') || n.includes('cereal') || n.includes('daal')) return '🥣';
+  if (n.includes('sweet') || n.includes('honey')) return '🍯';
+  return '🍃';
+};
+
+export const FALLBACK_PRODUCTS: MobileProduct[] = [
   {
     id: 'p1',
     name: 'Organic Honeycrisp Apples',
-    price: 4.99,
+    category: 'fruits',
+    price: 4.49,
+    original_price: 5.99,
     unit: '1 kg',
-    image: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=500&auto=format&fit=crop&q=60',
-    category: 'Fresh Fruits',
+    image: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=600&auto=format&fit=crop&q=80',
+    badge: '100% ORGANIC',
+    rating: 4.9,
+    reviews_count: 240,
+    origin: 'Himachal Orchards',
+    description: 'Crisp, exceptionally sweet with a hint of tartness. Freshly harvested and hand-graded.',
+    variants: [
+      { id: 'v1', name: 'Standard Pack', unit: '500 g', price: 2.49, original_price: 3.19, in_stock: true },
+      { id: 'v2', name: 'Value Bag', unit: '1 kg', price: 4.49, original_price: 5.99, in_stock: true },
+      { id: 'v3', name: 'Family Crate', unit: '2 kg', price: 8.29, original_price: 10.99, in_stock: true },
+    ],
   },
   {
     id: 'p2',
     name: 'Fresh Hass Avocados',
-    price: 3.49,
+    category: 'fruits',
+    price: 3.99,
+    original_price: 4.99,
     unit: '3 pcs',
-    image: 'https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?w=500&auto=format&fit=crop&q=60',
-    category: 'Fresh Fruits',
+    image: 'https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?w=600&auto=format&fit=crop&q=80',
+    badge: 'READY TO EAT',
+    rating: 4.8,
+    reviews_count: 185,
+    origin: 'Ooty High Valley',
+    description: 'Creamy, rich in heart-healthy monounsaturated fats. Perfectly conditioned for guacamole and salads.',
+    variants: [
+      { id: 'v4', name: 'Pair', unit: '2 pcs', price: 2.79, original_price: 3.49, in_stock: true },
+      { id: 'v5', name: 'Triple Pack', unit: '3 pcs', price: 3.99, original_price: 4.99, in_stock: true },
+    ],
   },
   {
     id: 'p3',
-    name: 'Farm Fresh Whole Milk',
-    price: 2.79,
-    unit: '1 L',
-    image: 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=500&auto=format&fit=crop&q=60',
-    category: 'Dairy & Eggs',
+    name: 'Farm Fresh A2 Whole Milk',
+    category: 'dairy',
+    price: 2.49,
+    original_price: 2.99,
+    unit: '1 L Bottle',
+    image: 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=600&auto=format&fit=crop&q=80',
+    badge: 'FARM FRESH',
+    rating: 4.9,
+    reviews_count: 512,
+    origin: 'Gir Purebred Dairy',
+    description: 'Pure, unadulterated pasteurized whole milk from grass-fed cows. Chilled instantly to 4°C.',
+    variants: [
+      { id: 'v6', name: 'Single Bottle', unit: '1 L', price: 2.49, original_price: 2.99, in_stock: true },
+      { id: 'v7', name: 'Twin Pack', unit: '2 L', price: 4.69, original_price: 5.79, in_stock: true },
+    ],
   },
   {
     id: 'p4',
-    name: 'Artisanal Sourdough Bread',
-    price: 3.99,
-    unit: '500g',
-    image: 'https://images.unsplash.com/photo-1589367920969-ab8e050bbb04?w=500&auto=format&fit=crop&q=60',
-    category: 'Bakery',
+    name: 'Artisanal Sourdough Boule',
+    category: 'bakery',
+    price: 3.89,
+    original_price: 4.50,
+    unit: '500 g Loaf',
+    image: 'https://images.unsplash.com/photo-1589367920969-ab8e050bbb04?w=600&auto=format&fit=crop&q=80',
+    badge: 'SLOW FERMENTED',
+    rating: 4.7,
+    reviews_count: 92,
+    origin: 'Artisan Bakery',
+    description: '36-hour slow fermented with organic heirloom flour. Crisp blistered crust and soft chewy crumb.',
+  },
+  {
+    id: 'p5',
+    name: 'Tender Baby Spinach Leaves',
+    category: 'vegetables',
+    price: 1.89,
+    original_price: 2.49,
+    unit: '250 g Box',
+    image: 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?w=600&auto=format&fit=crop&q=80',
+    badge: 'HYDROPONIC',
+    rating: 4.8,
+    reviews_count: 140,
+    origin: 'Hydroponic Farm',
+    description: 'Triple-washed and spun dry. Ready to eat straight from the pack with zero grit.',
+  },
+  {
+    id: 'p6',
+    name: 'Cold-Pressed Valencia Orange Juice',
+    category: 'beverages',
+    price: 3.49,
+    original_price: 4.20,
+    unit: '500 mL',
+    image: 'https://images.unsplash.com/photo-1621506289937-a8e4df240d0b?w=600&auto=format&fit=crop&q=80',
+    badge: 'COLD PRESSED',
+    rating: 4.9,
+    reviews_count: 320,
+    origin: 'Nagpur Citrus Groves',
+    description: '100% pure cold-pressed citrus juice with natural pulp. High Vitamin C and zero preservatives.',
   },
 ];
 
 export const HomeScreen = ({ navigation }: any) => {
-  const { cart, addToCart, updateQuantity, selectedAddress, deliveryEstimate, getCartTotal } = useStore();
-  const [selectedCategory, setSelectedCategory] = useState('1');
-  const [searchQuery, setSearchQuery] = useState('');
+  const {
+    cart,
+    addToCart,
+    updateQuantity,
+    selectedAddress,
+    deliveryEstimate,
+    getCartTotal,
+    getCartSavings,
+    getCartItemsCount,
+    toggleWishlist,
+    isWishlisted,
+  } = useStore();
+
+  const [products, setProducts] = useState<MobileProduct[]>(FALLBACK_PRODUCTS);
+  const [categories, setCategories] = useState<{ id: string; name: string; icon: string }[]>(CATEGORIES);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [filterType, setFilterType] = useState<'all' | 'sale' | 'organic'>('all');
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage] = useState(1);
+  const [refreshing, setRefreshing] = useState(false);
   const [, setCurrencyTick] = useState(0);
 
-  React.useEffect(() => {
-    fetchCompanyCurrency().then(() => setCurrencyTick((prev) => prev + 1));
+  const loadBackendCategories = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/categories');
+      const catList = Array.isArray(response.data)
+        ? response.data
+        : response.data?.data && Array.isArray(response.data.data)
+        ? response.data.data
+        : [];
+
+      if (catList.length > 0) {
+        const mapped = [
+          { id: 'all', name: 'All', icon: '🧺' },
+          ...catList.map((cat: any) => ({
+            id: cat.id,
+            name: cat.name,
+            icon: getCategoryEmoji(cat.name),
+          })),
+        ];
+        setCategories(mapped);
+      }
+    } catch (err) {
+      console.log('Error fetching categories from backend, keeping defaults:', err);
+    }
   }, []);
 
-  const cartItemCount = cart.reduce((sum: number, item: any) => sum + item.quantity, 0);
+  const fetchProductsPage = useCallback(
+    async (
+      pageNum: number,
+      search: string,
+      cat: string,
+      isAppend: boolean
+    ) => {
+      try {
+        if (isAppend) {
+          setLoadingMore(true);
+        } else {
+          setLoading(true);
+        }
+
+        const params: Record<string, any> = {
+          page: pageNum,
+          limit: 16,
+        };
+
+        if (search.trim()) {
+          params.search = search.trim();
+        }
+
+        if (cat !== 'all') {
+          const matchedCategory = categories.find(
+            (c) =>
+              c.id.toLowerCase() === cat.toLowerCase() ||
+              c.name.toLowerCase() === cat.toLowerCase()
+          );
+          if (matchedCategory && matchedCategory.id !== 'all') {
+            params.category = matchedCategory.id;
+          }
+        }
+
+        const response = await apiClient.get('/products', { params });
+        const productList = Array.isArray(response.data)
+          ? response.data
+          : response.data?.data && Array.isArray(response.data.data)
+          ? response.data.data
+          : [];
+
+        const mapped: MobileProduct[] = productList.map((item: any) => {
+          const variants: ProductVariantItem[] =
+            Array.isArray(item.variants) && item.variants.length > 0
+              ? item.variants.map((v: any) => {
+                  const vSalePrice = Number(v.price?.sale_price || v.sale_price || item.price || 0);
+                  const vMrpPrice = Number(v.price?.mrp_price || v.mrp_price || 0);
+                  return {
+                    id: v.id,
+                    name: v.name || v.sku || 'Default Pack',
+                    unit: v.unit
+                      ? `${v.unit} ${item.unit_type || ''}`.trim()
+                      : item.unit_type || '1 pack',
+                    price: vSalePrice > 0 ? vSalePrice : Number(item.price || 3.99),
+                    original_price: vMrpPrice > vSalePrice ? vMrpPrice : undefined,
+                    in_stock: true,
+                  };
+                })
+              : [];
+
+          const defaultVariant = variants[0];
+          const calculatedPrice = defaultVariant
+            ? defaultVariant.price
+            : Number(item.sale_price || item.price || 3.99);
+          const calculatedOriginalPrice = defaultVariant
+            ? defaultVariant.original_price
+            : item.price && Number(item.price) > calculatedPrice
+            ? Number(item.price)
+            : undefined;
+
+          const catIdentifier =
+            item.category?.slug ||
+            item.category?.name?.toLowerCase() ||
+            item.category_id ||
+            item.cat_slug ||
+            'general';
+
+          const primaryImage =
+            item.images?.[0]?.image_url ||
+            item.image_url ||
+            'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=500';
+
+          return {
+            id: item.id,
+            name: item.name,
+            category: catIdentifier,
+            price: calculatedPrice > 0 ? calculatedPrice : 3.99,
+            original_price: calculatedOriginalPrice,
+            unit:
+              defaultVariant?.unit ||
+              (item.unit ? `${item.unit} ${item.unit_type || ''}`.trim() : item.unit_type || '1 pack'),
+            image: primaryImage,
+            badge:
+              item.badge ||
+              (calculatedOriginalPrice && calculatedOriginalPrice > calculatedPrice
+                ? `SAVE ${Math.round(((calculatedOriginalPrice - calculatedPrice) / calculatedOriginalPrice) * 100)}%`
+                : 'FARM FRESH'),
+            rating: item.rating || 4.8,
+            reviews_count: item.reviews_count || 120,
+            origin: item.origin || 'Farm Direct',
+            description: item.description || 'Harvested fresh and chilled for maximum nutrition and crispness.',
+            variants: variants.length > 0 ? variants : undefined,
+          };
+        });
+
+        if (isAppend) {
+          setProducts((prev) => [...prev, ...mapped]);
+        } else {
+          setProducts(mapped);
+        }
+
+        setPage(pageNum);
+        setHasMore(mapped.length >= 16);
+      } catch (err) {
+        console.log('Error fetching products page:', err);
+        if (!isAppend && products.length === 0) {
+          setProducts(FALLBACK_PRODUCTS);
+        }
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [categories, products.length]
+  );
+
+  // Initial mount & currency loading
+  useEffect(() => {
+    fetchCompanyCurrency().then(() => setCurrencyTick((prev) => prev + 1));
+    loadBackendCategories();
+  }, [loadBackendCategories]);
+
+  // Debounced server-side search and category filtering
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchProductsPage(1, searchQuery, selectedCategory, false);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery, selectedCategory, fetchProductsPage]);
+
+  const loadMoreProducts = () => {
+    if (hasMore && !loadingMore && !loading) {
+      fetchProductsPage(page + 1, searchQuery, selectedCategory, true);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([
+      loadBackendCategories(),
+      fetchProductsPage(1, searchQuery, selectedCategory, false),
+      fetchCompanyCurrency(),
+    ]);
+    setRefreshing(false);
+  };
+
+  const filteredProducts = products.filter((p) => {
+    const pCat = (p.category || '').toLowerCase();
+    const sCat = selectedCategory.toLowerCase();
+    const matchedCategoryObj = categories.find((c) => c.id.toLowerCase() === sCat);
+    const matchesCategory =
+      selectedCategory === 'all' ||
+      pCat === sCat ||
+      pCat.includes(sCat) ||
+      sCat.includes(pCat) ||
+      Boolean(
+        matchedCategoryObj &&
+          matchedCategoryObj.name &&
+          (pCat === matchedCategoryObj.name.toLowerCase() ||
+            matchedCategoryObj.name.toLowerCase().includes(pCat) ||
+            pCat.includes(matchedCategoryObj.name.toLowerCase()))
+      );
+
+    const matchesSearch =
+      searchQuery.trim() === '' ||
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()));
+
+    const matchesFilter =
+      filterType === 'all' ||
+      (filterType === 'sale' && p.original_price && p.original_price > p.price) ||
+      (filterType === 'organic' && p.badge?.includes('ORGANIC'));
+
+    return matchesCategory && matchesSearch && matchesFilter;
+  });
+
+  const cartItemCount = getCartItemsCount();
+  const cartTotal = getCartTotal();
+  const cartSavings = getCartSavings();
 
   const getProductQuantity = (productId: string) => {
-    const item = cart.find((i: any) => i.id === productId);
+    const item = cart.find((i) => i.id === productId);
     return item ? item.quantity : 0;
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bgDark} />
-      
-      {/* Header & Location */}
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.bgWhite} />
+
+      {/* Top Header Bar matching Web Store */}
       <View style={styles.header}>
-        <View style={styles.locationContainer}>
-          <MapPin color={COLORS.primary} size={20} />
-          <View style={styles.locationTextContainer}>
-            <Text style={styles.deliveringLabel}>Delivering Nationwide</Text>
-            <Text style={styles.addressText} numberOfLines={1}>
-              {selectedAddress?.street ? `${selectedAddress.street}, ${selectedAddress.pincode}` : 'Select Delivery Location'}
-            </Text>
+        {/* Brand Logo & Top Actions */}
+        <View style={styles.brandRow}>
+          <View style={styles.brandLogo}>
+            <Text style={styles.logoFresh}>Fresh</Text>
+            <Text style={styles.logoBasket}>Basket</Text>
           </View>
-        </View>
 
-        <TouchableOpacity style={styles.shippingBadge}>
-          <Truck color={COLORS.accent} size={16} />
-          <Text style={styles.shippingText}>
-            {deliveryEstimate?.estimated_days ? `${deliveryEstimate.estimated_days} Days Express` : 'Nationwide'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <Search color={COLORS.textDarkSecondary} size={18} style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search fresh products..."
-          placeholderTextColor={COLORS.textDarkSecondary}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
-
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Hero Banner */}
-        <View style={styles.banner}>
-          <View style={styles.bannerTextContainer}>
-            <Text style={styles.bannerTag}>FLASH SALE • UP TO 30% OFF</Text>
-            <Text style={styles.bannerTitle}>Fresh Harvest Delivered Nationwide</Text>
-            <TouchableOpacity
-              style={styles.bannerButton}
-              onPress={() => navigation.navigate('Categories')}
-            >
-              <Text style={styles.bannerButtonText}>Shop Now</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Categories Bar */}
-        <Text style={styles.sectionTitle}>Categories</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoriesScroll}>
-          {DEMO_CATEGORIES.map((cat) => (
-            <TouchableOpacity
-              key={cat.id}
-              style={[
-                styles.categoryCard,
-                selectedCategory === cat.id && styles.categoryCardSelected,
-              ]}
-              onPress={() => setSelectedCategory(cat.id)}
-            >
-              <Text style={styles.categoryIcon}>{cat.icon}</Text>
-              <Text
-                style={[
-                  styles.categoryName,
-                  selectedCategory === cat.id && styles.categoryNameSelected,
-                ]}
-              >
-                {cat.name}
+          {/* Right Header: Delivery ETA Badge + Profile Avatar Button */}
+          <View style={styles.headerRightActions}>
+            <View style={styles.etaPill}>
+              <View style={styles.etaDot} />
+              <Text style={styles.etaText}>
+                {deliveryEstimate?.eta_text || '25 MINS'}
               </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+            </View>
 
-        {/* Featured Products */}
-        <Text style={styles.sectionTitle}>Popular Products</Text>
+            <TouchableOpacity
+              style={styles.profileAvatarBtn}
+              onPress={() => navigation.navigate('Profile')}
+              activeOpacity={0.8}
+            >
+              <User color={COLORS.primaryDark} size={18} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Location Dropdown - Click to open Saved Addresses in Profile */}
+        <TouchableOpacity
+          style={styles.locationDropdown}
+          onPress={() => navigation.navigate('Profile')}
+          activeOpacity={0.8}
+        >
+          <MapPin color={COLORS.primary} size={15} />
+          <Text style={styles.locationText} numberOfLines={1}>
+            {selectedAddress.street}, {selectedAddress.pincode}
+          </Text>
+          <ChevronDown color={COLORS.textSecondary} size={14} />
+        </TouchableOpacity>
+
+        {/* Clean Web-Style Search Bar */}
+        <View style={styles.searchBar}>
+          <Search color={COLORS.textSecondary} size={17} style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search farm fresh produce, milk, bakery..."
+            placeholderTextColor={COLORS.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearBtn}>
+              <X color={COLORS.textSecondary} size={15} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        scrollEventThrottle={300}
+        onScroll={({ nativeEvent }) => {
+          const paddingToBottom = 160;
+          const isNearBottom =
+            nativeEvent.layoutMeasurement.height + nativeEvent.contentOffset.y >=
+            nativeEvent.contentSize.height - paddingToBottom;
+          if (isNearBottom && hasMore && !loadingMore && !loading) {
+            loadMoreProducts();
+          }
+        }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[COLORS.primaryDark]}
+            tintColor={COLORS.primaryDark}
+          />
+        }
+      >
+        {/* Top Hero Banner matching Web Figma Page 4 */}
+        <View style={styles.heroBanner}>
+          <View style={styles.heroBadgeRow}>
+            <Leaf color={COLORS.primary} size={13} fill={COLORS.primary} />
+            <Text style={styles.heroBadgeText}>Direct from Farm</Text>
+          </View>
+
+          <Text style={styles.heroTitle}>Goodness in Every Category</Text>
+          <Text style={styles.heroSubtitle}>
+            Handpicked fresh, natural and organic produce harvested for your health.
+          </Text>
+
+          <View style={styles.heroDiscountTag}>
+            <Sparkles color="#FF9800" size={13} />
+            <Text style={styles.heroDiscountText}>Use Code: FRESH30 for 30% Off</Text>
+          </View>
+        </View>
+
+        {/* Shop By Category Section */}
+        <View style={styles.categorySection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Shop by Category</Text>
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryScroll}
+          >
+            {categories.map((cat) => {
+              const isSelected = selectedCategory === cat.id;
+              return (
+                <TouchableOpacity
+                  key={cat.id}
+                  style={styles.categoryItem}
+                  onPress={() => setSelectedCategory(cat.id)}
+                >
+                  <View
+                    style={[
+                      styles.categoryCircle,
+                      isSelected && styles.categoryCircleActive,
+                    ]}
+                  >
+                    <Text style={styles.categoryEmoji}>{cat.icon}</Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.categoryName,
+                      isSelected && styles.categoryNameActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {cat.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Filter Pills */}
+        <View style={styles.filterBar}>
+          <TouchableOpacity
+            style={[styles.filterChip, filterType === 'all' && styles.filterChipActive]}
+            onPress={() => setFilterType('all')}
+          >
+            <Text
+              style={[styles.filterChipText, filterType === 'all' && styles.filterChipTextActive]}
+            >
+              All Items
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterChip, filterType === 'sale' && styles.filterChipActive]}
+            onPress={() => setFilterType('sale')}
+          >
+            <Text
+              style={[styles.filterChipText, filterType === 'sale' && styles.filterChipTextActive]}
+            >
+              🔥 Deals & Sales
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterChip, filterType === 'organic' && styles.filterChipActive]}
+            onPress={() => setFilterType('organic')}
+          >
+            <Text
+              style={[styles.filterChipText, filterType === 'organic' && styles.filterChipTextActive]}
+            >
+              🌱 100% Organic
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Product Grid (Exact Match with Web ProductCard) */}
         <View style={styles.productGrid}>
-          {DEMO_PRODUCTS.map((product) => {
+          {filteredProducts.map((product) => {
             const qty = getProductQuantity(product.id);
+            const wishlisted = isWishlisted(product.id);
+            const discount =
+              product.original_price && product.original_price > product.price
+                ? Math.round(((product.original_price - product.price) / product.original_price) * 100)
+                : null;
+
             return (
-              <View key={product.id} style={styles.productCard}>
-                <Image source={{ uri: product.image }} style={styles.productImage} />
-                <Text style={styles.productName} numberOfLines={2}>
-                  {product.name}
-                </Text>
-                <Text style={styles.productUnit}>{product.unit}</Text>
-                <View style={styles.productFooter}>
-                  <Text style={styles.productPrice}>{formatCurrency(product.price)}</Text>
-                  
-                  {qty === 0 ? (
+              <TouchableOpacity
+                key={product.id}
+                style={styles.productCard}
+                activeOpacity={0.9}
+                onPress={() => navigation.navigate('ProductDetails', { product })}
+              >
+                {/* Image Stage Container */}
+                <View style={styles.cardImageContainer}>
+                  <Image source={{ uri: product.image }} style={styles.cardImage} resizeMode="contain" />
+
+                  {/* Top Badges */}
+                  <View style={styles.badgeOverlay}>
+                    {product.badge ? (
+                      <View style={styles.cardBadgePill}>
+                        <Text style={styles.cardBadgeText}>{product.badge}</Text>
+                      </View>
+                    ) : discount ? (
+                      <View style={[styles.cardBadgePill, { backgroundColor: COLORS.accent }]}>
+                        <Text style={styles.cardBadgeText}>{discount}% OFF</Text>
+                      </View>
+                    ) : null}
+
+                    {/* Heart Button */}
                     <TouchableOpacity
-                      style={styles.addButton}
-                      onPress={() => addToCart(product)}
+                      style={styles.cardHeartBtn}
+                      onPress={() => toggleWishlist(product.id)}
                     >
-                      <Plus color="#FFF" size={16} />
-                      <Text style={styles.addButtonText}>ADD</Text>
+                      <Heart
+                        color={wishlisted ? '#EF4444' : '#9CA3AF'}
+                        fill={wishlisted ? '#EF4444' : 'transparent'}
+                        size={15}
+                      />
                     </TouchableOpacity>
-                  ) : (
-                    <View style={styles.quantityStepper}>
+                  </View>
+                </View>
+
+                {/* Content */}
+                <View style={styles.cardContent}>
+                  <Text style={styles.cardTitle} numberOfLines={1}>
+                    {product.name}
+                  </Text>
+                  <Text style={styles.cardSubtitle} numberOfLines={1}>
+                    {product.description || 'Aromatic • Fresh • Pure & Natural'}
+                  </Text>
+
+                  {/* Price & Unit Row */}
+                  <View style={styles.cardPriceRow}>
+                    <View style={styles.priceCol}>
+                      <Text style={styles.cardPrice}>{formatCurrency(product.price)}</Text>
+                      {product.original_price && product.original_price > product.price && (
+                        <Text style={styles.cardMrp}>{formatCurrency(product.original_price)}</Text>
+                      )}
+                    </View>
+                    <View style={styles.unitBadge}>
+                      <Text style={styles.unitBadgeText}>{product.unit}</Text>
+                    </View>
+                  </View>
+
+                  {/* Add / Stepper Button */}
+                  <View style={styles.cardButtonRow}>
+                    {qty === 0 ? (
                       <TouchableOpacity
-                        onPress={() => updateQuantity(product.id, qty - 1)}
-                        style={styles.stepperButton}
-                      >
-                        <Minus color="#FFF" size={14} />
-                      </TouchableOpacity>
-                      <Text style={styles.stepperText}>{qty}</Text>
-                      <TouchableOpacity
-                        onPress={() => updateQuantity(product.id, qty + 1)}
-                        style={styles.stepperButton}
+                        style={styles.cardAddButton}
+                        onPress={() =>
+                          addToCart({
+                            id: product.id,
+                            name: product.name,
+                            price: product.price,
+                            original_price: product.original_price,
+                            image_url: product.image,
+                            unit: product.unit,
+                            category: product.category,
+                          })
+                        }
                       >
                         <Plus color="#FFF" size={14} />
+                        <Text style={styles.cardAddButtonText}>ADD</Text>
                       </TouchableOpacity>
-                    </View>
-                  )}
+                    ) : (
+                      <View style={styles.stepperContainer}>
+                        <TouchableOpacity
+                          style={styles.stepperBtn}
+                          onPress={() => updateQuantity(product.id, qty - 1)}
+                        >
+                          <Minus color="#FFF" size={12} />
+                        </TouchableOpacity>
+                        <Text style={styles.stepperQty}>{qty}</Text>
+                        <TouchableOpacity
+                          style={styles.stepperBtn}
+                          onPress={() => updateQuantity(product.id, qty + 1)}
+                        >
+                          <Plus color="#FFF" size={12} />
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
                 </View>
-              </View>
+              </TouchableOpacity>
             );
           })}
         </View>
+
+        {/* Loading More Indicator / End of List Indicator */}
+        {loadingMore && (
+          <View style={styles.paginationLoader}>
+            <ActivityIndicator size="small" color={COLORS.primaryDark} />
+            <Text style={styles.paginationLoaderText}>Loading more fresh harvest...</Text>
+          </View>
+        )}
+
+        {!hasMore && products.length > 0 && !loading && (
+          <View style={styles.endOfCatalogBox}>
+            <Text style={styles.endOfCatalogText}>✨ You've reached the end of this catalog</Text>
+          </View>
+        )}
       </ScrollView>
 
-      {/* Floating Cart Drawer Bar */}
+      {/* Floating Bottom Cart Pill */}
       {cartItemCount > 0 && (
-        <View style={styles.floatingCartContainer}>
+        <View style={styles.floatingCartAnchor}>
           <TouchableOpacity
-            style={styles.floatingCart}
+            style={styles.floatingCartPill}
+            activeOpacity={0.92}
             onPress={() => navigation.navigate('Cart')}
           >
-            <View style={styles.cartInfo}>
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{cartItemCount}</Text>
+            <View style={styles.cartPillLeft}>
+              <View style={styles.cartIconCircle}>
+                <ShoppingBag color="#FFF" size={16} />
+                <View style={styles.cartPillBadge}>
+                  <Text style={styles.cartPillBadgeText}>{cartItemCount}</Text>
+                </View>
               </View>
-              <Text style={styles.cartTotalText}>{formatCurrency(getCartTotal())}</Text>
+              <View>
+                <Text style={styles.cartPillTotal}>{formatCurrency(cartTotal)}</Text>
+                {cartSavings > 0 && (
+                  <Text style={styles.cartPillSavings}>You save {formatCurrency(cartSavings)}!</Text>
+                )}
+              </View>
             </View>
-            <View style={styles.viewCartButton}>
-              <Text style={styles.viewCartText}>View Cart</Text>
-              <ShoppingBag color="#FFF" size={18} />
+
+            <View style={styles.cartPillRight}>
+              <Text style={styles.cartPillActionText}>View Basket</Text>
+              <View style={styles.cartPillArrowCircle}>
+                <Text style={styles.cartPillArrow}>→</Text>
+              </View>
             </View>
           </TouchableOpacity>
         </View>
@@ -226,267 +758,495 @@ export const HomeScreen = ({ navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.bgDark,
+    backgroundColor: COLORS.bgCanvas,
   },
   header: {
+    backgroundColor: COLORS.bgWhite,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.xs,
+    paddingBottom: SPACING.sm + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    ...SHADOWS.card,
+  },
+  brandRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.sm,
-    paddingBottom: SPACING.xs,
+    marginBottom: 6,
   },
-  locationContainer: {
+  brandLogo: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  logoFresh: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: COLORS.primaryDark,
+    letterSpacing: -0.5,
+  },
+  logoBasket: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: COLORS.primary,
+    marginLeft: 2,
+  },
+  headerRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
+    gap: 8,
   },
-  locationTextContainer: {
-    marginLeft: SPACING.sm,
-    flex: 1,
+  profileAvatarBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: COLORS.primaryBorder,
   },
-  deliveringLabel: {
-    color: COLORS.textDarkSecondary,
-    fontSize: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  addressText: {
-    color: COLORS.textDarkPrimary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  shippingBadge: {
+  etaPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    paddingHorizontal: SPACING.sm,
+    backgroundColor: COLORS.primaryLight,
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: RADIUS.full,
+    gap: 6,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.3)',
+    borderColor: COLORS.primaryBorder,
   },
-  shippingText: {
-    color: COLORS.accent,
+  etaDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.primary,
+  },
+  etaText: {
     fontSize: 11,
-    fontWeight: '700',
-    marginLeft: 4,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+    letterSpacing: 0.5,
   },
-  searchContainer: {
+  locationDropdown: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.bgCardDark,
-    marginHorizontal: SPACING.md,
-    marginVertical: SPACING.sm,
+    backgroundColor: COLORS.bgCard,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: RADIUS.sm,
+    marginBottom: 8,
+    gap: 6,
+  },
+  locationText: {
+    flex: 1,
+    fontSize: 12,
+    color: COLORS.textBody,
+    fontWeight: '600',
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.bgWhite,
     borderRadius: RADIUS.md,
-    paddingHorizontal: SPACING.md,
-    height: 44,
-    borderWidth: 1,
-    borderColor: COLORS.borderDark,
+    paddingHorizontal: 12,
+    height: 42,
+    borderWidth: 1.5,
+    borderColor: COLORS.borderGreen,
   },
   searchIcon: {
-    marginRight: SPACING.xs,
+    marginRight: 8,
   },
   searchInput: {
     flex: 1,
-    color: COLORS.textDarkPrimary,
-    fontSize: 14,
+    fontSize: 13,
+    color: COLORS.textBody,
+  },
+  clearBtn: {
+    padding: 4,
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 110,
   },
-  banner: {
-    backgroundColor: 'linear-gradient(135deg, #059669 0%, #10B981 100%)',
-    marginHorizontal: SPACING.md,
-    borderRadius: RADIUS.lg,
-    padding: SPACING.lg,
-    marginVertical: SPACING.sm,
-    overflow: 'hidden',
-  },
-  bannerTextContainer: {
-    width: '80%',
-  },
-  bannerTag: {
-    color: COLORS.accent,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-    marginBottom: 4,
-  },
-  bannerTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: SPACING.md,
-  },
-  bannerButton: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs + 2,
-    borderRadius: RADIUS.full,
-    alignSelf: 'flex-start',
-  },
-  bannerButtonText: {
-    color: COLORS.primaryDark,
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  sectionTitle: {
-    color: COLORS.textDarkPrimary,
-    fontSize: 16,
-    fontWeight: '700',
+  heroBanner: {
     marginHorizontal: SPACING.md,
     marginTop: SPACING.md,
-    marginBottom: SPACING.sm,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.lg,
+    borderWidth: 1.5,
+    borderColor: COLORS.borderGreen,
+    ...SHADOWS.card,
   },
-  categoriesScroll: {
-    paddingLeft: SPACING.md,
-  },
-  categoryCard: {
+  heroBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.bgCardDark,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: RADIUS.full,
-    marginRight: SPACING.sm,
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginBottom: 8,
     borderWidth: 1,
-    borderColor: COLORS.borderDark,
+    borderColor: COLORS.borderGreen,
   },
-  categoryCardSelected: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+  heroBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.primaryDark,
   },
-  categoryIcon: {
+  heroTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: COLORS.primaryDark,
+    lineHeight: 26,
+    marginBottom: 4,
+  },
+  heroSubtitle: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  heroDiscountTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.cream,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: RADIUS.sm,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#FFE082',
+  },
+  heroDiscountText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#E65100',
+  },
+  categorySection: {
+    marginTop: SPACING.md,
+  },
+  sectionHeader: {
+    paddingHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  sectionTitle: {
     fontSize: 16,
-    marginRight: 6,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+  },
+  categoryScroll: {
+    paddingHorizontal: SPACING.md,
+    gap: 12,
+  },
+  categoryItem: {
+    alignItems: 'center',
+    width: 64,
+  },
+  categoryCircle: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: COLORS.bgWhite,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: COLORS.borderGreen,
+    marginBottom: 6,
+    ...SHADOWS.card,
+  },
+  categoryCircleActive: {
+    borderColor: COLORS.primaryDark,
+    backgroundColor: COLORS.primaryLight,
+  },
+  categoryEmoji: {
+    fontSize: 26,
   },
   categoryName: {
-    color: COLORS.textDarkSecondary,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '600',
+    color: COLORS.textSecondary,
+    textAlign: 'center',
   },
-  categoryNameSelected: {
-    color: '#FFFFFF',
+  categoryNameActive: {
+    color: COLORS.primaryDark,
+    fontWeight: '800',
+  },
+  filterBar: {
+    flexDirection: 'row',
+    paddingHorizontal: SPACING.md,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+    gap: SPACING.sm,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.bgWhite,
+    borderWidth: 1.5,
+    borderColor: COLORS.borderGreen,
+  },
+  filterChipActive: {
+    backgroundColor: COLORS.primaryDark,
+    borderColor: COLORS.primaryDark,
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textBody,
+  },
+  filterChipTextActive: {
+    color: '#FFF',
+    fontWeight: '800',
   },
   productGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: SPACING.md - 4,
-  },
-  productCard: {
-    width: '50%',
-    padding: 4,
-  },
-  productImage: {
-    width: '100%',
-    height: 120,
-    borderRadius: RADIUS.md,
-    backgroundColor: COLORS.bgCardDark,
-  },
-  productName: {
-    color: COLORS.textDarkPrimary,
-    fontSize: 13,
-    fontWeight: '600',
+    paddingHorizontal: SPACING.md,
+    gap: SPACING.sm,
     marginTop: SPACING.xs,
   },
-  productUnit: {
-    color: COLORS.textDarkSecondary,
-    fontSize: 11,
-    marginBottom: 4,
-  },
-  productFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 'auto',
-  },
-  productPrice: {
-    color: COLORS.primary,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.sm + 2,
-    paddingVertical: 4,
-    borderRadius: RADIUS.sm,
-  },
-  addButtonText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
-    marginLeft: 2,
-  },
-  quantityStepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primaryDark,
-    borderRadius: RADIUS.sm,
-    paddingHorizontal: 2,
-  },
-  stepperButton: {
-    padding: 4,
-  },
-  stepperText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-    paddingHorizontal: 6,
-  },
-  floatingCartContainer: {
-    position: 'absolute',
-    bottom: SPACING.md,
-    left: SPACING.md,
-    right: SPACING.md,
-  },
-  floatingCart: {
-    backgroundColor: COLORS.primary,
+  productCard: {
+    width: CARD_WIDTH,
+    backgroundColor: COLORS.bgCard, // Matching web ProductCard (#f5f8f0)
     borderRadius: RADIUS.lg,
-    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: COLORS.borderGreen,
+    padding: 10,
+    marginBottom: SPACING.xs,
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md - 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    ...SHADOWS.card,
   },
-  cartInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  badge: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: RADIUS.full,
-    width: 24,
-    height: 24,
+  cardImageContainer: {
+    width: '100%',
+    height: CARD_WIDTH * 0.85,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#E8F5E9',
+    position: 'relative',
+    padding: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: SPACING.sm,
   },
-  badgeText: {
-    color: COLORS.primaryDark,
-    fontWeight: '800',
-    fontSize: 12,
+  cardImage: {
+    width: '100%',
+    height: '100%',
   },
-  cartTotalText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  viewCartButton: {
+  badgeOverlay: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: 6,
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  viewCartText: {
-    color: '#FFFFFF',
+  cardBadgePill: {
+    backgroundColor: COLORS.primaryDark,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: RADIUS.full,
+  },
+  cardBadgeText: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  cardHeartBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...SHADOWS.card,
+  },
+  cardContent: {
+    paddingTop: 8,
+  },
+  cardTitle: {
     fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+    lineHeight: 18,
+  },
+  cardSubtitle: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  cardPriceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: 8,
+  },
+  priceCol: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+  },
+  cardPrice: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: COLORS.primaryDark,
+  },
+  cardMrp: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    textDecorationLine: 'line-through',
+  },
+  unitBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: RADIUS.xs,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  unitBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  cardButtonRow: {
+    marginTop: 2,
+  },
+  cardAddButton: {
+    backgroundColor: COLORS.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    gap: 4,
+  },
+  cardAddButtonText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.primaryDark,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 4,
+    paddingVertical: 3,
+  },
+  stepperBtn: {
+    padding: 5,
+  },
+  stepperQty: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  floatingCartAnchor: {
+    position: 'absolute',
+    bottom: 12,
+    left: SPACING.md,
+    right: SPACING.md,
+    zIndex: 100,
+  },
+  floatingCartPill: {
+    backgroundColor: COLORS.primaryDark,
+    borderRadius: RADIUS.xl,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    ...SHADOWS.floating,
+  },
+  cartPillLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  cartIconCircle: {
+    position: 'relative',
+    padding: 4,
+  },
+  cartPillBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: COLORS.accent,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 2,
+  },
+  cartPillBadgeText: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  cartPillTotal: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  cartPillSavings: {
+    color: '#DCFCE7',
+    fontSize: 11,
     fontWeight: '700',
-    marginRight: 6,
+  },
+  cartPillRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  cartPillActionText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  cartPillArrowCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cartPillArrow: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  paginationLoader: {
+    paddingVertical: SPACING.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  paginationLoaderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  endOfCatalogBox: {
+    paddingVertical: SPACING.md,
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  endOfCatalogText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '600',
   },
 });

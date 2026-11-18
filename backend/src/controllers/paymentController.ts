@@ -46,8 +46,9 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     });
     
     // Return more specific error information
-    res.status(500).json({ 
+    res.status(error.statusCode || 400).json({ 
       error: 'Error creating payment intent',
+      message: error.message || 'Unknown error',
       details: error.message || 'Unknown error'
     });
   }

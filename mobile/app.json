@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Fresh Breeze Basket",
-    "slug": "fresh-breeze-basket",
+    "slug": "rishabh",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -19,12 +19,13 @@
       "bundleIdentifier": "com.freshbreeze.basket"
     },
     "android": {
+      "package": "com.freshbreeze.basket",
+      "versionCode": 1,
+      "targetSdkVersion": 34,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0F172A"
       },
-      "package": "com.freshbreeze.basket",
-      "targetSdkVersion": 34,
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -44,6 +45,12 @@
           "enableGooglePay": true
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "cf862d60-5ce8-46e8-a266-0d5f97e71b9b"
+      }
+    },
+    "owner": "gulffreshs-team"
   }
 }

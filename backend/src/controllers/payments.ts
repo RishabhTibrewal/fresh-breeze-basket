@@ -65,12 +65,13 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating payment intent:', error);
     if (error instanceof ApiError) {
       throw error;
     }
-    throw new ApiError(500, 'Error creating payment intent');
+    const message = error.raw?.message || error.message || 'Error creating payment intent';
+    throw new ApiError(error.statusCode || 400, message);
   }
 };
 

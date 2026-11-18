@@ -1,4 +1,5 @@
-import { apiClient } from '../api/client';
+import { apiClient, DEFAULT_TENANT_SUBDOMAIN } from '../api/client';
+import { useStore } from '../store/useStore';
 
 export const CURRENCY_SYMBOLS: Record<string, string> = {
   INR: '₹',
@@ -34,8 +35,23 @@ export function formatCurrency(amount: number | string | null | undefined, curre
 
 export async function fetchCompanyCurrency(): Promise<string> {
   try {
-    const response = await apiClient.get('/companies/me');
-    const currency = response.data?.data?.currency || response.data?.currency;
+    const token = useStore.getState().token;
+    let currency: string | undefined;
+
+    if (token) {
+      try {
+        const response = await apiClient.get('/companies/me');
+        currency = response.data?.data?.currency || response.data?.currency;
+      } catch {
+        // Fallback to public endpoint
+      }
+    }
+
+    if (!currency) {
+      const publicRes = await apiClient.get(`/companies/by-slug/${DEFAULT_TENANT_SUBDOMAIN}`);
+      currency = publicRes.data?.data?.currency || publicRes.data?.currency;
+    }
+
     if (currency) {
       setCompanyCurrency(currency);
       return currency;

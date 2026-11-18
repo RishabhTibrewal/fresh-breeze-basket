@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,122 +6,319 @@ import {
   ScrollView,
   TouchableOpacity,
   SafeAreaView,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { COLORS, SPACING, RADIUS } from '../theme/theme';
-import { CheckCircle2, Clock, PackageCheck, Truck, Home } from 'lucide-react-native';
+import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
+import {
+  CheckCircle2,
+  Clock,
+  PackageCheck,
+  Truck,
+  Home,
+  ArrowLeft,
+  MapPin,
+  CreditCard,
+  ShoppingBag,
+} from 'lucide-react-native';
+import { apiClient } from '../api/client';
+import { useStore } from '../store/useStore';
+import { formatCurrency } from '../utils/currency';
 
-const TRACKING_STEPS = [
-  {
-    title: 'Order Placed & Confirmed',
-    time: 'Today, 02:15 PM',
-    done: true,
-    active: false,
-    icon: CheckCircle2,
-  },
-  {
-    title: 'Packed at Warehouse',
-    time: 'Today, 03:00 PM',
-    done: true,
-    active: false,
-    icon: PackageCheck,
-  },
-  {
-    title: 'Handed to Shiprocket Express Courier',
-    time: 'Estimated Today, 06:00 PM',
-    done: false,
-    active: true,
-    icon: Truck,
-  },
-  {
-    title: 'Delivered to your Doorstep',
-    time: 'Estimated 2 Business Days',
-    done: false,
-    active: false,
-    icon: Home,
-  },
-];
+interface BackendOrderItem {
+  id: string;
+  quantity: number;
+  unit_price?: number;
+  price?: number;
+  total_price?: number;
+  product?: { name: string; image_url?: string };
+  variant?: { name: string };
+  name?: string;
+}
+
+interface BackendOrder {
+  id: string;
+  status: string;
+  payment_status: string;
+  payment_method?: string;
+  total_amount: number;
+  delivery_slot?: string;
+  delivery_date?: string;
+  created_at: string;
+  shipping_address?: {
+    address_line1?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    pincode?: string;
+  };
+  order_items?: BackendOrderItem[];
+}
 
 export const OrderTrackingScreen = ({ route, navigation }: any) => {
-  const { orderId = 'ORD-893212' } = route.params || {};
+  const { orderId: paramOrderId } = route.params || {};
+  const { token, user } = useStore();
+
+  const [currentOrderId, setCurrentOrderId] = useState<string | null>(paramOrderId || null);
+  const [order, setOrder] = useState<BackendOrder | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+
+  const fetchOrderData = useCallback(async (idToFetch?: string) => {
+    let targetId = idToFetch || currentOrderId;
+
+    try {
+      // If no orderId provided and user is authenticated, fetch their most recent order
+      if (!targetId && token) {
+        const myOrdersRes = await apiClient.get('/orders/my-orders');
+        const list = myOrdersRes.data?.data;
+        if (Array.isArray(list) && list.length > 0) {
+          targetId = list[0].id;
+          setCurrentOrderId(list[0].id);
+          setOrder(list[0]);
+          return;
+        }
+      }
+
+      if (targetId) {
+        const res = await apiClient.get(`/orders/${targetId}`);
+        const data = res.data?.data || res.data;
+        if (data && data.id) {
+          setOrder(data);
+          setCurrentOrderId(data.id);
+        }
+      }
+    } catch (err: any) {
+      console.log('Error fetching order from backend:', err?.response?.data || err?.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [currentOrderId, token]);
+
+  useEffect(() => {
+    fetchOrderData(paramOrderId);
+  }, [paramOrderId, fetchOrderData]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchOrderData();
+  };
+
+  // Determine timeline progress based on real order status
+  const normalizedStatus = (order?.status || 'confirmed').toLowerCase();
+  const isDelivered = normalizedStatus === 'delivered' || normalizedStatus === 'completed';
+  const isDispatched = isDelivered || normalizedStatus === 'dispatched' || normalizedStatus === 'in_transit' || normalizedStatus === 'shipped';
+  const isPacked = isDispatched || normalizedStatus === 'processing' || normalizedStatus === 'harvested' || normalizedStatus === 'packed';
+  const isConfirmed = isPacked || normalizedStatus === 'confirmed' || normalizedStatus === 'paid' || normalizedStatus === 'pending';
+
+  const steps = [
+    {
+      title: 'Order Placed & Confirmed',
+      time: order?.created_at ? new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Confirmed',
+      done: isConfirmed,
+      active: !isPacked,
+      icon: CheckCircle2,
+    },
+    {
+      title: 'Harvest Packed at Farm Facility',
+      time: isPacked ? 'Packaged Cold-Chain' : 'Estimated 15 mins',
+      done: isPacked,
+      active: isPacked && !isDispatched,
+      icon: PackageCheck,
+    },
+    {
+      title: 'Dispatched with Chilled Courier',
+      time: isDispatched ? 'Out for Delivery' : 'In Transit Soon',
+      done: isDispatched,
+      active: isDispatched && !isDelivered,
+      icon: Truck,
+    },
+    {
+      title: 'Delivered Fresh to your Doorstep',
+      time: isDelivered ? 'Delivered' : (order?.delivery_slot || 'Estimated in 25-30 Mins'),
+      done: isDelivered,
+      active: isDelivered,
+      icon: Home,
+    },
+  ];
+
+  const address = order?.shipping_address;
+  const addressText = address
+    ? [address.address_line1 || address.street, address.city, address.postal_code || address.pincode].filter(Boolean).join(', ')
+    : 'Default Delivery Address';
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Live Order Tracking</Text>
-        <Text style={styles.orderId}>{orderId}</Text>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('HomeTab')}>
+          <ArrowLeft color={COLORS.primaryDark} size={20} />
+        </TouchableOpacity>
+        <View style={styles.headerTitleBox}>
+          <Text style={styles.headerTitle}>Live Order Tracking</Text>
+          <Text style={styles.orderId} numberOfLines={1}>
+            {currentOrderId || 'Recent Harvest Order'}
+          </Text>
+        </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Status Card */}
-        <View style={styles.card}>
-          <View style={styles.etaContainer}>
-            <Clock color={COLORS.accent} size={24} />
-            <View style={styles.etaTextContainer}>
-              <Text style={styles.etaLabel}>ESTIMATED NATIONWIDE DELIVERY</Text>
-              <Text style={styles.etaValue}>2-3 Business Days</Text>
-            </View>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[COLORS.primaryDark]}
+            tintColor={COLORS.primaryDark}
+          />
+        }
+      >
+        {loading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color={COLORS.primaryDark} />
+            <Text style={styles.loadingText}>Fetching real-time shipment updates...</Text>
           </View>
-          <Text style={styles.courierTag}>Partnered with Shiprocket Express Shipping</Text>
-        </View>
-
-        {/* Timeline */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Shipment Status</Text>
-
-          <View style={styles.timeline}>
-            {TRACKING_STEPS.map((step, index) => {
-              const IconComp = step.icon;
-              return (
-                <View key={index} style={styles.stepRow}>
-                  <View style={styles.stepLeft}>
-                    <View
-                      style={[
-                        styles.iconCircle,
-                        step.done && styles.iconCircleDone,
-                        step.active && styles.iconCircleActive,
-                      ]}
-                    >
-                      <IconComp
-                        color={
-                          step.done ? '#FFF' : step.active ? COLORS.accent : COLORS.textDarkSecondary
-                        }
-                        size={18}
-                      />
-                    </View>
-
-                    {index < TRACKING_STEPS.length - 1 && (
-                      <View
-                        style={[
-                          styles.line,
-                          step.done && styles.lineDone,
-                        ]}
-                      />
-                    )}
-                  </View>
-
-                  <View style={styles.stepRight}>
-                    <Text
-                      style={[
-                        styles.stepTitle,
-                        step.active && styles.stepTitleActive,
-                      ]}
-                    >
-                      {step.title}
-                    </Text>
-                    <Text style={styles.stepTime}>{step.time}</Text>
-                  </View>
+        ) : (
+          <>
+            {/* Status Card */}
+            <View style={styles.card}>
+              <View style={styles.etaContainer}>
+                <View style={styles.clockIconCircle}>
+                  <Clock color={COLORS.primaryDark} size={22} />
                 </View>
-              );
-            })}
-          </View>
-        </View>
+                <View style={styles.etaTextContainer}>
+                  <Text style={styles.etaLabel}>CURRENT ORDER STATUS</Text>
+                  <Text style={styles.etaValue}>
+                    {normalizedStatus.toUpperCase().replace('_', ' ')}
+                  </Text>
+                </View>
+                <View style={styles.statusBadge}>
+                  <Text style={styles.statusBadgeText}>
+                    {isDelivered ? 'DELIVERED' : 'LIVE'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.courierTag}>
+                <Text style={styles.courierTagText}>
+                  ⚡ {order?.delivery_slot ? `Slot: ${order.delivery_slot}` : 'Cold-Chain Harvest Delivery'}
+                </Text>
+              </View>
+            </View>
 
-        <TouchableOpacity
-          style={styles.homeButton}
-          onPress={() => navigation.popToTop()}
-        >
-          <Text style={styles.homeButtonText}>Back to Shopping</Text>
-        </TouchableOpacity>
+            {/* Timeline */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Shipment Status</Text>
+
+              <View style={styles.timeline}>
+                {steps.map((step, index) => {
+                  const IconComp = step.icon;
+                  return (
+                    <View key={index} style={styles.stepRow}>
+                      <View style={styles.stepLeft}>
+                        <View
+                          style={[
+                            styles.iconCircle,
+                            step.done && styles.iconCircleDone,
+                            step.active && styles.iconCircleActive,
+                          ]}
+                        >
+                          <IconComp
+                            color={
+                              step.done ? '#FFF' : step.active ? COLORS.primaryDark : COLORS.textMuted
+                            }
+                            size={17}
+                          />
+                        </View>
+
+                        {index < steps.length - 1 && (
+                          <View
+                            style={[
+                              styles.line,
+                              step.done && styles.lineDone,
+                            ]}
+                          />
+                        )}
+                      </View>
+
+                      <View style={styles.stepRight}>
+                        <Text
+                          style={[
+                            styles.stepTitle,
+                            step.active && styles.stepTitleActive,
+                            step.done && styles.stepTitleDone,
+                          ]}
+                        >
+                          {step.title}
+                        </Text>
+                        <Text style={styles.stepTime}>{step.time}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Order Items & Summary */}
+            {order && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Order Summary</Text>
+
+                {order.order_items && order.order_items.length > 0 ? (
+                  <View style={styles.itemsList}>
+                    {order.order_items.map((it, idx) => {
+                      const itemName = it.product?.name || it.name || it.variant?.name || 'Fresh Item';
+                      const itemPrice = it.unit_price || it.price || 0;
+                      return (
+                        <View key={idx} style={styles.itemRow}>
+                          <View style={styles.itemBullet} />
+                          <Text style={styles.itemName} numberOfLines={1}>
+                            {itemName} x {it.quantity}
+                          </Text>
+                          <Text style={styles.itemPrice}>
+                            {formatCurrency(itemPrice * it.quantity)}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+
+                <View style={styles.summaryDivider} />
+
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Total Paid / Due</Text>
+                  <Text style={styles.summaryTotalAmount}>
+                    {formatCurrency(order.total_amount)}
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <CreditCard color={COLORS.textSecondary} size={14} />
+                  <Text style={styles.infoText}>
+                    Payment: {(order.payment_method || 'Online').toUpperCase()} ({order.payment_status || 'Paid'})
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <MapPin color={COLORS.textSecondary} size={14} />
+                  <Text style={styles.infoText} numberOfLines={2}>
+                    {addressText}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={styles.continueShoppingBtn}
+              onPress={() => navigation.navigate('HomeTab')}
+            >
+              <Text style={styles.continueShoppingBtnText}>Continue Shopping</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -130,137 +327,251 @@ export const OrderTrackingScreen = ({ route, navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.bgDark,
+    backgroundColor: COLORS.bgCanvas,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
+    backgroundColor: COLORS.bgWhite,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.borderDark,
+    borderBottomColor: COLORS.border,
+    ...SHADOWS.card,
+  },
+  backBtn: {
+    padding: 6,
+    marginRight: SPACING.sm,
+  },
+  headerTitleBox: {
+    flex: 1,
   },
   headerTitle: {
-    color: COLORS.textDarkPrimary,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
+    color: COLORS.primaryDark,
   },
   orderId: {
-    color: COLORS.primary,
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 2,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
   },
   scrollContent: {
     padding: SPACING.md,
+    paddingBottom: 40,
+  },
+  loadingBox: {
+    paddingVertical: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
   },
   card: {
-    backgroundColor: COLORS.bgCardDark,
+    backgroundColor: COLORS.bgWhite,
     borderRadius: RADIUS.lg,
     padding: SPACING.md,
     marginBottom: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.borderDark,
+    borderColor: COLORS.borderGreen,
+    ...SHADOWS.card,
   },
   cardTitle: {
-    color: COLORS.textDarkPrimary,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '800',
+    color: COLORS.primaryDark,
     marginBottom: SPACING.md,
   },
   etaContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  clockIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.primaryBorder,
   },
   etaTextContainer: {
-    marginLeft: SPACING.md,
+    flex: 1,
   },
   etaLabel: {
-    color: COLORS.textDarkSecondary,
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0.8,
+    color: COLORS.textSecondary,
+    letterSpacing: 0.5,
   },
   etaValue: {
-    color: COLORS.textDarkPrimary,
     fontSize: 18,
+    fontWeight: '900',
+    color: COLORS.primaryDark,
+    marginTop: 2,
+  },
+  statusBadge: {
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: RADIUS.sm,
+  },
+  statusBadgeText: {
+    fontSize: 11,
     fontWeight: '800',
+    color: COLORS.primaryDark,
   },
   courierTag: {
-    color: COLORS.accent,
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: SPACING.sm,
-    paddingTop: SPACING.xs,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.borderDark,
+    backgroundColor: COLORS.cream,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: RADIUS.sm,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#FFE082',
+  },
+  courierTagText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#E65100',
   },
   timeline: {
-    marginTop: SPACING.xs,
+    paddingTop: SPACING.xs,
   },
   stepRow: {
     flexDirection: 'row',
-    marginBottom: SPACING.md,
+    minHeight: 65,
   },
   stepLeft: {
     alignItems: 'center',
-    marginRight: SPACING.md,
+    width: 32,
+    marginRight: SPACING.sm + 4,
   },
   iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: RADIUS.full,
-    backgroundColor: COLORS.bgDark,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.bgCanvas,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.borderDark,
   },
   iconCircleDone: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primaryDark,
+    borderColor: COLORS.primaryDark,
   },
   iconCircleActive: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    borderColor: COLORS.accent,
+    backgroundColor: COLORS.primaryLight,
+    borderColor: COLORS.primaryDark,
   },
   line: {
     width: 2,
-    height: 30,
-    backgroundColor: COLORS.borderDark,
-    marginTop: 4,
+    flex: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: 4,
   },
   lineDone: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.primaryDark,
   },
   stepRight: {
     flex: 1,
-    justifyContent: 'center',
+    paddingTop: 4,
   },
   stepTitle: {
-    color: COLORS.textDarkSecondary,
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textMuted,
   },
   stepTitleActive: {
-    color: COLORS.textDarkPrimary,
+    color: COLORS.primaryDark,
     fontWeight: '800',
   },
-  stepTime: {
-    color: COLORS.textDarkSecondary,
-    fontSize: 11,
-    marginTop: 2,
+  stepTitleDone: {
+    color: COLORS.textPrimary,
   },
-  homeButton: {
-    backgroundColor: COLORS.bgCardDark,
-    paddingVertical: SPACING.md,
-    borderRadius: RADIUS.lg,
+  stepTime: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  itemsList: {
+    marginBottom: SPACING.sm,
+  },
+  itemRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.borderDark,
+    paddingVertical: 6,
+  },
+  itemBullet: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: COLORS.primary,
+    marginRight: 8,
+  },
+  itemName: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.textPrimary,
+    fontWeight: '600',
+  },
+  itemPrice: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.primaryDark,
+  },
+  summaryDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: SPACING.sm,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  summaryLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  summaryTotalAmount: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: COLORS.primaryDark,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  infoText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+    flex: 1,
+  },
+  continueShoppingBtn: {
+    backgroundColor: COLORS.primaryDark,
+    paddingVertical: 14,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
     marginTop: SPACING.sm,
   },
-  homeButtonText: {
-    color: COLORS.textDarkPrimary,
-    fontWeight: '700',
-    fontSize: 14,
+  continueShoppingBtnText: {
+    color: COLORS.textWhite,
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

@@ -745,7 +745,7 @@ export const createOrder = async (req: Request, res: Response) => {
       .from('carts')
       .select('id')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
     
     if (cart) {
       const { error: cartError } = await (supabaseAdmin || supabase)
@@ -770,11 +770,13 @@ export const createOrder = async (req: Request, res: Response) => {
         order_id: result.id
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in createOrder:', error);
-    res.status(500).json({
+    const message = error instanceof ApiError ? error.message : (error?.message || 'Error creating order');
+    res.status(error?.statusCode || error?.status || 500).json({
       success: false,
-      error: error instanceof ApiError ? error.message : 'Error creating order'
+      error: message,
+      details: error?.details || error?.hint || error?.message || null
     });
   }
 };

@@ -1,25 +1,30 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { StripeProvider } from '@stripe/stripe-react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { StripeProviderWrapper } from './src/components/StripeProviderWrapper';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { registerForPushNotificationsAsync } from './src/utils/notifications';
 
 const queryClient = new QueryClient();
 
 export default function App() {
   const stripePublishableKey = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || 'pk_test_sample_key';
 
+  useEffect(() => {
+    registerForPushNotificationsAsync();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
-        <StripeProvider
+        <StripeProviderWrapper
           publishableKey={stripePublishableKey}
           merchantIdentifier="merchant.com.freshbreeze.basket"
         >
           <StatusBar style="light" />
           <RootNavigator />
-        </StripeProvider>
+        </StripeProviderWrapper>
       </QueryClientProvider>
     </SafeAreaProvider>
   );

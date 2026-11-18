@@ -176,7 +176,7 @@ export class OrderService {
           .eq('is_active', true)
           .order('created_at', { ascending: true })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         finalOutletId = defaultWarehouse?.id || null;
       }
@@ -193,10 +193,10 @@ export class OrderService {
                 itemOutletId,
                 item.quantity,
                 item.variantId,
-                false // eCommerce follows strict stock checks
+                true // allowNegative = true for sales/ecommerce orders to prevent blocking checkout
               );
             } catch (error: any) {
-              throw new Error(`Stock reservation failed: ${error.message}`);
+              console.warn(`[OrderService] Stock reservation warning for product ${item.productId}: ${error.message}. Proceeding with order.`);
             }
           }
         }

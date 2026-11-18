@@ -109,6 +109,10 @@ const isAllowedOrigin = (origin?: string | null): boolean => {
   const normalizedOrigin = origin.replace(/\/$/, '');
   if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin)) return true;
   if (normalizedOrigin.startsWith('http://localhost:') || normalizedOrigin.startsWith('https://localhost:')) return true;
+  if (normalizedOrigin.startsWith('http://127.0.0.1:') || normalizedOrigin.startsWith('https://127.0.0.1:')) return true;
+  // Allow all local LAN IP origins (192.168.x.x, 10.x.x.x, 172.16-31.x.x) for Expo dev, mobile emulators & web testing
+  const isLocalLan = /^https?:\/\/(?:192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?::\d+)?$/.test(normalizedOrigin);
+  if (isLocalLan) return true;
   return normalizedOrigin.includes('gofreshco.com');
 };
 

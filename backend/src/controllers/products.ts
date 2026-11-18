@@ -51,7 +51,7 @@ export const getProducts = async (req: Request, res: Response) => {
     if (!req.companyId) {
       throw new ApiError(400, 'Company context is required');
     }
-    const { category, minPrice, maxPrice, inStock, sortBy, limit, page, format, collection_slug } = req.query;
+    const { category, minPrice, maxPrice, inStock, sortBy, limit, page, format, collection_slug, search } = req.query;
     
     const client = supabaseAdmin || supabase;
     
@@ -68,7 +68,32 @@ export const getProducts = async (req: Request, res: Response) => {
     
     // Apply filters
     if (category) {
-      query = query.eq('category_id', category);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(category as string);
+      if (isUuid) {
+        query = query.eq('category_id', category);
+      } else {
+        const { data: matchedCat } = await client
+          .from('categories')
+          .select('id')
+          .eq('company_id', req.companyId)
+          .or(`slug.ilike.${category},name.ilike.${category}`)
+          .maybeSingle();
+
+        if (matchedCat) {
+          query = query.eq('category_id', matchedCat.id);
+        } else {
+          return res.status(200).json({
+            success: true,
+            count: 0,
+            data: [],
+            deprecated: true,
+          });
+        }
+      }
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      query = query.ilike('name', `%${search.trim()}%`);
     }
     
     if (minPrice) {
@@ -134,7 +159,32 @@ export const getProducts = async (req: Request, res: Response) => {
     
     // Apply filters
     if (category) {
-      query = query.eq('category_id', category);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(category as string);
+      if (isUuid) {
+        query = query.eq('category_id', category);
+      } else {
+        const { data: matchedCat } = await client
+          .from('categories')
+          .select('id')
+          .eq('company_id', req.companyId)
+          .or(`slug.ilike.${category},name.ilike.${category}`)
+          .maybeSingle();
+
+        if (matchedCat) {
+          query = query.eq('category_id', matchedCat.id);
+        } else {
+          return res.status(200).json({
+            success: true,
+            count: 0,
+            data: [],
+            deprecated: true,
+          });
+        }
+      }
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      query = query.ilike('name', `%${search.trim()}%`);
     }
 
     // Filter by collection
