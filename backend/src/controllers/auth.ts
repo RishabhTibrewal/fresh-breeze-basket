@@ -594,6 +594,175 @@ export const login = async (req: Request, res: Response) => {
   }
 };
 
+// Google OAuth login — accepts { id_token } (mobile/native) or { supabase_access_token } (web OAuth callback)
+export const googleLogin = async (req: Request, res: Response) => {
+  try {
+    const { id_token, supabase_access_token } = req.body;
+    const activeCompanyId = req.companyId;
+
+    if (!activeCompanyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required',
+      });
+    }
+
+    if (!id_token && !supabase_access_token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Google id_token or supabase_access_token is required',
+      });
+    }
+
+    let authUser: any = null;
+    let accessToken = '';
+    let refreshToken = '';
+
+    if (id_token) {
+      const client = createTransientClient(true);
+      const { data: authData, error: authError } = await client.auth.signInWithIdToken({
+        provider: 'google',
+        token: id_token,
+      });
+
+      if (authError || !authData?.session || !authData?.user) {
+        console.error('Supabase Google signInWithIdToken error:', authError);
+        return res.status(401).json({
+          success: false,
+          message: authError?.message || 'Google authentication failed',
+        });
+      }
+
+      authUser = authData.user;
+      accessToken = authData.session.access_token;
+      refreshToken = authData.session.refresh_token;
+    } else if (supabase_access_token) {
+      const adminClient = supabaseAdmin || supabase;
+      const { data: userData, error: userError } = await adminClient.auth.getUser(supabase_access_token);
+
+      if (userError || !userData?.user) {
+        console.error('Supabase getUser error during Google sync:', userError);
+        return res.status(401).json({
+          success: false,
+          message: userError?.message || 'Invalid Supabase token',
+        });
+      }
+
+      authUser = userData.user;
+      accessToken = supabase_access_token;
+    }
+
+    const email = authUser.email || '';
+    const meta = authUser.user_metadata || {};
+    const rawFullName: string = meta.full_name || meta.name || '';
+    const nameParts = rawFullName.trim().split(/\s+/).filter(Boolean);
+    const firstName = meta.given_name || nameParts[0] || email.split('@')[0] || 'User';
+    const lastName = meta.family_name || (nameParts.length > 1 ? nameParts.slice(1).join(' ') : '');
+
+    // Ensure profile exists
+    let profile: any = null;
+    const { profile: existingProfile } = await getGlobalProfile(authUser.id, accessToken);
+
+    if (existingProfile) {
+      profile = existingProfile;
+    } else if (supabaseAdmin) {
+      const { data: createdProfile, error: createProfileError } = await supabaseAdmin
+        .from('profiles')
+        .upsert(
+          {
+            id: authUser.id,
+            email,
+            first_name: firstName,
+            last_name: lastName || null,
+            phone: authUser.phone || null,
+            role: 'user',
+            company_id: activeCompanyId,
+          },
+          { onConflict: 'id' }
+        )
+        .select('*')
+        .single();
+
+      if (createProfileError) {
+        console.error('Error creating profile for Google user:', createProfileError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create user profile',
+        });
+      }
+      profile = createdProfile;
+    }
+
+    if (!profile) {
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to load or create user profile',
+      });
+    }
+
+    // Ensure company membership exists for the active tenant
+    const existingMembership = await getMembership(authUser.id, activeCompanyId);
+    if (!existingMembership) {
+      const membershipError = await ensureMembership(authUser.id, activeCompanyId, ['user']);
+      if (membershipError) {
+        console.error('Error ensuring company membership for Google user:', membershipError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to link Google account to this store',
+        });
+      }
+
+      // Ensure customer record exists for this company (non-blocking)
+      if (supabaseAdmin) {
+        try {
+          await supabaseAdmin.from('customers').upsert(
+            {
+              user_id: authUser.id,
+              company_id: activeCompanyId,
+              name: `${firstName} ${lastName}`.trim() || email,
+              email,
+              phone: profile.phone || null,
+              customer_type: 'individual',
+            },
+            { onConflict: 'user_id,company_id' }
+          );
+        } catch (custErr) {
+          console.error('Non-critical error creating customer record for Google user:', custErr);
+        }
+      }
+    }
+
+    const userRoles = await getUserRoles(authUser.id, activeCompanyId);
+    const primaryRole = userRoles.length > 0 ? userRoles[0] : 'user';
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        roles: userRoles,
+        user: {
+          id: profile.id,
+          email: profile.email || email,
+          first_name: profile.first_name || firstName,
+          last_name: profile.last_name || lastName,
+          phone: profile.phone || null,
+          role: primaryRole,
+          roles: userRoles,
+          company_id: activeCompanyId,
+          created_at: profile.created_at,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Unexpected error during Google login:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'An unexpected error occurred during Google login',
+    });
+  }
+};
+
 // Refresh session — accepts { refresh_token } and returns new { access_token, refresh_token }
 export const refresh = async (req: Request, res: Response) => {
   try {

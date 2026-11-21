@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   Image,
   SafeAreaView,
   StatusBar,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
 import { useStore, MobileProduct } from '../store/useStore';
@@ -22,18 +22,83 @@ import {
   Minus,
   ShoppingBag,
   RotateCcw,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react-native';
 import { formatCurrency } from '../utils/currency';
-
-const { width } = Dimensions.get('window');
+import { apiClient } from '../api/client';
 
 export const ProductDetailsScreen = ({ route, navigation }: any) => {
+  const { width } = useWindowDimensions();
+  const imageStageHeight = Math.min(width * 0.9, 420);
   const { product }: { product: MobileProduct } = route.params || {};
   const { cart, addToCart, updateQuantity, toggleWishlist, isWishlisted } = useStore();
 
   const [selectedVariantId, setSelectedVariantId] = useState<string>(
     product?.variants && product.variants.length > 0 ? product.variants[0].id : 'default'
   );
+  const [galleryImages, setGalleryImages] = useState<string[]>(() => {
+    const initial = [
+      ...(Array.isArray(product?.images) ? product.images : []),
+      ...(product?.image ? [product.image] : []),
+    ].filter(Boolean);
+    return Array.from(new Set(initial));
+  });
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const galleryScrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    if (!product?.id) return;
+    let isMounted = true;
+
+    const loadProductImages = async () => {
+      try {
+        const res = await apiClient.get(`/products/${product.id}`);
+        const detail = res.data?.data || res.data;
+        if (!detail || !isMounted) return;
+
+        const detailImages: string[] = Array.isArray(detail.images)
+          ? detail.images
+              .map((img: any) => (typeof img === 'string' ? img : img?.image_url))
+              .filter(Boolean)
+          : [];
+        const additionalImages: string[] = Array.isArray(detail.additionalImages)
+          ? detail.additionalImages.filter(Boolean)
+          : [];
+        const variantImages: string[] = Array.isArray(detail.variants)
+          ? detail.variants.flatMap((v: any) => [
+              ...(v.image_url ? [v.image_url] : []),
+              ...(Array.isArray(v.variant_images)
+                ? v.variant_images.map((vi: any) => (typeof vi === 'string' ? vi : vi?.image_url)).filter(Boolean)
+                : []),
+            ])
+          : [];
+
+        const merged = Array.from(
+          new Set(
+            [
+              detail.image_url,
+              ...detailImages,
+              ...additionalImages,
+              ...variantImages,
+              product.image,
+            ].filter(Boolean)
+          )
+        );
+
+        if (merged.length > 0 && isMounted) {
+          setGalleryImages(merged);
+        }
+      } catch {
+        // Keep initial product image(s) if detail fetch fails
+      }
+    };
+
+    loadProductImages();
+    return () => {
+      isMounted = false;
+    };
+  }, [product?.id, product?.image]);
 
   if (!product) {
     return (
@@ -108,8 +173,90 @@ export const ProductDetailsScreen = ({ route, navigation }: any) => {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Product Image Stage */}
-        <View style={styles.imageStage}>
-          <Image source={{ uri: product.image }} style={styles.heroImage} resizeMode="contain" />
+        <View style={[styles.imageStage, { width, height: imageStageHeight }]}>
+          <ScrollView
+            ref={galleryScrollRef}
+            horizontal
+            pagingEnabled
+            nestedScrollEnabled
+            snapToInterval={width}
+            decelerationRate="fast"
+            showsHorizontalScrollIndicator={false}
+            scrollEventThrottle={16}
+            style={{ width, height: imageStageHeight }}
+            onScroll={(e) => {
+              const offsetX = e.nativeEvent.contentOffset.x;
+              if (width > 0) {
+                const idx = Math.round(offsetX / width);
+                if (idx >= 0 && idx < galleryImages.length && idx !== activeImageIndex) {
+                  setActiveImageIndex(idx);
+                }
+              }
+            }}
+            onMomentumScrollEnd={(e) => {
+              const offsetX = e.nativeEvent.contentOffset.x;
+              if (width > 0) {
+                const idx = Math.round(offsetX / width);
+                if (idx >= 0 && idx < galleryImages.length) {
+                  setActiveImageIndex(idx);
+                }
+              }
+            }}
+          >
+            {galleryImages.map((imgUri, idx) => (
+              <View key={`${imgUri}-${idx}`} style={[styles.imageSlide, { width, height: imageStageHeight }]}>
+                <Image source={{ uri: imgUri }} style={styles.heroImage} resizeMode="contain" />
+              </View>
+            ))}
+          </ScrollView>
+
+          {galleryImages.length > 1 && activeImageIndex > 0 && (
+            <TouchableOpacity
+              style={[styles.slideArrowBtn, styles.slideArrowLeft]}
+              activeOpacity={0.8}
+              onPress={() => {
+                const nextIdx = activeImageIndex - 1;
+                setActiveImageIndex(nextIdx);
+                galleryScrollRef.current?.scrollTo({ x: nextIdx * width, animated: true });
+              }}
+            >
+              <ChevronLeft color={COLORS.primaryDark} size={20} />
+            </TouchableOpacity>
+          )}
+
+          {galleryImages.length > 1 && activeImageIndex < galleryImages.length - 1 && (
+            <TouchableOpacity
+              style={[styles.slideArrowBtn, styles.slideArrowRight]}
+              activeOpacity={0.8}
+              onPress={() => {
+                const nextIdx = activeImageIndex + 1;
+                setActiveImageIndex(nextIdx);
+                galleryScrollRef.current?.scrollTo({ x: nextIdx * width, animated: true });
+              }}
+            >
+              <ChevronRight color={COLORS.primaryDark} size={20} />
+            </TouchableOpacity>
+          )}
+
+          {galleryImages.length > 1 && (
+            <View style={styles.paginationDotsContainer}>
+              {galleryImages.map((_, idx) => {
+                const isActive = idx === activeImageIndex;
+                return (
+                  <TouchableOpacity
+                    key={`dot-${idx}`}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setActiveImageIndex(idx);
+                      galleryScrollRef.current?.scrollTo({ x: idx * width, animated: true });
+                    }}
+                    style={[styles.paginationDot, isActive && styles.paginationDotActive]}
+                  />
+                );
+              })}
+            </View>
+          )}
+
           {discountPercent && (
             <View style={styles.discountBadge}>
               <Text style={styles.discountBadgeText}>{discountPercent}% OFF</Text>
@@ -333,19 +480,64 @@ const styles = StyleSheet.create({
     paddingBottom: 110,
   },
   imageStage: {
-    width: width,
-    height: width * 0.9,
     backgroundColor: COLORS.bgWhite,
     position: 'relative',
+    overflow: 'hidden',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderGreen,
+  },
+  imageSlide: {
     padding: SPACING.lg,
     justifyContent: 'center',
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.borderGreen,
   },
   heroImage: {
     width: '100%',
     height: '100%',
+  },
+  slideArrowBtn: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -18,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+    ...SHADOWS.card,
+  },
+  slideArrowLeft: {
+    left: SPACING.sm,
+  },
+  slideArrowRight: {
+    right: SPACING.sm,
+  },
+  paginationDotsContainer: {
+    position: 'absolute',
+    bottom: SPACING.md,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: RADIUS.full,
+    zIndex: 2,
+  },
+  paginationDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+  },
+  paginationDotActive: {
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
+    backgroundColor: '#FFFFFF',
   },
   discountBadge: {
     position: 'absolute',

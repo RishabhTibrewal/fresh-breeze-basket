@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
 import { useStore } from '../store/useStore';
 import {
@@ -29,9 +31,22 @@ import {
 } from 'lucide-react-native';
 import { apiClient } from '../api/client';
 
+WebBrowser.maybeCompleteAuthSession();
+
+const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
+const GOOGLE_ANDROID_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '';
+const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '';
+
 export const LoginScreen = ({ navigation }: any) => {
   const { setAuth, user } = useStore();
   const [mode, setMode] = useState<'login' | 'register'>('login');
+
+  const [googleRequest, googleResponse, promptGoogleAsync] = Google.useIdTokenAuthRequest({
+    clientId: GOOGLE_WEB_CLIENT_ID || undefined,
+    webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
+    iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
+  });
 
   // Form Fields
   const [email, setEmail] = useState('');
@@ -180,22 +195,87 @@ export const LoginScreen = ({ navigation }: any) => {
     }
   };
 
-  const handleSocialLogin = (provider: 'Google' | 'Apple') => {
-    setLoading(true);
-    setTimeout(() => {
-      setAuth(
-        {
-          id: `usr-${provider.toLowerCase()}-123`,
-          email: `user.${provider.toLowerCase()}@freshbasket.com`,
-          name: `${provider} Fresh User`,
-          phone: '+91 98765 43210',
-        },
-        null
+  useEffect(() => {
+    const completeGoogleSignIn = async () => {
+      if (googleResponse?.type === 'success') {
+        const idToken =
+          googleResponse.params?.id_token || googleResponse.authentication?.idToken;
+
+        if (!idToken) {
+          setErrorMsg('Google did not return an ID token. Please try again.');
+          return;
+        }
+
+        setLoading(true);
+        setErrorMsg(null);
+        try {
+          const response = await apiClient.post('/auth/google', { id_token: idToken });
+          if (response.data?.success && response.data?.data) {
+            const u = response.data.data.user || response.data.data;
+            const token = response.data.data.access_token || response.data.data.token;
+            const displayName =
+              (u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : null) ||
+              u.name ||
+              (u.email ? u.email.split('@')[0] : 'GoFreshCo User');
+
+            setAuth(
+              {
+                id: u.id,
+                email: u.email,
+                name: displayName,
+                phone: u.phone || '',
+                role: u.role || 'user',
+              },
+              token || null
+            );
+            navigation.goBack();
+          } else {
+            setErrorMsg(response.data?.message || 'Google sign-in failed.');
+          }
+        } catch (err: any) {
+          const msg =
+            err?.response?.data?.message ||
+            err?.message ||
+            'Unable to complete Google sign-in.';
+          setErrorMsg(msg);
+        } finally {
+          setLoading(false);
+        }
+      } else if (googleResponse?.type === 'error') {
+        setErrorMsg(googleResponse.error?.description || 'Google sign-in failed.');
+      }
+    };
+
+    completeGoogleSignIn();
+  }, [googleResponse, navigation, setAuth]);
+
+  const handleSocialLogin = async (provider: 'Google' | 'Apple') => {
+    setErrorMsg(null);
+
+    if (provider === 'Apple') {
+      Alert.alert('Coming Soon', 'Apple Sign-In will be available in a future update.');
+      return;
+    }
+
+    const hasPlatformClientId =
+      Platform.OS === 'android'
+        ? Boolean(GOOGLE_ANDROID_CLIENT_ID || GOOGLE_WEB_CLIENT_ID)
+        : Platform.OS === 'ios'
+        ? Boolean(GOOGLE_IOS_CLIENT_ID || GOOGLE_WEB_CLIENT_ID)
+        : Boolean(GOOGLE_WEB_CLIENT_ID);
+
+    if (!hasPlatformClientId || !googleRequest) {
+      setErrorMsg(
+        'Google Sign-In is not configured yet. Add EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (and Android/iOS Client IDs) to mobile/.env.'
       );
-      setLoading(false);
-      Alert.alert('Signed In! 🎉', `Authenticated seamlessly with ${provider}.`);
-      navigation.goBack();
-    }, 600);
+      return;
+    }
+
+    try {
+      await promptGoogleAsync();
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to launch Google Sign-In.');
+    }
   };
 
   return (

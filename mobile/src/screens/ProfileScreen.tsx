@@ -30,6 +30,7 @@ import {
   Phone,
   Mail,
   ShieldCheck,
+  FileText,
   Building,
   Home as HomeIcon,
   ChevronRight,
@@ -246,7 +247,7 @@ export const ProfileScreen = ({ navigation }: any) => {
 
           <TouchableOpacity
             style={styles.menuRow}
-            onPress={() => Alert.alert('Customer Care', 'FreshBasket 24/7 Support: support@freshbasket.com')}
+            onPress={() => Alert.alert('Customer Care', 'GoFreshCo Support: support@gofreshco.com')}
           >
             <View style={[styles.menuIconCircle, { backgroundColor: '#E0F2FE' }]}>
               <HelpCircle color="#0284C7" size={18} />
@@ -254,6 +255,38 @@ export const ProfileScreen = ({ navigation }: any) => {
             <View style={styles.menuTextCol}>
               <Text style={styles.menuTitle}>Help & Support</Text>
               <Text style={styles.menuSubtitle}>FAQs, return policies & instant agent chat</Text>
+            </View>
+            <Text style={styles.menuChevron}>→</Text>
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => navigation.navigate('PrivacyPolicy')}
+          >
+            <View style={[styles.menuIconCircle, { backgroundColor: '#F3E8FF' }]}>
+              <ShieldCheck color="#7C3AED" size={18} />
+            </View>
+            <View style={styles.menuTextCol}>
+              <Text style={styles.menuTitle}>Privacy Policy</Text>
+              <Text style={styles.menuSubtitle}>How we collect, use & protect your data</Text>
+            </View>
+            <Text style={styles.menuChevron}>→</Text>
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => navigation.navigate('TermsOfService')}
+          >
+            <View style={[styles.menuIconCircle, { backgroundColor: '#FEF3C7' }]}>
+              <FileText color="#D97706" size={18} />
+            </View>
+            <View style={styles.menuTextCol}>
+              <Text style={styles.menuTitle}>Terms of Service</Text>
+              <Text style={styles.menuSubtitle}>Rules, ordering terms & usage guidelines</Text>
             </View>
             <Text style={styles.menuChevron}>→</Text>
           </TouchableOpacity>

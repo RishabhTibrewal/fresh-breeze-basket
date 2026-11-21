@@ -45,6 +45,7 @@ export interface MobileProduct {
   original_price?: number;
   unit: string;
   image: string;
+  images?: string[];
   description?: string;
   rating?: number;
   reviews_count?: number;

@@ -30,6 +30,7 @@ type AuthContextType = {
   warehouses: string[]; // Array of warehouse IDs assigned to user
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signUp: (
     email: string,
     password: string,
@@ -141,11 +142,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('supabase_token', accessToken);
 
       // Get the user's profile from Supabase first
-      const { data: profile, error: profileError } = await supabase
+      let { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', currentSession.user.id)
         .single();
+
+      // Auto-provision Google OAuth users who don't have a profile or company membership yet
+      const isGoogleUser =
+        currentSession.user.app_metadata?.provider === 'google' ||
+        currentSession.user.identities?.some((id: any) => id.provider === 'google');
+
+      if (profileError && isGoogleUser) {
+        try {
+          const { data: googleRes } = await apiClient.post('/auth/google', {
+            supabase_access_token: accessToken,
+          });
+          if (googleRes?.success && googleRes?.data?.user) {
+            profile = googleRes.data.user;
+            profileError = null;
+            const provisionedRoles = googleRes.data.roles || ['user'];
+            localStorage.setItem('userRole', provisionedRoles[0] || 'user');
+            localStorage.setItem('userRoles', JSON.stringify(provisionedRoles));
+          }
+        } catch (googleSyncErr) {
+          console.error('Error auto-provisioning Google user:', googleSyncErr);
+        }
+      }
 
       if (profileError) {
         console.error('Error fetching profile during sync:', profileError);
@@ -191,6 +214,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const message = error?.response?.data?.message || error?.message;
 
       if (status === 401 || status === 403) {
+        const isGoogleUser =
+          currentSession.user.app_metadata?.provider === 'google' ||
+          currentSession.user.identities?.some((id: any) => id.provider === 'google');
+
+        if (status === 403 && isGoogleUser) {
+          try {
+            const { data: googleRes } = await apiClient.post('/auth/google', {
+              supabase_access_token: currentSession.access_token,
+            });
+            if (googleRes?.success) {
+              const provisionedRoles = googleRes.data?.roles || ['user'];
+              localStorage.setItem('userRole', provisionedRoles[0] || 'user');
+              localStorage.setItem('userRoles', JSON.stringify(provisionedRoles));
+              return true;
+            }
+          } catch (provisionErr) {
+            console.error('Failed to provision Google user for tenant:', provisionErr);
+          }
+        }
+
         console.warn('Backend rejected session, signing out:', message);
         await supabase.auth.signOut();
         await clearLocalSession();
@@ -621,6 +664,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const signInWithGoogle = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth`,
+        },
+      });
+      if (error) {
+        toast.error(error.message || 'Failed to start Google sign-in');
+        throw error;
+      }
+    } catch (error: any) {
+      toast.error(error?.message || 'Google sign-in failed');
+      throw error;
+    }
+  };
+
   const signUp = async (
     email: string,
     password: string,
@@ -921,6 +982,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     warehouses,
     isLoading,
     signIn,
+    signInWithGoogle,
     signUp,
     signOut,
     refreshProfile,

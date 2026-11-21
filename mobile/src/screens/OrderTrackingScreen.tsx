@@ -20,6 +20,8 @@ import {
   MapPin,
   CreditCard,
   ShoppingBag,
+  ChevronRight,
+  Package,
 } from 'lucide-react-native';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
@@ -62,25 +64,14 @@ export const OrderTrackingScreen = ({ route, navigation }: any) => {
 
   const [currentOrderId, setCurrentOrderId] = useState<string | null>(paramOrderId || null);
   const [order, setOrder] = useState<BackendOrder | null>(null);
+  const [ordersList, setOrdersList] = useState<BackendOrder[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
-  const fetchOrderData = useCallback(async (idToFetch?: string) => {
-    let targetId = idToFetch || currentOrderId;
+  const fetchOrderData = useCallback(async (idToFetch?: string | null) => {
+    const targetId = idToFetch !== undefined ? idToFetch : currentOrderId;
 
     try {
-      // If no orderId provided and user is authenticated, fetch their most recent order
-      if (!targetId && token) {
-        const myOrdersRes = await apiClient.get('/orders/my-orders');
-        const list = myOrdersRes.data?.data;
-        if (Array.isArray(list) && list.length > 0) {
-          targetId = list[0].id;
-          setCurrentOrderId(list[0].id);
-          setOrder(list[0]);
-          return;
-        }
-      }
-
       if (targetId) {
         const res = await apiClient.get(`/orders/${targetId}`);
         const data = res.data?.data || res.data;
@@ -88,6 +79,14 @@ export const OrderTrackingScreen = ({ route, navigation }: any) => {
           setOrder(data);
           setCurrentOrderId(data.id);
         }
+      } else if (token) {
+        const myOrdersRes = await apiClient.get('/orders/my-orders');
+        const list = Array.isArray(myOrdersRes.data?.data) ? myOrdersRes.data.data : [];
+        setOrdersList(list);
+        setOrder(null);
+      } else {
+        setOrdersList([]);
+        setOrder(null);
       }
     } catch (err: any) {
       console.log('Error fetching order from backend:', err?.response?.data || err?.message);
@@ -98,12 +97,34 @@ export const OrderTrackingScreen = ({ route, navigation }: any) => {
   }, [currentOrderId, token]);
 
   useEffect(() => {
-    fetchOrderData(paramOrderId);
-  }, [paramOrderId, fetchOrderData]);
+    setLoading(true);
+    setCurrentOrderId(paramOrderId || null);
+    fetchOrderData(paramOrderId || null);
+  }, [paramOrderId, token]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchOrderData();
+    await fetchOrderData(currentOrderId);
+  };
+
+  const handleSelectOrder = async (selected: BackendOrder) => {
+    setCurrentOrderId(selected.id);
+    setOrder(selected);
+    setLoading(true);
+    await fetchOrderData(selected.id);
+  };
+
+  const handleBack = () => {
+    if (order && !paramOrderId) {
+      setOrder(null);
+      setCurrentOrderId(null);
+      return;
+    }
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate('HomeTab');
+    }
   };
 
   // Determine timeline progress based on real order status
@@ -153,13 +174,17 @@ export const OrderTrackingScreen = ({ route, navigation }: any) => {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('HomeTab')}>
+        <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
           <ArrowLeft color={COLORS.primaryDark} size={20} />
         </TouchableOpacity>
         <View style={styles.headerTitleBox}>
-          <Text style={styles.headerTitle}>Live Order Tracking</Text>
+          <Text style={styles.headerTitle}>
+            {order ? 'Live Order Tracking' : 'My Orders & Deliveries'}
+          </Text>
           <Text style={styles.orderId} numberOfLines={1}>
-            {currentOrderId || 'Recent Harvest Order'}
+            {order
+              ? currentOrderId || 'Order Details'
+              : `${ordersList.length} ${ordersList.length === 1 ? 'order' : 'orders'}`}
           </Text>
         </View>
       </View>
@@ -179,8 +204,95 @@ export const OrderTrackingScreen = ({ route, navigation }: any) => {
         {loading ? (
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={COLORS.primaryDark} />
-            <Text style={styles.loadingText}>Fetching real-time shipment updates...</Text>
+            <Text style={styles.loadingText}>
+              {currentOrderId ? 'Fetching real-time shipment updates...' : 'Loading your orders...'}
+            </Text>
           </View>
+        ) : !order ? (
+          ordersList.length === 0 ? (
+            <View style={styles.emptyOrdersBox}>
+              <Package color={COLORS.textMuted} size={36} />
+              <Text style={styles.emptyOrdersTitle}>
+                {token ? 'No orders placed yet' : 'Sign in to view your orders'}
+              </Text>
+              <Text style={styles.emptyOrdersSubtitle}>
+                {token
+                  ? 'Order farm-fresh seasonal harvest to track your deliveries here.'
+                  : 'Log in from your Account tab to see your order history and live delivery tracking.'}
+              </Text>
+              <TouchableOpacity
+                style={styles.continueShoppingBtn}
+                onPress={() => navigation.navigate(token ? 'HomeTab' : 'Login')}
+              >
+                <Text style={styles.continueShoppingBtnText}>
+                  {token ? 'Start Shopping' : 'Sign In'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.ordersListContainer}>
+              {ordersList.map((ord) => {
+                const status = (ord.status || 'confirmed').toLowerCase();
+                const isDone = status === 'delivered' || status === 'completed';
+                const dateStr = ord.created_at
+                  ? new Date(ord.created_at).toLocaleDateString([], {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })
+                  : 'Recent';
+                const itemCount = Array.isArray(ord.order_items)
+                  ? ord.order_items.reduce((sum, item) => sum + (item.quantity || 1), 0)
+                  : 0;
+
+                return (
+                  <TouchableOpacity
+                    key={ord.id}
+                    style={styles.orderListCard}
+                    activeOpacity={0.85}
+                    onPress={() => handleSelectOrder(ord)}
+                  >
+                    <View style={styles.orderListTop}>
+                      <View style={styles.orderListIdCol}>
+                        <Text style={styles.orderListId} numberOfLines={1}>
+                          #{ord.id}
+                        </Text>
+                        <Text style={styles.orderListDate}>
+                          {dateStr}
+                          {itemCount > 0 ? ` • ${itemCount} ${itemCount === 1 ? 'item' : 'items'}` : ''}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.orderStatusPill,
+                          isDone ? styles.orderStatusPillDone : styles.orderStatusPillActive,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.orderStatusPillText,
+                            isDone ? styles.orderStatusPillTextDone : styles.orderStatusPillTextActive,
+                          ]}
+                        >
+                          {status.toUpperCase().replace('_', ' ')}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.summaryDivider} />
+
+                    <View style={styles.orderListBottom}>
+                      <Text style={styles.orderListTotal}>{formatCurrency(ord.total_amount)}</Text>
+                      <View style={styles.viewDetailsRow}>
+                        <Text style={styles.viewDetailsText}>View Details</Text>
+                        <ChevronRight color={COLORS.primaryDark} size={15} />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )
         ) : (
           <>
             {/* Status Card */}
@@ -573,5 +685,101 @@ const styles = StyleSheet.create({
     color: COLORS.textWhite,
     fontSize: 15,
     fontWeight: '800',
+  },
+  emptyOrdersBox: {
+    backgroundColor: COLORS.bgWhite,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.xl,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.borderGreen,
+    marginTop: SPACING.md,
+    ...SHADOWS.card,
+  },
+  emptyOrdersTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+    marginTop: SPACING.md,
+  },
+  emptyOrdersSubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 6,
+    marginBottom: SPACING.md,
+    lineHeight: 19,
+  },
+  ordersListContainer: {
+    gap: SPACING.sm,
+  },
+  orderListCard: {
+    backgroundColor: COLORS.bgWhite,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.borderGreen,
+    ...SHADOWS.card,
+  },
+  orderListTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+  },
+  orderListIdCol: {
+    flex: 1,
+  },
+  orderListId: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+  },
+  orderListDate: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+    marginTop: 3,
+  },
+  orderStatusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: RADIUS.full,
+  },
+  orderStatusPillActive: {
+    backgroundColor: COLORS.primaryLight,
+  },
+  orderStatusPillDone: {
+    backgroundColor: '#DCFCE7',
+  },
+  orderStatusPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  orderStatusPillTextActive: {
+    color: COLORS.primaryDark,
+  },
+  orderStatusPillTextDone: {
+    color: '#15803D',
+  },
+  orderListBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  orderListTotal: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: COLORS.primaryDark,
+  },
+  viewDetailsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  viewDetailsText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
   },
 });

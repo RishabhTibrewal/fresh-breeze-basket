@@ -4,14 +4,17 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { HomeScreen } from '../screens/HomeScreen';
+import { CategoriesScreen } from '../screens/CategoriesScreen';
 import { ProductDetailsScreen } from '../screens/ProductDetailsScreen';
 import { CartScreen } from '../screens/CartScreen';
 import { CheckoutScreen } from '../screens/CheckoutScreen';
 import { OrderTrackingScreen } from '../screens/OrderTrackingScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { LoginScreen } from '../screens/LoginScreen';
+import { PrivacyPolicyScreen } from '../screens/PrivacyPolicyScreen';
+import { TermsOfServiceScreen } from '../screens/TermsOfServiceScreen';
 import { COLORS } from '../theme/theme';
-import { Home as HomeIcon, ShoppingBag, Truck, User } from 'lucide-react-native';
+import { Home as HomeIcon, LayoutGrid, ShoppingBag, User } from 'lucide-react-native';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -46,8 +49,16 @@ function MainTabNavigator() {
         name="HomeTab"
         component={HomeScreen}
         options={{
-          tabBarLabel: 'Shop',
+          tabBarLabel: 'Home',
           tabBarIcon: ({ color, size }: { color: string; size: number }) => <HomeIcon color={color} size={size} />,
+        }}
+      />
+      <Tab.Screen
+        name="CategoriesTab"
+        component={CategoriesScreen}
+        options={{
+          tabBarLabel: 'Categories',
+          tabBarIcon: ({ color, size }: { color: string; size: number }) => <LayoutGrid color={color} size={size} />,
         }}
       />
       <Tab.Screen
@@ -56,14 +67,6 @@ function MainTabNavigator() {
         options={{
           tabBarLabel: 'Cart',
           tabBarIcon: ({ color, size }: { color: string; size: number }) => <ShoppingBag color={color} size={size} />,
-        }}
-      />
-      <Tab.Screen
-        name="TrackingTab"
-        component={OrderTrackingScreen}
-        options={{
-          tabBarLabel: 'Track',
-          tabBarIcon: ({ color, size }: { color: string; size: number }) => <Truck color={color} size={size} />,
         }}
       />
       <Tab.Screen
@@ -90,6 +93,8 @@ export function RootNavigator() {
         <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+        <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

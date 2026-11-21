@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   TextInput,
   SafeAreaView,
   StatusBar,
-  Dimensions,
+  useWindowDimensions,
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
@@ -32,9 +32,6 @@ import {
 } from 'lucide-react-native';
 import { formatCurrency, fetchCompanyCurrency } from '../utils/currency';
 import { apiClient } from '../api/client';
-
-const { width } = Dimensions.get('window');
-const CARD_WIDTH = (width - SPACING.md * 2 - SPACING.sm) / 2;
 
 export const CATEGORIES = [
   { id: 'all', name: 'All', icon: '🧺' },
@@ -164,7 +161,10 @@ export const FALLBACK_PRODUCTS: MobileProduct[] = [
   },
 ];
 
-export const HomeScreen = ({ navigation }: any) => {
+export const HomeScreen = ({ route, navigation }: any) => {
+  const { width } = useWindowDimensions();
+  const cardWidth = (width - SPACING.md * 2 - SPACING.sm) / 2;
+
   const {
     cart,
     addToCart,
@@ -180,6 +180,9 @@ export const HomeScreen = ({ navigation }: any) => {
 
   const [products, setProducts] = useState<MobileProduct[]>(FALLBACK_PRODUCTS);
   const [categories, setCategories] = useState<{ id: string; name: string; icon: string }[]>(CATEGORIES);
+  const categoriesRef = useRef(categories);
+  categoriesRef.current = categories;
+  const isFetchingMoreRef = useRef(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterType, setFilterType] = useState<'all' | 'sale' | 'organic'>('all');
@@ -239,7 +242,7 @@ export const HomeScreen = ({ navigation }: any) => {
         }
 
         if (cat !== 'all') {
-          const matchedCategory = categories.find(
+          const matchedCategory = categoriesRef.current.find(
             (c) =>
               c.id.toLowerCase() === cat.toLowerCase() ||
               c.name.toLowerCase() === cat.toLowerCase()
@@ -256,18 +259,31 @@ export const HomeScreen = ({ navigation }: any) => {
           ? response.data.data
           : [];
 
+        const formatUnitValue = (u: any): string => {
+          if (u === null || u === undefined || u === '') return '';
+          const num = Number(u);
+          if (Number.isFinite(num)) {
+            return num > 0 ? String(num) : '';
+          }
+          return String(u).trim();
+        };
+
         const mapped: MobileProduct[] = productList.map((item: any) => {
+          const itemUnitVal = formatUnitValue(item.unit);
+          const itemUnitType = (item.unit_type || '').trim();
+
           const variants: ProductVariantItem[] =
             Array.isArray(item.variants) && item.variants.length > 0
               ? item.variants.map((v: any) => {
                   const vSalePrice = Number(v.price?.sale_price || v.sale_price || item.price || 0);
                   const vMrpPrice = Number(v.price?.mrp_price || v.mrp_price || 0);
+                  const vUnitVal = formatUnitValue(v.unit) || itemUnitVal || '1';
+                  const vUnitType = (v.unit_type || itemUnitType || 'pack').trim();
+                  const formattedVariantUnit = `${vUnitVal} ${vUnitType}`.trim();
                   return {
                     id: v.id,
                     name: v.name || v.sku || 'Default Pack',
-                    unit: v.unit
-                      ? `${v.unit} ${item.unit_type || ''}`.trim()
-                      : item.unit_type || '1 pack',
+                    unit: formattedVariantUnit,
                     price: vSalePrice > 0 ? vSalePrice : Number(item.price || 3.99),
                     original_price: vMrpPrice > vSalePrice ? vMrpPrice : undefined,
                     in_stock: true,
@@ -275,7 +291,13 @@ export const HomeScreen = ({ navigation }: any) => {
                 })
               : [];
 
-          const defaultVariant = variants[0];
+          const defaultVariantRaw = Array.isArray(item.variants)
+            ? item.variants.find((v: any) => v.is_default) || item.variants[0]
+            : undefined;
+          const defaultVariant = defaultVariantRaw
+            ? variants.find((v) => v.id === defaultVariantRaw.id) || variants[0]
+            : variants[0];
+          const fallbackUnit = `${itemUnitVal || '1'} ${itemUnitType || 'pack'}`.trim();
           const calculatedPrice = defaultVariant
             ? defaultVariant.price
             : Number(item.sale_price || item.price || 3.99);
@@ -292,10 +314,16 @@ export const HomeScreen = ({ navigation }: any) => {
             item.cat_slug ||
             'general';
 
+          const rawImages: string[] = Array.isArray(item.images)
+            ? item.images
+                .map((img: any) => (typeof img === 'string' ? img : img?.image_url))
+                .filter(Boolean)
+            : [];
           const primaryImage =
-            item.images?.[0]?.image_url ||
+            rawImages[0] ||
             item.image_url ||
             'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=500';
+          const images = Array.from(new Set([primaryImage, ...rawImages].filter(Boolean)));
 
           return {
             id: item.id,
@@ -303,10 +331,9 @@ export const HomeScreen = ({ navigation }: any) => {
             category: catIdentifier,
             price: calculatedPrice > 0 ? calculatedPrice : 3.99,
             original_price: calculatedOriginalPrice,
-            unit:
-              defaultVariant?.unit ||
-              (item.unit ? `${item.unit} ${item.unit_type || ''}`.trim() : item.unit_type || '1 pack'),
+            unit: defaultVariant?.unit || fallbackUnit,
             image: primaryImage,
+            images,
             badge:
               item.badge ||
               (calculatedOriginalPrice && calculatedOriginalPrice > calculatedPrice
@@ -321,25 +348,43 @@ export const HomeScreen = ({ navigation }: any) => {
         });
 
         if (isAppend) {
-          setProducts((prev) => [...prev, ...mapped]);
+          setProducts((prev) => {
+            const existingIds = new Set(prev.map((p) => p.id));
+            const uniqueNew = mapped.filter((p) => !existingIds.has(p.id));
+            return [...prev, ...uniqueNew];
+          });
         } else {
-          setProducts(mapped);
+          const seen = new Set<string>();
+          const unique = mapped.filter((p) => {
+            if (seen.has(p.id)) return false;
+            seen.add(p.id);
+            return true;
+          });
+          setProducts(unique);
         }
 
         setPage(pageNum);
         setHasMore(mapped.length >= 16);
       } catch (err) {
         console.log('Error fetching products page:', err);
-        if (!isAppend && products.length === 0) {
-          setProducts(FALLBACK_PRODUCTS);
+        if (!isAppend) {
+          setProducts((prev) => (prev.length === 0 ? FALLBACK_PRODUCTS : prev));
         }
       } finally {
+        isFetchingMoreRef.current = false;
         setLoading(false);
         setLoadingMore(false);
       }
     },
-    [categories, products.length]
+    []
   );
+
+  // Sync category selection when navigating from Categories tab
+  useEffect(() => {
+    if (route?.params?.selectedCategory) {
+      setSelectedCategory(route.params.selectedCategory);
+    }
+  }, [route?.params?.selectedCategory]);
 
   // Initial mount & currency loading
   useEffect(() => {
@@ -356,7 +401,8 @@ export const HomeScreen = ({ navigation }: any) => {
   }, [searchQuery, selectedCategory, fetchProductsPage]);
 
   const loadMoreProducts = () => {
-    if (hasMore && !loadingMore && !loading) {
+    if (hasMore && !loadingMore && !loading && !isFetchingMoreRef.current) {
+      isFetchingMoreRef.current = true;
       fetchProductsPage(page + 1, searchQuery, selectedCategory, true);
     }
   };
@@ -604,12 +650,12 @@ export const HomeScreen = ({ navigation }: any) => {
             return (
               <TouchableOpacity
                 key={product.id}
-                style={styles.productCard}
+                style={[styles.productCard, { width: cardWidth }]}
                 activeOpacity={0.9}
                 onPress={() => navigation.navigate('ProductDetails', { product })}
               >
                 {/* Image Stage Container */}
-                <View style={styles.cardImageContainer}>
+                <View style={[styles.cardImageContainer, { height: cardWidth * 0.85 }]}>
                   <Image source={{ uri: product.image }} style={styles.cardImage} resizeMode="contain" />
 
                   {/* Top Badges */}
@@ -1012,7 +1058,6 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
   },
   productCard: {
-    width: CARD_WIDTH,
     backgroundColor: COLORS.bgCard, // Matching web ProductCard (#f5f8f0)
     borderRadius: RADIUS.lg,
     borderWidth: 1,
@@ -1024,7 +1069,6 @@ const styles = StyleSheet.create({
   },
   cardImageContainer: {
     width: '100%',
-    height: CARD_WIDTH * 0.85,
     backgroundColor: 'rgba(255, 255, 255, 0.85)',
     borderRadius: RADIUS.md,
     borderWidth: 1,

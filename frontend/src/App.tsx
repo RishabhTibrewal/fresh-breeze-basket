@@ -27,6 +27,9 @@ const ContactUs = lazy(() => import("./pages/ContactUs"));
 const FAQ = lazy(() => import("./pages/FAQ"));
 const Shipping = lazy(() => import("./pages/Shipping"));
 const Returns = lazy(() => import("./pages/Returns"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
+const TermsOfService = lazy(() => import("./pages/TermsOfService"));
+const DeleteAccount = lazy(() => import("./pages/DeleteAccount"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Auth = lazy(() => import("./pages/Auth"));
 const CreateCompany = lazy(() => import("./pages/CreateCompany"));
@@ -227,6 +230,11 @@ const App: React.FC = () => {
                     <Route path="/faq" element={<FAQ />} />
                     <Route path="/shipping" element={<Shipping />} />
                     <Route path="/returns" element={<Returns />} />
+                    <Route path="/privacy" element={<PrivacyPolicy />} />
+                    <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+                    <Route path="/terms" element={<TermsOfService />} />
+                    <Route path="/terms-of-service" element={<TermsOfService />} />
+                    <Route path="/delete-account" element={<DeleteAccount />} />
                     <Route path="/auth" element={<Auth />} />
                     <Route path="/create-company" element={<CreateCompany />} />
                     <Route path="/test-payment" element={<TestPayment />} />
