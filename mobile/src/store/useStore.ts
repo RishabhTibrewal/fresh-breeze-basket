@@ -81,6 +81,7 @@ interface AppState {
   setSelectedAddress: (address: UserAddress) => void;
   setDeliveryEstimate: (estimate: { serviceable: boolean; estimated_days: number; message?: string; eta_text?: string } | null) => void;
   addAddress: (address: Omit<UserAddress, 'id'>) => void;
+  updateAddress: (id: string, address: Omit<UserAddress, 'id'>) => Promise<void>;
   selectAddress: (id: string) => void;
   deleteAddress: (id: string) => void;
   fetchUserAddresses: () => Promise<void>;
@@ -224,6 +225,40 @@ export const useStore = create<AppState>()(
         } else {
           set({ savedAddresses: [...current, created] });
         }
+      },
+
+      updateAddress: async (id: string, updatedAddr: Omit<UserAddress, 'id'>) => {
+        const token = get().token;
+        if (token && !id.startsWith('addr-')) {
+          try {
+            const payload = {
+              address_line1: updatedAddr.street,
+              city: updatedAddr.city,
+              state: updatedAddr.state,
+              postal_code: updatedAddr.pincode,
+              country: 'India',
+              address_type: 'shipping',
+              is_default: Boolean(updatedAddr.is_default),
+            };
+            await apiClient.put(`/auth/addresses/${id}`, payload);
+          } catch (e) {
+            console.log('Failed to update address on backend, updating locally:', e);
+          }
+        }
+
+        const updatedItem: UserAddress = { ...updatedAddr, id };
+        const updatedList = get().savedAddresses.map((a: UserAddress) => {
+          if (a.id === id) return updatedItem;
+          return updatedItem.is_default ? { ...a, is_default: false } : a;
+        });
+        const currentSelected = get().selectedAddress;
+        set({
+          savedAddresses: updatedList,
+          selectedAddress:
+            currentSelected.id === id || updatedItem.is_default
+              ? updatedItem
+              : currentSelected,
+        });
       },
 
       selectAddress: (id: string) => {

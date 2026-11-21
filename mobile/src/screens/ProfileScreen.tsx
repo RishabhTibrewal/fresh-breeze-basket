@@ -11,8 +11,10 @@ import {
   Alert,
   RefreshControl,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Location from 'expo-location';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
 import { useStore, UserAddress } from '../store/useStore';
 import {
@@ -35,6 +37,8 @@ import {
   Home as HomeIcon,
   ChevronRight,
   Clock,
+  LocateFixed,
+  Pencil,
 } from 'lucide-react-native';
 import { apiClient } from '../api/client';
 import { formatCurrency } from '../utils/currency';
@@ -48,6 +52,7 @@ export const ProfileScreen = ({ navigation }: any) => {
     selectedAddress,
     selectAddress,
     addAddress,
+    updateAddress,
     deleteAddress,
     fetchUserAddresses,
     wishlist,
@@ -59,12 +64,93 @@ export const ProfileScreen = ({ navigation }: any) => {
   const [refreshing, setRefreshing] = useState(false);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState<'Home' | 'Work' | 'Other'>('Home');
   const [newStreet, setNewStreet] = useState('');
   const [newCity, setNewCity] = useState('Mumbai');
   const [newState, setNewState] = useState('Maharashtra');
   const [newPincode, setNewPincode] = useState('');
   const [isDefault, setIsDefault] = useState(true);
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  const handleUseCurrentLocation = async () => {
+    setLocationError(null);
+    setLocating(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationError('Location permission denied. Please enable it in settings or enter your address manually.');
+        return;
+      }
+
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const { latitude, longitude } = position.coords;
+
+      let street = '';
+      let city = '';
+      let state = '';
+      let pincode = '';
+
+      if (Platform.OS !== 'web') {
+        try {
+          const places = await Location.reverseGeocodeAsync({ latitude, longitude });
+          if (places && places.length > 0) {
+            const p = places[0];
+            street = [p.name, p.streetNumber, p.street, p.district, p.subregion]
+              .filter(Boolean)
+              .filter((v, idx, arr) => arr.indexOf(v) === idx)
+              .join(', ');
+            city = p.city || p.subregion || '';
+            state = p.region || '';
+            pincode = p.postalCode || '';
+          }
+        } catch (nativeGeoErr) {
+          console.log('Native reverseGeocode failed, falling back to Nominatim:', nativeGeoErr);
+        }
+      }
+
+      // Fallback (and primary for Expo Web) using OpenStreetMap Nominatim
+      if (!street && !city) {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
+          { headers: { Accept: 'application/json' } }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const addr = data?.address || {};
+          street = [
+            addr.house_number,
+            addr.road || addr.pedestrian || addr.neighbourhood,
+            addr.suburb || addr.quarter || addr.village,
+          ]
+            .filter(Boolean)
+            .join(', ');
+          if (!street && data?.display_name) {
+            street = String(data.display_name).split(',').slice(0, 3).join(',').trim();
+          }
+          city = addr.city || addr.town || addr.village || addr.county || '';
+          state = addr.state || '';
+          pincode = addr.postcode || '';
+        }
+      }
+
+      if (street) setNewStreet(street);
+      if (city) setNewCity(city);
+      if (state) setNewState(state);
+      if (pincode) setNewPincode(pincode.replace(/\s+/g, '').slice(0, 10));
+
+      if (!street && !city && !pincode) {
+        setLocationError('Location detected, but address details could not be resolved. Please enter manually.');
+      }
+    } catch (err: any) {
+      setLocationError(err?.message || 'Unable to fetch current location. Please try again.');
+    } finally {
+      setLocating(false);
+    }
+  };
 
   const fetchUserOrders = useCallback(async () => {
     if (!token) {
@@ -103,25 +189,61 @@ export const ProfileScreen = ({ navigation }: any) => {
     setRefreshing(false);
   };
 
-  const handleSaveAddress = () => {
+  const openAddAddressModal = () => {
+    setEditingAddressId(null);
+    setNewTitle('Home');
+    setNewStreet('');
+    setNewCity('Mumbai');
+    setNewState('Maharashtra');
+    setNewPincode('');
+    setIsDefault(true);
+    setLocationError(null);
+    setIsAddModalOpen(true);
+  };
+
+  const openEditAddressModal = (addr: UserAddress) => {
+    const tag: 'Home' | 'Work' | 'Other' =
+      addr.title === 'Home' || addr.title === 'Work' || addr.title === 'Other'
+        ? addr.title
+        : 'Other';
+    setEditingAddressId(addr.id);
+    setNewTitle(tag);
+    setNewStreet(addr.street || '');
+    setNewCity(addr.city || '');
+    setNewState(addr.state || '');
+    setNewPincode(addr.pincode || '');
+    setIsDefault(Boolean(addr.is_default || selectedAddress.id === addr.id));
+    setLocationError(null);
+    setIsAddModalOpen(true);
+  };
+
+  const handleSaveAddress = async () => {
     if (!newStreet.trim() || !newPincode.trim()) {
       Alert.alert('Incomplete Address', 'Please provide a street address and pincode.');
       return;
     }
 
-    addAddress({
+    const addressPayload = {
       title: newTitle,
       street: newStreet.trim(),
       city: newCity.trim(),
       state: newState.trim(),
       pincode: newPincode.trim(),
       is_default: isDefault,
-    });
+    };
 
-    setNewStreet('');
-    setNewPincode('');
-    setIsAddModalOpen(false);
-    Alert.alert('Address Saved 🎉', `Your ${newTitle} address has been added.`);
+    if (editingAddressId) {
+      await updateAddress(editingAddressId, addressPayload);
+      setEditingAddressId(null);
+      setIsAddModalOpen(false);
+      Alert.alert('Address Updated 🎉', `Your ${newTitle} address has been updated.`);
+    } else {
+      addAddress(addressPayload);
+      setNewStreet('');
+      setNewPincode('');
+      setIsAddModalOpen(false);
+      Alert.alert('Address Saved 🎉', `Your ${newTitle} address has been added.`);
+    }
   };
 
   return (
@@ -369,7 +491,7 @@ export const ProfileScreen = ({ navigation }: any) => {
           <Text style={styles.sectionTitle}>Saved Addresses</Text>
           <TouchableOpacity
             style={styles.addAddressPill}
-            onPress={() => setIsAddModalOpen(true)}
+            onPress={openAddAddressModal}
           >
             <Plus color={COLORS.primaryDark} size={15} />
             <Text style={styles.addAddressPillText}>Add New</Text>
@@ -418,14 +540,22 @@ export const ProfileScreen = ({ navigation }: any) => {
                     )}
                   </View>
 
-                  {savedAddresses.length > 1 && (
+                  <View style={styles.addressActionsRow}>
                     <TouchableOpacity
-                      style={styles.deleteBtn}
-                      onPress={() => deleteAddress(addr.id)}
+                      style={styles.editAddressBtn}
+                      onPress={() => openEditAddressModal(addr)}
                     >
-                      <Trash2 color="#9CA3AF" size={16} />
+                      <Pencil color={COLORS.primaryDark} size={15} />
                     </TouchableOpacity>
-                  )}
+                    {savedAddresses.length > 1 && (
+                      <TouchableOpacity
+                        style={styles.deleteBtn}
+                        onPress={() => deleteAddress(addr.id)}
+                      >
+                        <Trash2 color="#9CA3AF" size={16} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
 
                 <Text style={styles.addressStreet}>{addr.street}</Text>
@@ -480,14 +610,48 @@ export const ProfileScreen = ({ navigation }: any) => {
           <View style={styles.modalContent}>
             {/* Modal Header */}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Delivery Address</Text>
+              <Text style={styles.modalTitle}>
+                {editingAddressId ? 'Edit Delivery Address' : 'Add Delivery Address'}
+              </Text>
               <TouchableOpacity
                 style={styles.modalCloseBtn}
-                onPress={() => setIsAddModalOpen(false)}
+                onPress={() => {
+                  setLocationError(null);
+                  setEditingAddressId(null);
+                  setIsAddModalOpen(false);
+                }}
               >
                 <X color={COLORS.textSecondary} size={20} />
               </TouchableOpacity>
             </View>
+
+            {/* Use Current Location Button */}
+            <TouchableOpacity
+              style={styles.useLocationBtn}
+              onPress={handleUseCurrentLocation}
+              disabled={locating}
+              activeOpacity={0.85}
+            >
+              {locating ? (
+                <ActivityIndicator size="small" color={COLORS.primaryDark} />
+              ) : (
+                <LocateFixed color={COLORS.primaryDark} size={18} />
+              )}
+              <View style={styles.useLocationTextCol}>
+                <Text style={styles.useLocationTitle}>
+                  {locating ? 'Detecting your location...' : 'Use Current Location'}
+                </Text>
+                <Text style={styles.useLocationSub}>
+                  Auto-fill street, city, state &amp; pincode via GPS
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            {locationError && (
+              <View style={styles.locationErrorBox}>
+                <Text style={styles.locationErrorText}>{locationError}</Text>
+              </View>
+            )}
 
             {/* Address Type Selector */}
             <Text style={styles.inputLabel}>Address Tag</Text>
@@ -520,33 +684,47 @@ export const ProfileScreen = ({ navigation }: any) => {
               onChangeText={setNewStreet}
             />
 
-            {/* City & Pincode */}
+            {/* City & State */}
             <View style={styles.inputRow}>
               <View style={styles.inputCol}>
                 <Text style={styles.inputLabel}>City</Text>
                 <TextInput
                   style={styles.textInput}
+                  placeholder="e.g. Mumbai"
+                  placeholderTextColor={COLORS.textMuted}
                   value={newCity}
                   onChangeText={setNewCity}
                 />
               </View>
               <View style={styles.inputCol}>
-                <Text style={styles.inputLabel}>Pincode</Text>
+                <Text style={styles.inputLabel}>State</Text>
                 <TextInput
                   style={styles.textInput}
-                  placeholder="e.g. 400050"
+                  placeholder="e.g. Maharashtra"
                   placeholderTextColor={COLORS.textMuted}
-                  keyboardType="numeric"
-                  maxLength={6}
-                  value={newPincode}
-                  onChangeText={setNewPincode}
+                  value={newState}
+                  onChangeText={setNewState}
                 />
               </View>
             </View>
 
+            {/* Pincode */}
+            <Text style={styles.inputLabel}>Pincode / Postal Code</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="e.g. 400050"
+              placeholderTextColor={COLORS.textMuted}
+              keyboardType="numeric"
+              maxLength={10}
+              value={newPincode}
+              onChangeText={setNewPincode}
+            />
+
             {/* Save Button */}
             <TouchableOpacity style={styles.saveAddressBtn} onPress={handleSaveAddress}>
-              <Text style={styles.saveAddressBtnText}>Save & Set as Active</Text>
+              <Text style={styles.saveAddressBtnText}>
+                {editingAddressId ? 'Save Changes' : 'Save & Set as Active'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -965,6 +1143,16 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.primaryDark,
   },
+  addressActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  editAddressBtn: {
+    padding: 5,
+    borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.primaryLight,
+  },
   deleteBtn: {
     padding: 4,
   },
@@ -1021,6 +1209,44 @@ const styles = StyleSheet.create({
   },
   modalCloseBtn: {
     padding: 4,
+  },
+  useLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.primaryLight,
+    borderWidth: 1.5,
+    borderColor: COLORS.primaryBorder,
+    borderRadius: RADIUS.md,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    marginBottom: SPACING.sm,
+  },
+  useLocationTextCol: {
+    flex: 1,
+  },
+  useLocationTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+  },
+  useLocationSub: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 1,
+  },
+  locationErrorBox: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: RADIUS.sm,
+    padding: 10,
+    marginBottom: SPACING.xs,
+  },
+  locationErrorText: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: '600',
   },
   inputLabel: {
     fontSize: 12,
