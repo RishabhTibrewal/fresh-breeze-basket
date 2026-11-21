@@ -7,10 +7,10 @@ import {
   TouchableOpacity,
   Image,
   TextInput,
-  SafeAreaView,
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
 import { useStore } from '../store/useStore';
 import {
@@ -95,7 +95,7 @@ export const CartScreen = ({ navigation }: any) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>

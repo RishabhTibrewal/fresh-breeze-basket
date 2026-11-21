@@ -22,7 +22,7 @@ export default function App() {
           publishableKey={stripePublishableKey}
           merchantIdentifier="merchant.com.freshbreeze.basket"
         >
-          <StatusBar style="light" />
+          <StatusBar style="dark" />
           <RootNavigator />
         </StripeProviderWrapper>
       </QueryClientProvider>

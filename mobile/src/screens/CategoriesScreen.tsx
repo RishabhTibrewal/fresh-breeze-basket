@@ -6,13 +6,13 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  SafeAreaView,
   StatusBar,
   TextInput,
   ActivityIndicator,
   RefreshControl,
   useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Search, X, ChevronRight } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
 import { apiClient } from '../api/client';
@@ -84,7 +84,7 @@ export const CategoriesScreen = ({ navigation }: any) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.bgWhite} />
 
       {/* Header */}

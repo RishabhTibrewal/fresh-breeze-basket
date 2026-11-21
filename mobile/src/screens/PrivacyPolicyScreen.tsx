@@ -5,10 +5,10 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   Linking,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, ShieldCheck, ExternalLink } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
 

@@ -7,12 +7,12 @@ import {
   TouchableOpacity,
   Image,
   TextInput,
-  SafeAreaView,
   StatusBar,
   useWindowDimensions,
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
 import { useStore, MobileProduct, ProductVariantItem } from '../store/useStore';
 import {
@@ -457,7 +457,7 @@ export const HomeScreen = ({ route, navigation }: any) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.bgWhite} />
 
       {/* Top Header Bar matching Web Store */}
