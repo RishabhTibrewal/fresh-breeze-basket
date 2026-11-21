@@ -14,7 +14,9 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://www.rishabhgofreshco.dev/api",
-        "EXPO_PUBLIC_TENANT_SUBDOMAIN": "default"
+        "EXPO_PUBLIC_TENANT_SUBDOMAIN": "default",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "405267950963-h9q69rqgu0f4pecbgp6tvd4qnccivoh2.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "405267950963-gl3borrcu1pipv8lodtjri56mafuu8uo.apps.googleusercontent.com"
       }
     },
     "production": {
@@ -23,7 +25,9 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://www.rishabhgofreshco.dev/api",
-        "EXPO_PUBLIC_TENANT_SUBDOMAIN": "default"
+        "EXPO_PUBLIC_TENANT_SUBDOMAIN": "default",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "405267950963-h9q69rqgu0f4pecbgp6tvd4qnccivoh2.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "405267950963-gl3borrcu1pipv8lodtjri56mafuu8uo.apps.googleusercontent.com"
       }
     }
   },

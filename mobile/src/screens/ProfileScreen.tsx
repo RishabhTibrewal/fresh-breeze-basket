@@ -572,6 +572,15 @@ export const ProfileScreen = ({ navigation }: any) => {
           <TouchableOpacity
             style={styles.logoutBtn}
             onPress={() => {
+              if (Platform.OS === 'web') {
+                const confirmed =
+                  typeof window === 'undefined' ||
+                  window.confirm('Are you sure you want to log out?');
+                if (confirmed) {
+                  logout();
+                }
+                return;
+              }
               Alert.alert('Sign Out', 'Are you sure you want to log out?', [
                 { text: 'Cancel', style: 'cancel' },
                 {

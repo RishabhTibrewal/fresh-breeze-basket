@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -16,7 +17,13 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider
+      style={
+        Platform.OS === 'web'
+          ? { flex: 1, height: '100vh' as any, maxHeight: '100vh' as any, overflow: 'hidden' }
+          : { flex: 1 }
+      }
+    >
       <QueryClientProvider client={queryClient}>
         <StripeProviderWrapper
           publishableKey={stripePublishableKey}

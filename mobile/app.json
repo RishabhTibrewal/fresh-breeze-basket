@@ -4,7 +4,7 @@
     "slug": "rishabh",
     "scheme": "gofreshco",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "splash": {
@@ -21,7 +21,7 @@
     },
     "android": {
       "package": "com.gofreshco.app",
-      "versionCode": 1,
+      "versionCode": 3,
       "targetSdkVersion": 34,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -45,7 +45,8 @@
           "merchantIdentifier": "merchant.com.freshbreeze.basket",
           "enableGooglePay": true
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {

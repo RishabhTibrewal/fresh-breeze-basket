@@ -33,20 +33,71 @@ import { apiClient } from '../api/client';
 
 WebBrowser.maybeCompleteAuthSession();
 
-const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
-const GOOGLE_ANDROID_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '';
-const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '';
+const GOOGLE_WEB_CLIENT_ID = (process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '').trim();
+const GOOGLE_ANDROID_CLIENT_ID = (process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '').trim();
+const GOOGLE_IOS_CLIENT_ID = (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '').trim();
+
+const hasGoogleClientIdForPlatform = () => {
+  if (Platform.OS === 'android') return Boolean(GOOGLE_ANDROID_CLIENT_ID || GOOGLE_WEB_CLIENT_ID);
+  if (Platform.OS === 'ios') return Boolean(GOOGLE_IOS_CLIENT_ID || GOOGLE_WEB_CLIENT_ID);
+  return Boolean(GOOGLE_WEB_CLIENT_ID);
+};
+
+interface GoogleSignInButtonProps {
+  disabled: boolean;
+  onIdToken: (idToken: string) => void;
+  onError: (msg: string) => void;
+}
+
+const ConfiguredGoogleSignInButton = ({
+  disabled,
+  onIdToken,
+  onError,
+}: GoogleSignInButtonProps) => {
+  const [googleRequest, googleResponse, promptGoogleAsync] = Google.useIdTokenAuthRequest({
+    clientId: GOOGLE_WEB_CLIENT_ID || undefined,
+    webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID || GOOGLE_WEB_CLIENT_ID || undefined,
+    iosClientId: GOOGLE_IOS_CLIENT_ID || GOOGLE_WEB_CLIENT_ID || undefined,
+  });
+
+  useEffect(() => {
+    if (googleResponse?.type === 'success') {
+      const idToken =
+        googleResponse.params?.id_token || googleResponse.authentication?.idToken;
+      if (idToken) {
+        onIdToken(idToken);
+      } else {
+        onError('Google did not return an ID token. Please try again.');
+      }
+    } else if (googleResponse?.type === 'error') {
+      onError(googleResponse.error?.description || 'Google sign-in failed.');
+    }
+  }, [googleResponse, onIdToken, onError]);
+
+  return (
+    <TouchableOpacity
+      style={styles.socialBtn}
+      disabled={disabled || !googleRequest}
+      onPress={async () => {
+        try {
+          await promptGoogleAsync();
+        } catch (err: any) {
+          onError(err?.message || 'Failed to launch Google Sign-In.');
+        }
+      }}
+      activeOpacity={0.85}
+    >
+      <Text style={styles.socialIcon}>🌐</Text>
+      <Text style={styles.socialBtnText}>Google</Text>
+    </TouchableOpacity>
+  );
+};
 
 export const LoginScreen = ({ navigation }: any) => {
   const { setAuth, user } = useStore();
   const [mode, setMode] = useState<'login' | 'register'>('login');
-
-  const [googleRequest, googleResponse, promptGoogleAsync] = Google.useIdTokenAuthRequest({
-    clientId: GOOGLE_WEB_CLIENT_ID || undefined,
-    webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
-    androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
-    iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
-  });
+  const isGoogleConfigured = hasGoogleClientIdForPlatform();
 
   // Form Fields
   const [email, setEmail] = useState('');
@@ -195,61 +246,45 @@ export const LoginScreen = ({ navigation }: any) => {
     }
   };
 
-  useEffect(() => {
-    const completeGoogleSignIn = async () => {
-      if (googleResponse?.type === 'success') {
-        const idToken =
-          googleResponse.params?.id_token || googleResponse.authentication?.idToken;
+  const handleGoogleIdToken = async (idToken: string) => {
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const response = await apiClient.post('/auth/google', { id_token: idToken });
+      if (response.data?.success && response.data?.data) {
+        const u = response.data.data.user || response.data.data;
+        const token = response.data.data.access_token || response.data.data.token;
+        const displayName =
+          (u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : null) ||
+          u.name ||
+          (u.email ? u.email.split('@')[0] : 'GoFreshCo User');
 
-        if (!idToken) {
-          setErrorMsg('Google did not return an ID token. Please try again.');
-          return;
-        }
-
-        setLoading(true);
-        setErrorMsg(null);
-        try {
-          const response = await apiClient.post('/auth/google', { id_token: idToken });
-          if (response.data?.success && response.data?.data) {
-            const u = response.data.data.user || response.data.data;
-            const token = response.data.data.access_token || response.data.data.token;
-            const displayName =
-              (u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : null) ||
-              u.name ||
-              (u.email ? u.email.split('@')[0] : 'GoFreshCo User');
-
-            setAuth(
-              {
-                id: u.id,
-                email: u.email,
-                name: displayName,
-                phone: u.phone || '',
-                role: u.role || 'user',
-              },
-              token || null
-            );
-            navigation.goBack();
-          } else {
-            setErrorMsg(response.data?.message || 'Google sign-in failed.');
-          }
-        } catch (err: any) {
-          const msg =
-            err?.response?.data?.message ||
-            err?.message ||
-            'Unable to complete Google sign-in.';
-          setErrorMsg(msg);
-        } finally {
-          setLoading(false);
-        }
-      } else if (googleResponse?.type === 'error') {
-        setErrorMsg(googleResponse.error?.description || 'Google sign-in failed.');
+        setAuth(
+          {
+            id: u.id,
+            email: u.email,
+            name: displayName,
+            phone: u.phone || '',
+            role: u.role || 'user',
+          },
+          token || null
+        );
+        navigation.goBack();
+      } else {
+        setErrorMsg(response.data?.message || 'Google sign-in failed.');
       }
-    };
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        'Unable to complete Google sign-in.';
+      setErrorMsg(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    completeGoogleSignIn();
-  }, [googleResponse, navigation, setAuth]);
-
-  const handleSocialLogin = async (provider: 'Google' | 'Apple') => {
+  const handleSocialLogin = (provider: 'Google' | 'Apple') => {
     setErrorMsg(null);
 
     if (provider === 'Apple') {
@@ -257,25 +292,9 @@ export const LoginScreen = ({ navigation }: any) => {
       return;
     }
 
-    const hasPlatformClientId =
-      Platform.OS === 'android'
-        ? Boolean(GOOGLE_ANDROID_CLIENT_ID || GOOGLE_WEB_CLIENT_ID)
-        : Platform.OS === 'ios'
-        ? Boolean(GOOGLE_IOS_CLIENT_ID || GOOGLE_WEB_CLIENT_ID)
-        : Boolean(GOOGLE_WEB_CLIENT_ID);
-
-    if (!hasPlatformClientId || !googleRequest) {
-      setErrorMsg(
-        'Google Sign-In is not configured yet. Add EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (and Android/iOS Client IDs) to mobile/.env.'
-      );
-      return;
-    }
-
-    try {
-      await promptGoogleAsync();
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Failed to launch Google Sign-In.');
-    }
+    setErrorMsg(
+      'Google Sign-In is not configured yet. Add EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (and Android/iOS Client IDs) to mobile/.env.'
+    );
   };
 
   return (
@@ -470,14 +489,22 @@ export const LoginScreen = ({ navigation }: any) => {
 
           {/* Social Sign-in Buttons */}
           <View style={styles.socialRow}>
-            <TouchableOpacity
-              style={styles.socialBtn}
-              onPress={() => handleSocialLogin('Google')}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.socialIcon}>🌐</Text>
-              <Text style={styles.socialBtnText}>Google</Text>
-            </TouchableOpacity>
+            {isGoogleConfigured ? (
+              <ConfiguredGoogleSignInButton
+                disabled={loading}
+                onIdToken={handleGoogleIdToken}
+                onError={(msg) => setErrorMsg(msg)}
+              />
+            ) : (
+              <TouchableOpacity
+                style={styles.socialBtn}
+                onPress={() => handleSocialLogin('Google')}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.socialIcon}>🌐</Text>
+                <Text style={styles.socialBtnText}>Google</Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={styles.socialBtn}
