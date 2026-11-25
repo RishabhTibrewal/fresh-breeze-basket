@@ -30,7 +30,7 @@ type AuthContextType = {
   warehouses: string[]; // Array of warehouse IDs assigned to user
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: (idToken: string) => Promise<void>;
   signUp: (
     email: string,
     password: string,
@@ -146,7 +146,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .from('profiles')
         .select('*')
         .eq('id', currentSession.user.id)
-        .single();
+        .maybeSingle();
 
       // Auto-provision Google OAuth users who don't have a profile or company membership yet
       const isGoogleUser =
@@ -218,7 +218,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           currentSession.user.app_metadata?.provider === 'google' ||
           currentSession.user.identities?.some((id: any) => id.provider === 'google');
 
-        if (status === 403 && isGoogleUser) {
+        if ((status === 401 || status === 403) && isGoogleUser) {
           try {
             const { data: googleRes } = await apiClient.post('/auth/google', {
               supabase_access_token: currentSession.access_token,
@@ -512,7 +512,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .from('profiles')
           .select('*')
           .eq('id', userId)
-          .single();
+          .maybeSingle();
 
         if (profileError) {
           console.error('Error fetching user profile:', profileError);
@@ -664,20 +664,98 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (idToken: string) => {
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth`,
-        },
-      });
-      if (error) {
-        toast.error(error.message || 'Failed to start Google sign-in');
-        throw error;
+      const { data: loginData } = await apiClient.post('/auth/google', { id_token: idToken });
+
+      if (!loginData?.success || !loginData?.data) {
+        throw new Error(loginData?.message || 'Google login failed');
       }
+
+      const { access_token, refresh_token, user: userProfile, roles: userRoles } = loginData.data;
+
+      if (!access_token || !refresh_token) {
+        throw new Error('Missing tokens in Google login response');
+      }
+
+      const decodeJWT = (token: string) => {
+        try {
+          const base64Url = token.split('.')[1];
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(
+            atob(base64)
+              .split('')
+              .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+              .join('')
+          );
+          return JSON.parse(jsonPayload);
+        } catch {
+          return null;
+        }
+      };
+
+      const jwtPayload = decodeJWT(access_token);
+      if (!jwtPayload) throw new Error('Invalid access token received');
+
+      const supabaseUser: User = {
+        id: jwtPayload.sub,
+        aud: jwtPayload.aud || 'authenticated',
+        role: jwtPayload.role || 'authenticated',
+        email: jwtPayload.email || userProfile?.email,
+        email_confirmed_at: jwtPayload.email_confirmed_at,
+        phone: jwtPayload.phone || '',
+        confirmed_at: jwtPayload.email_confirmed_at,
+        last_sign_in_at: new Date().toISOString(),
+        app_metadata: jwtPayload.app_metadata || {},
+        user_metadata: jwtPayload.user_metadata || {},
+        identities: [],
+        created_at: jwtPayload.iat
+          ? new Date(jwtPayload.iat * 1000).toISOString()
+          : new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        factors: [],
+      };
+
+      const supabaseSession: Session = {
+        access_token,
+        refresh_token,
+        token_type: 'bearer',
+        expires_in: (jwtPayload.exp || 0) - (jwtPayload.iat || 0),
+        expires_at: jwtPayload.exp,
+        user: supabaseUser,
+      };
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+      const projectRef = supabaseUrl.replace('https://', '').split('.')[0];
+      localStorage.setItem(`sb-${projectRef}-auth-token`, JSON.stringify(supabaseSession));
+      localStorage.setItem('supabase_token', access_token);
+      localStorage.setItem('supabase_refresh_token', refresh_token);
+
+      setUser(supabaseUser);
+      setSession(supabaseSession);
+
+      if (userProfile) {
+        const resolvedRoles =
+          userRoles || userProfile.roles || (userProfile.role ? [userProfile.role] : ['user']);
+        const primaryRole = resolvedRoles.length > 0 ? resolvedRoles[0] : 'user';
+        localStorage.setItem('userRole', primaryRole);
+        localStorage.setItem('userRoles', JSON.stringify(resolvedRoles));
+        setProfile((prev) => (prev ? { ...prev, role: primaryRole, roles: resolvedRoles } : userProfile));
+        setIsAdmin(resolvedRoles.includes('admin') || resolvedRoles.includes('accounts'));
+        setIsSales(resolvedRoles.includes('sales'));
+        setIsAccounts(resolvedRoles.includes('accounts'));
+        setIsWarehouseManager(resolvedRoles.includes('warehouse_manager'));
+        setIsPosManager(resolvedRoles.includes('pos_manager'));
+        setRole(primaryRole);
+        setRoles(resolvedRoles);
+      }
+
+      toast.success('Successfully signed in with Google!');
+      navigate('/');
     } catch (error: any) {
-      toast.error(error?.message || 'Google sign-in failed');
+      const errorMessage = error?.response?.data?.message || error?.message || 'Google login failed';
+      toast.error(errorMessage);
+      await clearLocalSession();
       throw error;
     }
   };

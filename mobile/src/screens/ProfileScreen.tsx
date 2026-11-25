@@ -321,7 +321,7 @@ export const ProfileScreen = ({ navigation }: any) => {
                 <Text style={styles.userContactText}>{user.email}</Text>
               </View>
 
-              {user.phone && (
+              {Boolean(user.phone) && (
                 <View style={styles.userContactRow}>
                   <Phone color={COLORS.textSecondary} size={13} />
                   <Text style={styles.userContactText}>{user.phone}</Text>

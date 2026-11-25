@@ -297,6 +297,9 @@ export const HomeScreen = ({ route, navigation }: any) => {
           const defaultVariant = defaultVariantRaw
             ? variants.find((v) => v.id === defaultVariantRaw.id) || variants[0]
             : variants[0];
+          const orderedVariants = defaultVariant
+            ? [defaultVariant, ...variants.filter((v) => v.id !== defaultVariant.id)]
+            : variants;
           const fallbackUnit = `${itemUnitVal || '1'} ${itemUnitType || 'pack'}`.trim();
           const calculatedPrice = defaultVariant
             ? defaultVariant.price
@@ -343,7 +346,7 @@ export const HomeScreen = ({ route, navigation }: any) => {
             reviews_count: item.reviews_count || 120,
             origin: item.origin || 'Farm Direct',
             description: item.description || 'Harvested fresh and chilled for maximum nutrition and crispness.',
-            variants: variants.length > 0 ? variants : undefined,
+            variants: orderedVariants.length > 0 ? orderedVariants : undefined,
           };
         });
 
@@ -451,8 +454,10 @@ export const HomeScreen = ({ route, navigation }: any) => {
   const cartTotal = getCartTotal();
   const cartSavings = getCartSavings();
 
-  const getProductQuantity = (productId: string) => {
-    const item = cart.find((i) => i.id === productId);
+  const getProductQuantity = (productId: string, variantId: string) => {
+    const item = cart.find(
+      (i) => i.id === productId && (i.variant_id || 'default') === variantId
+    );
     return item ? item.quantity : 0;
   };
 
@@ -640,7 +645,11 @@ export const HomeScreen = ({ route, navigation }: any) => {
         {/* Product Grid (Exact Match with Web ProductCard) */}
         <View style={styles.productGrid}>
           {filteredProducts.map((product) => {
-            const qty = getProductQuantity(product.id);
+            const defaultVariantId =
+              product.variants && product.variants.length > 0
+                ? product.variants[0].id
+                : 'default';
+            const qty = getProductQuantity(product.id, defaultVariantId);
             const wishlisted = isWishlisted(product.id);
             const discount =
               product.original_price && product.original_price > product.price
@@ -720,6 +729,8 @@ export const HomeScreen = ({ route, navigation }: any) => {
                             image_url: product.image,
                             unit: product.unit,
                             category: product.category,
+                            variant_id: defaultVariantId,
+                            description: product.description,
                           })
                         }
                       >
@@ -730,14 +741,14 @@ export const HomeScreen = ({ route, navigation }: any) => {
                       <View style={styles.stepperContainer}>
                         <TouchableOpacity
                           style={styles.stepperBtn}
-                          onPress={() => updateQuantity(product.id, qty - 1)}
+                          onPress={() => updateQuantity(product.id, qty - 1, defaultVariantId)}
                         >
                           <Minus color="#FFF" size={12} />
                         </TouchableOpacity>
                         <Text style={styles.stepperQty}>{qty}</Text>
                         <TouchableOpacity
                           style={styles.stepperBtn}
-                          onPress={() => updateQuantity(product.id, qty + 1)}
+                          onPress={() => updateQuantity(product.id, qty + 1, defaultVariantId)}
                         >
                           <Plus color="#FFF" size={12} />
                         </TouchableOpacity>

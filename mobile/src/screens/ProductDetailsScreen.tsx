@@ -9,7 +9,7 @@ import {
   StatusBar,
   useWindowDimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
 import { useStore, MobileProduct } from '../store/useStore';
 import {
@@ -30,6 +30,7 @@ import { apiClient } from '../api/client';
 
 export const ProductDetailsScreen = ({ route, navigation }: any) => {
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const imageStageHeight = Math.min(width * 0.9, 420);
   const { product }: { product: MobileProduct } = route.params || {};
   const { cart, addToCart, updateQuantity, toggleWishlist, isWishlisted } = useStore();
@@ -381,7 +382,7 @@ export const ProductDetailsScreen = ({ route, navigation }: any) => {
       </ScrollView>
 
       {/* Sticky Bottom Action Bar */}
-      <View style={styles.bottomBar}>
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
         <View style={styles.bottomPriceCol}>
           <Text style={styles.bottomTotalLabel}>Total Price ({currentUnit})</Text>
           <Text style={styles.bottomTotalValue}>

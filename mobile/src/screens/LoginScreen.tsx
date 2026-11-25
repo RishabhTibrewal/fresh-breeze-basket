@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -45,7 +45,7 @@ const hasGoogleClientIdForPlatform = () => {
 
 interface GoogleSignInButtonProps {
   disabled: boolean;
-  onIdToken: (idToken: string) => void;
+  onIdToken: (idToken: string, nonce?: string) => void;
   onError: (msg: string) => void;
 }
 
@@ -54,11 +54,15 @@ const ConfiguredGoogleSignInButton = ({
   onIdToken,
   onError,
 }: GoogleSignInButtonProps) => {
+  const handledTokenRef = useRef<string | null>(null);
   const [googleRequest, googleResponse, promptGoogleAsync] = Google.useIdTokenAuthRequest({
     clientId: GOOGLE_WEB_CLIENT_ID || undefined,
     webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
     androidClientId: GOOGLE_ANDROID_CLIENT_ID || GOOGLE_WEB_CLIENT_ID || undefined,
     iosClientId: GOOGLE_IOS_CLIENT_ID || GOOGLE_WEB_CLIENT_ID || undefined,
+    extraParams: {
+      prompt: 'select_account',
+    },
   });
 
   useEffect(() => {
@@ -66,14 +70,16 @@ const ConfiguredGoogleSignInButton = ({
       const idToken =
         googleResponse.params?.id_token || googleResponse.authentication?.idToken;
       if (idToken) {
-        onIdToken(idToken);
+        if (handledTokenRef.current === idToken) return;
+        handledTokenRef.current = idToken;
+        onIdToken(idToken, (googleRequest as any)?.nonce);
       } else {
         onError('Google did not return an ID token. Please try again.');
       }
     } else if (googleResponse?.type === 'error') {
       onError(googleResponse.error?.description || 'Google sign-in failed.');
     }
-  }, [googleResponse, onIdToken, onError]);
+  }, [googleResponse, googleRequest, onIdToken, onError]);
 
   return (
     <TouchableOpacity
@@ -98,6 +104,14 @@ export const LoginScreen = ({ navigation }: any) => {
   const { setAuth, user } = useStore();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const isGoogleConfigured = hasGoogleClientIdForPlatform();
+
+  const goBackSafely = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate('MainTabs', { screen: 'ProfileTab' });
+    }
+  };
 
   // Form Fields
   const [email, setEmail] = useState('');
@@ -153,7 +167,7 @@ export const LoginScreen = ({ navigation }: any) => {
           );
 
           Alert.alert('Welcome Back! 🎉', `Signed in as ${displayName}`);
-          navigation.goBack();
+          goBackSafely();
           return;
         }
       } else {
@@ -207,7 +221,7 @@ export const LoginScreen = ({ navigation }: any) => {
           }
 
           Alert.alert('Account Created! 🎉', 'Welcome to FreshBasket Farm Direct.');
-          navigation.goBack();
+          goBackSafely();
           return;
         }
       }
@@ -237,7 +251,7 @@ export const LoginScreen = ({ navigation }: any) => {
               },
               null
             );
-            navigation.goBack();
+            goBackSafely();
           },
         },
       ]);
@@ -246,11 +260,14 @@ export const LoginScreen = ({ navigation }: any) => {
     }
   };
 
-  const handleGoogleIdToken = async (idToken: string) => {
+  const handleGoogleIdToken = async (idToken: string, nonce?: string) => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const response = await apiClient.post('/auth/google', { id_token: idToken });
+      const response = await apiClient.post('/auth/google', {
+        id_token: idToken,
+        ...(nonce ? { nonce } : {}),
+      });
       if (response.data?.success && response.data?.data) {
         const u = response.data.data.user || response.data.data;
         const token = response.data.data.access_token || response.data.data.token;
@@ -269,7 +286,7 @@ export const LoginScreen = ({ navigation }: any) => {
           },
           token || null
         );
-        navigation.goBack();
+        goBackSafely();
       } else {
         setErrorMsg(response.data?.message || 'Google sign-in failed.');
       }
@@ -303,7 +320,7 @@ export const LoginScreen = ({ navigation }: any) => {
 
       {/* Top Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => goBackSafely()}>
           <ArrowLeft color={COLORS.primaryDark} size={22} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{mode === 'login' ? 'Sign In' : 'Create Account'}</Text>
@@ -519,7 +536,7 @@ export const LoginScreen = ({ navigation }: any) => {
           {/* Continue as Guest */}
           <TouchableOpacity
             style={styles.guestBtn}
-            onPress={() => navigation.goBack()}
+            onPress={() => goBackSafely()}
             activeOpacity={0.7}
           >
             <Text style={styles.guestBtnText}>Continue as Guest →</Text>

@@ -597,7 +597,7 @@ export const login = async (req: Request, res: Response) => {
 // Google OAuth login — accepts { id_token } (mobile/native) or { supabase_access_token } (web OAuth callback)
 export const googleLogin = async (req: Request, res: Response) => {
   try {
-    const { id_token, supabase_access_token } = req.body;
+    const { id_token, nonce, supabase_access_token } = req.body;
     const activeCompanyId = req.companyId;
 
     if (!activeCompanyId) {
@@ -623,6 +623,7 @@ export const googleLogin = async (req: Request, res: Response) => {
       const { data: authData, error: authError } = await client.auth.signInWithIdToken({
         provider: 'google',
         token: id_token,
+        ...(nonce ? { nonce } : {}),
       });
 
       if (authError || !authData?.session || !authData?.user) {
@@ -666,22 +667,18 @@ export const googleLogin = async (req: Request, res: Response) => {
     if (existingProfile) {
       profile = existingProfile;
     } else if (supabaseAdmin) {
-      const { data: createdProfile, error: createProfileError } = await supabaseAdmin
+      const newProfileData = {
+        id: authUser.id,
+        email,
+        first_name: firstName,
+        last_name: lastName || null,
+        phone: authUser.phone || null,
+        role: 'user',
+        company_id: activeCompanyId,
+      };
+      const { error: createProfileError } = await supabaseAdmin
         .from('profiles')
-        .upsert(
-          {
-            id: authUser.id,
-            email,
-            first_name: firstName,
-            last_name: lastName || null,
-            phone: authUser.phone || null,
-            role: 'user',
-            company_id: activeCompanyId,
-          },
-          { onConflict: 'id' }
-        )
-        .select('*')
-        .single();
+        .upsert(newProfileData, { onConflict: 'id' });
 
       if (createProfileError) {
         console.error('Error creating profile for Google user:', createProfileError);
@@ -690,7 +687,10 @@ export const googleLogin = async (req: Request, res: Response) => {
           message: 'Failed to create user profile',
         });
       }
-      profile = createdProfile;
+      profile = {
+        ...newProfileData,
+        created_at: new Date().toISOString(),
+      };
     }
 
     if (!profile) {

@@ -27,11 +27,17 @@ export function useCompanyCurrency() {
   const { data: company } = useQuery({
     queryKey: ['company', 'currency-info'],
     queryFn: async () => {
-      try {
-        const myComp = await companyService.getMyCompany();
-        if (myComp?.currency) return myComp;
-      } catch {
-        // Unauthenticated or error - try by-slug
+      const hasToken =
+        typeof window !== 'undefined' &&
+        Boolean(localStorage.getItem('supabase_token') || localStorage.getItem('token'));
+
+      if (hasToken) {
+        try {
+          const myComp = await companyService.getMyCompany();
+          if (myComp?.currency) return myComp;
+        } catch {
+          // Token expired or error - try by-slug
+        }
       }
       try {
         const subdomain = getSubdomain();

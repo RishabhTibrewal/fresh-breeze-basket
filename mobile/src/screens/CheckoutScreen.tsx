@@ -9,7 +9,7 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../theme/theme';
 import { useStore } from '../store/useStore';
 import {
@@ -38,6 +38,7 @@ const DELIVERY_SLOTS = [
 ];
 
 export const CheckoutScreen = ({ route, navigation }: any) => {
+  const insets = useSafeAreaInsets();
   const { total = 0 } = route.params || {};
   const { selectedAddress, cart, clearCart, user, token } = useStore();
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'upi' | 'cod'>('cod');
@@ -359,7 +360,7 @@ export const CheckoutScreen = ({ route, navigation }: any) => {
       </ScrollView>
 
       {/* Place Order CTA Footer */}
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 14) }]}>
         <View style={styles.footerPriceCol}>
           <Text style={styles.footerLabel}>TOTAL PAYABLE</Text>
           <Text style={styles.footerValue}>{formatCurrency(total)}</Text>
